@@ -14,17 +14,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache JUCE download
-        uses: actions/cache@v4
-        with:
-          path: build/_deps
-          key: juce-8.0.15-${{ runner.os }}
-
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        shell: pwsh
+        run: |
+          # Let CMake pick the newest installed Visual Studio.
+          cmake -S . -B build -A x64 *>&1 | Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Get-Content configure.log -Tail 60) -join "%0A"; Write-Output "::error title=configure::$msg"
+            exit 1
+          }
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel -- /v:minimal *>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Select-String -Path build.log -Pattern "error" | Select-Object -First 60 | ForEach-Object { $_.Line }) -join "%0A"; Write-Output "::error title=build::$msg"
+            exit 1
+          }
 
       - name: Package
         shell: pwsh
