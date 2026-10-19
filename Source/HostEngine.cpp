@@ -34,6 +34,7 @@ HostEngine::HostEngine()
 
     auto in = std::make_unique<GainMeterProcessor>();
     in->inputMode = (int) GainMeterProcessor::InputMode::Left; // guitar into input 1 by default
+    in->tapEnabled = true;
     inputStage = in.get();
     inNode = graph.addNode (std::move (in));
 

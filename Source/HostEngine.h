@@ -19,6 +19,13 @@ public:
     std::atomic<float> gainDb { 0.0f };
     std::atomic<int>   inputMode { (int) InputMode::Stereo };
     std::atomic<float> peakL { 0.0f }, peakR { 0.0f };
+    std::atomic<bool>  muted { false };
+
+    /** Mono tap of the conditioned (pre-gain) signal, read by the tuner. */
+    static constexpr int tapSize = 16384;
+    std::vector<float> tap = std::vector<float> ((size_t) tapSize, 0.0f);
+    std::atomic<int>   tapWritePos { 0 };
+    bool tapEnabled = false;
 
     void prepareToPlay (double, int) override { smoothed.reset (getSampleRate() > 0 ? getSampleRate() : 48000.0, 0.02); smoothed.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (gainDb.load())); }
     void releaseResources() override {}
@@ -43,7 +50,18 @@ public:
             case InputMode::Stereo: default: break;
         }
 
-        smoothed.setTargetValue (juce::Decibels::decibelsToGain (gainDb.load(), -60.0f));
+        if (tapEnabled)
+        {
+            int w = tapWritePos.load (std::memory_order_relaxed);
+            for (int i = 0; i < n; ++i)
+            {
+                tap[(size_t) w] = 0.5f * (l[i] + r[i]);
+                w = (w + 1) & (tapSize - 1);
+            }
+            tapWritePos.store (w, std::memory_order_release);
+        }
+
+        smoothed.setTargetValue (muted.load() ? 0.0f : juce::Decibels::decibelsToGain (gainDb.load(), -60.0f));
         float pl = 0.0f, pr = 0.0f;
         for (int i = 0; i < n; ++i)
         {

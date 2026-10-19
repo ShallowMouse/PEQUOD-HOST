@@ -172,12 +172,13 @@ public:
                                bool highlighted, bool down) override
     {
         auto r = b.getLocalBounds().toFloat().reduced (0.5f);
-        auto c = b.getToggleState() ? Pequod::Colours::mustard : bgColour;
+        const auto onColour = b.findColour (juce::TextButton::buttonOnColourId);
+        auto c = b.getToggleState() ? onColour : bgColour;
         if (down)             c = c.brighter (0.15f);
         else if (highlighted) c = c.brighter (0.07f);
         g.setColour (c);
         g.fillRoundedRectangle (r, 2.0f);
-        g.setColour (b.getToggleState() ? Pequod::Colours::mustard : Pequod::Colours::line);
+        g.setColour (b.getToggleState() ? onColour : Pequod::Colours::line);
         g.drawRoundedRectangle (r, 2.0f, 1.0f);
     }
 
@@ -331,5 +332,26 @@ public:
             return;
         }
         Slider::mouseDown (e);
+    }
+};
+
+//==============================================================================
+/** TextButton whose right-click offers "MIDI / OSC learn". */
+class LearnableButton : public juce::TextButton
+{
+public:
+    using juce::TextButton::TextButton;
+    std::function<void()> onLearn;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && onLearn)
+        {
+            juce::PopupMenu m;
+            m.addItem ("MIDI / OSC learn", onLearn);
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+            return;
+        }
+        TextButton::mouseDown (e);
     }
 };

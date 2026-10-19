@@ -31,8 +31,9 @@ private:
 
     HostEngine engine;
     ControlSurface control { engine };
+    Tuner tuner { engine };
 
-    HeaderBar header { engine, control };
+    HeaderBar header { engine, control, tuner };
     BrowserPanel browser { engine, presetDir };
     RackView rack;
     ControlPanel controlPanel { engine, control };

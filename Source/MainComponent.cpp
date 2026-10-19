@@ -70,6 +70,7 @@ MainComponent::MainComponent()
     control.getPresetName = [this] { return getPresetDisplayName(); };
     control.getPresetIndex = [this] { return getPresetFiles().indexOf (currentPresetFile); };
     control.addChangeListener (this);
+    control.setTuner (&tuner);
 
     engine.onSlotAboutToBeRemoved = [this] (int uid)
     {
@@ -98,6 +99,8 @@ MainComponent::MainComponent()
     browser.onLoadPreset   = [this] (const juce::File& f) { loadPresetFile (f); };
     browser.onDeletePreset = [this] (const juce::File& f) { deletePreset (f); };
     browser.refresh();
+
+    controlPanel.onShowInRack = [this] (int uid) { rack.showModule (uid); };
 
     statusBar.setFont (Pequod::heading (12.0f, false));
     statusBar.setColour (juce::Label::textColourId, Pequod::Colours::textDim);
@@ -134,6 +137,7 @@ MainComponent::~MainComponent()
     engine.clearRack();
     engine.onSlotAboutToBeRemoved = nullptr;
 
+    control.setTuner (nullptr);
     control.removeChangeListener (this);
     engine.knownPlugins.removeChangeListener (this);
 }

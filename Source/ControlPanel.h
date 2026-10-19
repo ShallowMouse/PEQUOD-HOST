@@ -2,6 +2,7 @@
 
 #include "ControlSurface.h"
 #include "PequodLookAndFeel.h"
+#include "ChainMap.h"
 
 //==============================================================================
 /** Right-hand panel: OSC ports, MIDI inputs, input mode, and the MIDI/OSC mapping list. */
@@ -14,7 +15,8 @@ public:
     ControlPanel (HostEngine&, ControlSurface&);
     ~ControlPanel() override;
 
-    void refreshMidiInputs();
+    /** Called when a block in the effects map is clicked (slot or split uid). */
+    std::function<void (int uid)> onShowInRack;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -30,13 +32,13 @@ private:
     juce::Label inputModeLabel;
     juce::ComboBox inputMode;
 
-    juce::OwnedArray<juce::ToggleButton> midiToggles;
-    juce::TextButton midiRefresh { "RESCAN" };
-
     juce::TextButton learnButton { "LEARN" }, hostLearnButton { "+ HOST" }, clearButton { "CLEAR" };
     juce::ListBox mappingList { "mappings", this };
 
-    juce::Rectangle<int> oscSection, midiSection, inputSection, mapSection;
+    juce::Viewport chainViewport;
+    ChainMap chainMap;
+
+    juce::Rectangle<int> oscSection, inputSection, mapSection, chainSection;
     juce::Rectangle<int> oscInLed, oscOutLed, midiLed;
 
     int getNumRows() override;

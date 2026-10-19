@@ -47,7 +47,9 @@ target_sources(PequodHost PRIVATE
     Source/RackView.cpp
     Source/BrowserPanel.cpp
     Source/HeaderBar.cpp
-    Source/ControlPanel.cpp)
+    Source/ControlPanel.cpp
+    Source/ChainMap.cpp
+    Source/NativeClip.cpp)
 
 target_compile_definitions(PequodHost PRIVATE
     JUCE_PLUGINHOST_VST3=1

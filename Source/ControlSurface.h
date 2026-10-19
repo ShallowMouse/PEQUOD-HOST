@@ -1,11 +1,12 @@
 #pragma once
 
 #include "HostEngine.h"
+#include "Tuner.h"
 
 //==============================================================================
 struct Mapping
 {
-    enum class Target { param, bypass, splitMix, inputGain, outputGain, presetNext, presetPrev };
+    enum class Target { param, bypass, splitMix, inputGain, outputGain, presetNext, presetPrev, mute };
     enum class Source { midiCC, midiNote, osc };
 
     Target target = Target::param;
@@ -22,7 +23,7 @@ struct Mapping
     bool lastPressed = false;
 
     bool isRackMapping() const { return target == Target::param || target == Target::bypass || target == Target::splitMix; }
-    bool isSwitchTarget() const { return target == Target::bypass || target == Target::presetNext || target == Target::presetPrev; }
+    bool isSwitchTarget() const { return target == Target::bypass || target == Target::presetNext || target == Target::presetPrev || target == Target::mute; }
 };
 
 //==============================================================================
@@ -78,6 +79,10 @@ public:
     std::function<juce::String()> getPresetName;
     std::function<int()> getPresetIndex;                  // 0-based, -1 if unsaved
 
+    void setTuner (Tuner* t) { tuner = t; }
+    void setMuted (bool shouldMute);
+    bool isMuted() const { return engine.getOutputStage()->muted.load(); }
+
     void sendFullState();
     void sendRackSummary();
 
@@ -100,6 +105,9 @@ private:
 
     std::vector<Mapping> mappings;
     std::vector<float> lastMix;
+    Tuner* tuner = nullptr;
+    int lastMuteSent = -1, tunerTick = 0;
+    juce::String lastTunerNote;
 
     std::atomic<LearnState> learnState { LearnState::off };
     Mapping pending;

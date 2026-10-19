@@ -1,10 +1,100 @@
 #include "HeaderBar.h"
 
-HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c) : engine (e), control (c)
+//==============================================================================
+void TunerDisplay::timerCallback()
+{
+    auto& r = tuner.getReading();
+    if (r.valid != lastValid || r.midiNote != lastNote || std::abs (r.cents - lastCents) > 0.2f)
+    {
+        lastValid = r.valid;
+        lastNote = r.midiNote;
+        lastCents = r.cents;
+        repaint();
+    }
+}
+
+void TunerDisplay::mouseDown (const juce::MouseEvent& e)
+{
+    if (! e.mods.isPopupMenu()) return;
+
+    juce::PopupMenu m;
+    for (float a : { 432.0f, 436.0f, 438.0f, 440.0f, 442.0f, 444.0f })
+        m.addItem ("A = " + juce::String ((int) a) + " Hz", true, std::abs (tuner.referenceA4 - a) < 0.1f,
+                   [this, a] { tuner.referenceA4 = a; repaint(); });
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+}
+
+void TunerDisplay::paint (juce::Graphics& g)
+{
+    auto& r = tuner.getReading();
+    auto bounds = getLocalBounds().toFloat();
+
+    g.setColour (Pequod::Colours::well);
+    g.fillRoundedRectangle (bounds, 3.0f);
+
+    const bool inTune = r.valid && std::abs (r.cents) < 3.0f;
+    g.setColour (inTune ? Pequod::Colours::mustard : Pequod::Colours::line);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, 1.0f);
+
+    auto area = bounds.reduced (6.0f, 3.0f);
+
+    // Note name
+    auto noteArea = area.removeFromLeft (44.0f);
+    g.setColour (r.valid ? (inTune ? Pequod::Colours::mustard : Pequod::Colours::text) : Pequod::Colours::textDim);
+    g.setFont (Pequod::heading (24.0f));
+    g.drawText (r.valid ? r.noteName : juce::String ("-"), noteArea.withTrimmedBottom (8.0f), juce::Justification::centred);
+    g.setFont (Pequod::heading (10.0f, false));
+    g.setColour (Pequod::Colours::textDim);
+    g.drawText (r.valid ? juce::String (r.frequency, 1) + " Hz" : juce::String ("A" + juce::String ((int) tuner.referenceA4)),
+                noteArea.removeFromBottom (11.0f), juce::Justification::centred);
+
+    // Cents scale
+    area.removeFromLeft (4.0f);
+    auto scale = area.reduced (2.0f, 6.0f);
+    const float cx = scale.getCentreX();
+    const float halfW = scale.getWidth() * 0.5f;
+
+    g.setColour (Pequod::Colours::textDim);
+    for (int c = -50; c <= 50; c += 10)
+    {
+        const float x = cx + halfW * (float) c / 50.0f;
+        const float len = c == 0 ? scale.getHeight() : (c % 50 == 0 ? scale.getHeight() * 0.6f : scale.getHeight() * 0.35f);
+        g.drawLine (x, scale.getBottom() - len, x, scale.getBottom(), c == 0 ? 1.5f : 1.0f);
+    }
+    g.setFont (Pequod::heading (10.0f, false));
+    g.drawText ("b", juce::Rectangle<float> (scale.getX(), scale.getY() - 4.0f, 12.0f, 12.0f), juce::Justification::centredLeft);
+    g.drawText ("#", juce::Rectangle<float> (scale.getRight() - 12.0f, scale.getY() - 4.0f, 12.0f, 12.0f), juce::Justification::centredRight);
+
+    if (r.valid)
+    {
+        const float x = cx + halfW * juce::jlimit (-50.0f, 50.0f, r.cents) / 50.0f;
+        auto needle = juce::Rectangle<float> (4.0f, scale.getHeight() + 6.0f).withCentre ({ x, scale.getCentreY() });
+        g.setColour (inTune ? Pequod::Colours::mustard : Pequod::Colours::text);
+        g.fillRoundedRectangle (needle, 1.5f);
+        if (inTune)
+        {
+            g.setColour (Pequod::Colours::mustard.withAlpha (0.25f));
+            g.fillRoundedRectangle (needle.expanded (3.0f, 1.0f), 3.0f);
+        }
+    }
+}
+
+//==============================================================================
+HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
+    : engine (e), control (c), tunerDisplay (t)
 {
     for (auto* b : { &prevButton, &nextButton, &presetButton, &saveButton, &saveAsButton, &initButton,
                      &learnButton, &audioButton, &pluginsButton })
         addAndMakeVisible (b);
+
+    addAndMakeVisible (tunerDisplay);
+
+    muteButton.setTooltip ("Mute the output (e.g. while tuning). Right-click to learn a MIDI / OSC control.");
+    muteButton.onClick = [this] { control.setMuted (! control.isMuted()); };
+    muteButton.onLearn = [this] { control.armLearnFor (Mapping::Target::mute); };
+    muteButton.setColour (juce::TextButton::buttonOnColourId, Pequod::Colours::danger);
+    muteButton.setColour (juce::TextButton::textColourOnId, Pequod::Colours::text);
+    addAndMakeVisible (muteButton);
 
     presetButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::well);
     presetButton.setTooltip ("Click for the preset list");
@@ -75,6 +165,8 @@ void HeaderBar::timerCallback()
     if (! outKnob.isMouseButtonDown()) outKnob.setValue (out->gainDb.load(), juce::dontSendNotification);
 
     learnButton.setToggleState (control.getLearnState() != ControlSurface::LearnState::off, juce::dontSendNotification);
+    muteButton.setToggleState (control.isMuted(), juce::dontSendNotification);
+    muteButton.setButtonText (control.isMuted() ? "MUTED" : "MUTE");
 
     static int tick = 0;
     if (++tick % 10 == 0)
@@ -90,7 +182,6 @@ void HeaderBar::paint (juce::Graphics& g)
     g.setColour (Pequod::Colours::mustard);
     g.fillRect (r.removeFromBottom (2.0f));
 
-    // Wordmark
     auto wm = wordmarkArea.toFloat();
     g.setColour (Pequod::Colours::mustard);
     g.setFont (Pequod::heading (28.0f));
@@ -103,41 +194,52 @@ void HeaderBar::paint (juce::Graphics& g)
 void HeaderBar::resized()
 {
     auto r = getLocalBounds().reduced (14, 0).withTrimmedBottom (2);
-    wordmarkArea = r.removeFromLeft (150);
+    auto row = [] (juce::Rectangle<int> a, int h = 30) { return a.withSizeKeepingCentre (a.getWidth(), h); };
 
-    auto row = [&] (juce::Rectangle<int> a) { return a.withSizeKeepingCentre (a.getWidth(), 30); };
-
-    r.removeFromLeft (10);
-    prevButton.setBounds (row (r.removeFromLeft (30)));
-    r.removeFromLeft (4);
-    presetButton.setBounds (row (r.removeFromLeft (juce::jlimit (160, 300, getWidth() / 5))));
-    r.removeFromLeft (4);
-    nextButton.setBounds (row (r.removeFromLeft (30)));
-    r.removeFromLeft (10);
-    initButton.setBounds (row (r.removeFromLeft (52)));
-    r.removeFromLeft (4);
-    saveButton.setBounds (row (r.removeFromLeft (56)));
-    r.removeFromLeft (4);
-    saveAsButton.setBounds (row (r.removeFromLeft (76)));
-    r.removeFromLeft (16);
-    learnButton.setBounds (row (r.removeFromLeft (70)));
-
-    // Right side: OUT, IN, CPU, settings
+    // Right-hand block, laid out from the right edge: OUT, IN, CPU, PLUGINS, AUDIO, MUTE, tuner, LEARN
     auto knobBlock = [&] (LearnableSlider& k, juce::Label& l, PeakMeter& m)
     {
-        auto b = r.removeFromRight (70);
+        auto b = r.removeFromRight (66);
         m.setBounds (b.removeFromRight (10).reduced (0, 10));
         b.removeFromRight (4);
         l.setBounds (b.removeFromBottom (14));
         k.setBounds (b.reduced (2, 2));
     };
     knobBlock (outKnob, outLabel, outMeter);
-    r.removeFromRight (8);
+    r.removeFromRight (6);
     knobBlock (inKnob, inLabel, inMeter);
-    r.removeFromRight (12);
-    cpuLabel.setBounds (row (r.removeFromRight (70)));
     r.removeFromRight (8);
-    pluginsButton.setBounds (row (r.removeFromRight (80)));
+    cpuLabel.setBounds (row (r.removeFromRight (58)));
+    r.removeFromRight (8);
+    pluginsButton.setBounds (row (r.removeFromRight (78)));
     r.removeFromRight (4);
-    audioButton.setBounds (row (r.removeFromRight (66)));
+    audioButton.setBounds (row (r.removeFromRight (62)));
+    r.removeFromRight (10);
+    muteButton.setBounds (row (r.removeFromRight (66)));
+    r.removeFromRight (4);
+    tunerDisplay.setBounds (row (r.removeFromRight (176), 44));
+    r.removeFromRight (10);
+    learnButton.setBounds (row (r.removeFromRight (66)));
+    r.removeFromRight (12);
+
+    // Left-hand block: wordmark, preset navigation (preset name takes the remaining space)
+    wordmarkArea = r.removeFromLeft (132);
+    r.removeFromLeft (8);
+    prevButton.setBounds (row (r.removeFromLeft (30)));
+    r.removeFromLeft (4);
+
+    auto saveAs = r.removeFromRight (74);
+    r.removeFromRight (4);
+    auto save = r.removeFromRight (52);
+    r.removeFromRight (4);
+    auto init = r.removeFromRight (48);
+    r.removeFromRight (8);
+    auto next = r.removeFromRight (30);
+    r.removeFromRight (4);
+
+    presetButton.setBounds (row (r.removeFromLeft (juce::jmin (r.getWidth(), 320))));
+    nextButton.setBounds (row (next.withX (presetButton.getRight() + 4)));
+    initButton.setBounds (row (init.withX (nextButton.getRight() + 8)));
+    saveButton.setBounds (row (save.withX (initButton.getRight() + 4)));
+    saveAsButton.setBounds (row (saveAs.withX (saveButton.getRight() + 4)));
 }

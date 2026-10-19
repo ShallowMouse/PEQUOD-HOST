@@ -4,7 +4,7 @@
 
 namespace
 {
-    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev" };
+    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute" };
     const char* sourceNames[] = { "cc", "note", "osc" };
 
     template <typename Enum>
@@ -172,6 +172,33 @@ void ControlSurface::timerCallback()
     if (std::abs (inDb - lastIn) > 0.001f)   { lastIn = inDb;   send ("/pequod/master/in",  dbToNorm (inDb)); }
     if (std::abs (outDb - lastOut) > 0.001f) { lastOut = outDb; send ("/pequod/master/out", dbToNorm (outDb)); }
 
+    // Mute + tuner feedback
+    const int muteNow = isMuted() ? 1 : 0;
+    if (muteNow != lastMuteSent)
+    {
+        lastMuteSent = muteNow;
+        send ("/pequod/mute", muteNow);
+        for (auto& m : mappings)
+            if (m.source == Mapping::Source::osc && m.target == Mapping::Target::mute)
+                send (m.oscAddress, (float) muteNow);
+    }
+
+    if (tuner != nullptr && ++tunerTick % 3 == 0)
+    {
+        auto& r = tuner->getReading();
+        auto note = r.valid ? r.noteName : juce::String ("-");
+        if (r.valid || note != lastTunerNote)
+        {
+            send ("/pequod/tuner/note", note);
+            if (r.valid)
+            {
+                send ("/pequod/tuner/cents", r.cents);
+                send ("/pequod/tuner/hz", r.frequency);
+            }
+        }
+        lastTunerNote = note;
+    }
+
     int k = 0;
     for (auto* split : engine.getSplits())
     {
@@ -186,6 +213,12 @@ void ControlSurface::timerCallback()
         }
         ++k;
     }
+}
+
+void ControlSurface::setMuted (bool shouldMute)
+{
+    engine.getOutputStage()->muted = shouldMute;
+    sendChangeMessage();
 }
 
 void ControlSurface::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -284,6 +317,7 @@ bool ControlSurface::handleFixedOsc (const juce::OSCMessage& msg, float value)
     const bool press = value >= 0.5f;
 
     if (parts[1] == "sync") { sendFullState(); return true; }
+    if (parts[1] == "mute") { setMuted (msg.isEmpty() ? ! isMuted() : press); return true; }
 
     if (parts[1] == "slot" && parts.size() >= 4)
     {
@@ -419,6 +453,10 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
         case Mapping::Target::outputGain: engine.getOutputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::presetNext: if (risingEdge && onPresetNext) onPresetNext(); break;
         case Mapping::Target::presetPrev: if (risingEdge && onPresetPrev) onPresetPrev(); break;
+        case Mapping::Target::mute:
+            if (m.toggle) { if (risingEdge) setMuted (! isMuted()); }
+            else          setMuted (isPress);
+            break;
     }
 }
 
@@ -535,6 +573,7 @@ juce::String ControlSurface::describeTarget (const Mapping& m) const
         case Mapping::Target::outputGain: return "Master OUT";
         case Mapping::Target::presetNext: return "Preset NEXT";
         case Mapping::Target::presetPrev: return "Preset PREV";
+        case Mapping::Target::mute:       return "MUTE";
     }
     return {};
 }
@@ -569,7 +608,7 @@ static juce::XmlElement* mappingToXml (const Mapping& m, int targetRef)
 static Mapping mappingFromXml (const juce::XmlElement& x)
 {
     Mapping m;
-    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 7, Mapping::Target::param);
+    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 8, Mapping::Target::param);
     m.paramIndex = x.getIntAttribute ("param", -1);
     m.source = enumFromName (x.getStringAttribute ("source"), sourceNames, 3, Mapping::Source::midiCC);
     m.midiChannel = x.getIntAttribute ("ch");

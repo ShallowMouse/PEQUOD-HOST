@@ -2,14 +2,40 @@
 
 #include "ControlSurface.h"
 #include "PequodLookAndFeel.h"
+#include "Tuner.h"
 
 //==============================================================================
-/** Top strip: wordmark, preset navigation, learn, settings, master IN/OUT with meters. */
+/** Compact note + cents display fed by the Tuner. */
+class TunerDisplay : public juce::Component,
+                     public juce::SettableTooltipClient,
+                     private juce::Timer
+{
+public:
+    explicit TunerDisplay (Tuner& t) : tuner (t)
+    {
+        setTooltip ("Tuner - follows the guitar input. Right-click to change the reference pitch.");
+        startTimerHz (30);
+    }
+
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+private:
+    Tuner& tuner;
+    bool lastValid = false;
+    float lastCents = 0.0f;
+    int lastNote = -1;
+
+    void timerCallback() override;
+};
+
+//==============================================================================
+/** Top strip: wordmark, preset navigation, learn, tuner + mute, settings, master IN/OUT with meters. */
 class HeaderBar : public juce::Component,
                   private juce::Timer
 {
 public:
-    HeaderBar (HostEngine&, ControlSurface&);
+    HeaderBar (HostEngine&, ControlSurface&, Tuner&);
     ~HeaderBar() override;
 
     void setPresetName (const juce::String& name, bool modified);
@@ -27,6 +53,9 @@ private:
     juce::TextButton prevButton { "<" }, nextButton { ">" }, presetButton,
                      saveButton { "SAVE" }, saveAsButton { "SAVE AS" }, initButton { "INIT" },
                      learnButton { "LEARN" }, audioButton { "AUDIO" }, pluginsButton { "PLUGINS" };
+
+    TunerDisplay tunerDisplay;
+    LearnableButton muteButton { "MUTE" };
 
     LearnableSlider inKnob, outKnob;
     juce::Label inLabel, outLabel, cpuLabel;

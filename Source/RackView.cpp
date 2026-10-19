@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <map>
 #include "BrowserPanel.h"
+#include "NativeClip.h"
 
 namespace
 {
@@ -654,6 +655,34 @@ public:
         if (getHeight() != juce::jmax (y, minH))
             setSize (w, juce::jmax (y, minH));
         repaint();
+
+        if (onLayoutChanged) onLayoutChanged();
+    }
+
+    std::function<void()> onLayoutChanged;
+
+    /** Bounds (in this component) of the module showing a slot or split; empty if not found. */
+    juce::Rectangle<int> getModuleBoundsFor (int uid) const
+    {
+        if (auto it = pluginModules.find (uid); it != pluginModules.end()) return it->second->getBounds();
+        if (auto it = splitModules.find (uid); it != splitModules.end())   return it->second->getBounds();
+
+        RackLocation loc;
+        if (ctx.engine.locateSlot (uid, loc) && loc.lane >= 0)
+        {
+            auto& items = ctx.engine.getItems();
+            if (juce::isPositiveAndBelow (loc.itemIndex, (int) items.size()))
+                if (auto it = splitModules.find (items[(size_t) loc.itemIndex].uid); it != splitModules.end())
+                    return it->second->getBounds();
+        }
+        return {};
+    }
+
+    void flash (juce::Rectangle<int> area)
+    {
+        flashArea = area;
+        flashUntil = juce::Time::getMillisecondCounterHiRes() + 900.0;
+        repaint();
     }
 
     void paint (juce::Graphics& g) override
@@ -685,6 +714,12 @@ public:
 
     void paintOverChildren (juce::Graphics& g) override
     {
+        if (! flashArea.isEmpty())
+        {
+            g.setColour (Pequod::Colours::mustard);
+            g.drawRoundedRectangle (flashArea.toFloat().expanded (2.0f), 4.0f, 2.5f);
+        }
+
         if (! dragOver || insertIndex < 0) return;
         int y = insertIndex < (int) order.size() ? order[(size_t) insertIndex]->getY() - gap / 2
                                                  : dropZone.getY() - gap / 2;
@@ -748,6 +783,8 @@ private:
     juce::Rectangle<int> dropZone;
     bool dragOver = false;
     int insertIndex = -1;
+    juce::Rectangle<int> flashArea;
+    double flashUntil = 0;
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { rebuild(); }
     void handleAsyncUpdate() override { layout(); }
@@ -755,6 +792,12 @@ private:
 
     void timerCallback() override
     {
+        if (! flashArea.isEmpty() && juce::Time::getMillisecondCounterHiRes() > flashUntil)
+        {
+            flashArea = {};
+            repaint();
+        }
+
         auto& items = ctx.engine.getItems();
         for (auto& item : items)
             if (item.type == RackItem::Type::split)
@@ -770,14 +813,18 @@ private:
 RackView::RackView (RackContext c) : ctx (std::move (c))
 {
     content = std::make_unique<RackContent> (ctx);
+    content->onLayoutChanged = [this] { updateNativeClipping(); };
+    viewport.onVisibleAreaChanged = [this] { updateNativeClipping(); };
     viewport.setViewedComponent (content.get(), false);
     viewport.setScrollBarsShown (true, false);
     viewport.setScrollBarThickness (10);
     addAndMakeVisible (viewport);
+    startTimerHz (10);
 }
 
 RackView::~RackView()
 {
+    stopTimer();
     viewport.setViewedComponent (nullptr, false);
     content.reset();
 }
@@ -787,6 +834,20 @@ void RackView::collapseAll()        { content->setAllExpanded (false); }
 void RackView::expandAll()          { content->setAllExpanded (true); }
 
 void RackView::paint (juce::Graphics& g) { g.fillAll (Pequod::Colours::rail); }
+
+void RackView::updateNativeClipping()
+{
+    if (content != nullptr && isShowing())
+        NativeClip::clipToArea (*content, viewport.getScreenBounds().withTrimmedRight (viewport.getScrollBarThickness()));
+}
+
+void RackView::showModule (int uid)
+{
+    auto b = content->getModuleBoundsFor (uid);
+    if (b.isEmpty()) return;
+    viewport.setViewPosition (0, juce::jmax (0, b.getY() - 8));
+    content->flash (b);
+}
 
 void RackView::resized()
 {

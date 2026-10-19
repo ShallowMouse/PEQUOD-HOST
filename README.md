@@ -22,13 +22,15 @@ A standalone VST3 host for Windows with a Guitar Rig-style layout, MIDI and OSC 
 - **Split**: **+ SPLIT** adds an A/B parallel module. The fader crossfades: centre plays both lanes at full level, the ends fade the other lane out.
 - **Presets**: saved as `.pqrack` files in `Documents\PEQUOD Host\Presets`. `<` / `>` step through them; click the name for the list. Ctrl+S saves, Ctrl+Shift+S saves as. Your last session is restored on launch.
 - **Guitar input**: defaults to *Left (input 1)* copied to both channels, so a guitar in input 1 comes out in stereo. Change it in the right panel.
-- **AUDIO**: device, sample rate, buffer size (ASIO, WASAPI, DirectSound), and MIDI inputs.
+- **AUDIO**: device, sample rate, buffer size (ASIO, WASAPI, DirectSound), and which MIDI inputs are enabled.
+- **Tuner**: always listening to the guitar input (top bar). Right-click it to change the reference pitch (A = 432–444 Hz). **MUTE** silences the output, e.g. while tuning; right-click it to learn a footswitch.
+- **Effects map** (right panel): the whole signal chain at a glance. Click a block to jump to it in the rack, click its LED to switch it on or off.
 
 ## MIDI
 
-- All MIDI inputs are enabled on first run (toggle them in the right panel). MIDI is also passed to any instrument plugins.
+- All MIDI inputs are enabled on first run (toggle them under **AUDIO**). MIDI is also passed to any instrument plugins.
 - **Program Change** loads the preset at that position in the list (PC 0 = first preset).
-- **Learn**: click **LEARN**, move a control on any plugin panel, then move a MIDI knob/fader/footswitch (CC or note). Right-click an on/off LED, a split fader or the IN/OUT knobs to learn those directly. **+ HOST** learns preset next/prev and master levels.
+- **Learn**: click **LEARN**, move a control on any plugin panel, then move a MIDI knob/fader/footswitch (CC or note). Right-click an on/off LED, a split fader or the IN/OUT knobs to learn those directly. **+ HOST** learns preset next/prev, master levels and MUTE.
 - Footswitch mappings default to **Toggle** (each press flips the state). Click a mapping and pick **Direct** for latching pedals that send 127 = on, 0 = off.
 - Mappings to plugins are saved with the preset; host mappings (preset next/prev, master) are global.
 
@@ -45,11 +47,12 @@ Receives on port **9000**, sends feedback to **127.0.0.1:9001** by default (chan
 | `/pequod/master/in`, `/pequod/master/out` | float 0–1 | Level, −36 dB to +12 dB (0.75 = 0 dB) |
 | `/pequod/preset/next`, `/pequod/preset/prev` | — | Step presets |
 | `/pequod/preset/load` | int (1-based) or string name | Load preset |
+| `/pequod/mute` | 0/1 (no arg = toggle) | Output mute |
 | `/pequod/sync` | — | Send the full state back (all names and values) |
 
 Any other address can be mapped with **LEARN**: touch a plugin control, then send the OSC message.
 
-**Feedback sent out** (so TouchOSC, an ESP32 controller etc. stay in sync): every parameter change as `/pequod/slot/{n}/param/{p} f`, plus `/pequod/rack/count`, `/pequod/slot/{n}/name`, `/pequod/slot/{n}/on`, `/pequod/slot/{n}/params` (count), `/pequod/split/{k}/mix`, `/pequod/master/in|out`, `/pequod/preset/name`, `/pequod/preset/index`. `/pequod/sync` also sends `/pequod/slot/{n}/param/{p}/name`. Learned OSC addresses get feedback on their own address too.
+**Feedback sent out** (so TouchOSC, an ESP32 controller etc. stay in sync): every parameter change as `/pequod/slot/{n}/param/{p} f`, plus `/pequod/rack/count`, `/pequod/slot/{n}/name`, `/pequod/slot/{n}/on`, `/pequod/slot/{n}/params` (count), `/pequod/split/{k}/mix`, `/pequod/master/in|out`, `/pequod/mute`, `/pequod/tuner/note` (s, `-` when silent), `/pequod/tuner/cents` (f), `/pequod/tuner/hz` (f), `/pequod/preset/name`, `/pequod/preset/index`. `/pequod/sync` also sends `/pequod/slot/{n}/param/{p}/name`. Learned OSC addresses get feedback on their own address too.
 
 ## Building
 
@@ -68,6 +71,5 @@ The exe is at `build\PequodHost_artefacts\Release\PEQUOD Host.exe`. JUCE 8.0.15 
 
 - Built on JUCE 8, which is dual-licensed: AGPLv3 or a commercial JUCE licence. Personal use is fine; selling PEQUOD Host closed-source would need a JUCE licence.
 - Fonts: Courier Prime (SIL OFL 1.1) and Roboto (Apache 2.0), licences in `Resources/Fonts`.
-- Plugin panels shown inside the rack are real plugin windows. If one misbehaves while scrolling (draws over the header), hide it with **-** and use **EDIT** instead.
 - Plugins load in-process; a plugin that crashes during scanning is remembered and skipped next time.
 - Settings live in `%APPDATA%\PEQUOD\PEQUOD Host.settings`.

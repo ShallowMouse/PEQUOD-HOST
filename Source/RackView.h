@@ -19,7 +19,8 @@ struct RackContext
 
 //==============================================================================
 /** Centre panel: scrolling rack of plugin modules and A/B split modules. */
-class RackView : public juce::Component
+class RackView : public juce::Component,
+                 private juce::Timer
 {
 public:
     explicit RackView (RackContext);
@@ -27,6 +28,9 @@ public:
 
     /** Synchronously deletes any embedded editor for this slot (call before its plugin dies). */
     void dropEditor (int slotUid);
+
+    /** Scrolls to the module for a slot or split and flashes it. */
+    void showModule (int uid);
 
     void collapseAll();
     void expandAll();
@@ -36,6 +40,15 @@ public:
 
 private:
     RackContext ctx;
-    juce::Viewport viewport;
+    struct RackViewport : public juce::Viewport
+    {
+        std::function<void()> onVisibleAreaChanged;
+        void visibleAreaChanged (const juce::Rectangle<int>&) override { if (onVisibleAreaChanged) onVisibleAreaChanged(); }
+    };
+
+    RackViewport viewport;
+
+    void updateNativeClipping();
+    void timerCallback() override { updateNativeClipping(); }
     std::unique_ptr<RackContent> content;
 };

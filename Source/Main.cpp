@@ -36,7 +36,7 @@ public:
             setUsingNativeTitleBar (true);
             setContentOwned (new MainComponent(), true);
             setResizable (true, true);
-            setResizeLimits (1200, 700, 8000, 6000);
+            setResizeLimits (1300, 700, 8000, 6000);
 
             juce::Rectangle<int> area (0, 0, 1920, 1080);
             if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()) area = d->userBounds.toNearestInt();
