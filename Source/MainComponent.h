@@ -6,6 +6,7 @@
 #include "BrowserPanel.h"
 #include "RackView.h"
 #include "ControlPanel.h"
+#include "PresetLibrary.h"
 
 class PluginWindow;
 
@@ -28,13 +29,14 @@ public:
 private:
     std::unique_ptr<juce::ApplicationProperties> appProperties;
     juce::File presetDir;
+    PresetLibrary library { presetDir };
 
     HostEngine engine;
     ControlSurface control { engine };
     Tuner tuner { engine };
 
     HeaderBar header { engine, control, tuner };
-    BrowserPanel browser { engine, presetDir };
+    BrowserPanel browser { engine, library };
     RackView rack;
     ControlPanel controlPanel { engine, control };
     juce::Label statusBar;
@@ -61,6 +63,16 @@ private:
     void initRack();
     void deletePreset (const juce::File&);
     void showPresetMenu();
+
+    //== Banks
+    void stepBank (int delta);
+    void selectBank (int index, bool loadPresetToo);
+    void newBank();
+    void renameBank (const juce::String&);
+    void deleteBank (const juce::String&);
+    void movePreset (const juce::File&, const juce::String& bank);
+    void askForText (const juce::String& title, const juce::String& label, const juce::String& initial,
+                     std::function<void (const juce::String&)> onOk);
     std::unique_ptr<juce::XmlElement> createFullRackXml() const;
     juce::String getPresetDisplayName() const;
 

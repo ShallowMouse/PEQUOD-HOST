@@ -1,4 +1,6 @@
 #include "MainComponent.h"
+#include "SettingsPanel.h"
+#include "PluginManagerPanel.h"
 
 //==============================================================================
 class PluginWindow : public juce::DocumentWindow
@@ -47,7 +49,6 @@ MainComponent::MainComponent()
                           [this] (int uid) { closePluginWindow (uid); },
                           [this] (const juce::String& s) { setStatus (s); } })
 {
-    presetDir.createDirectory();
     auto* settings = appProperties->getUserSettings();
 
     // Plugins
@@ -71,6 +72,12 @@ MainComponent::MainComponent()
     control.onPresetName  = [this] (const juce::String& n) { loadPresetByName (n); };
     control.getPresetName = [this] { return getPresetDisplayName(); };
     control.getPresetIndex = [this] { return getPresetFiles().indexOf (currentPresetFile); };
+    control.onBankNext     = [this] { stepBank (1); };
+    control.onBankPrev     = [this] { stepBank (-1); };
+    control.onBankIndex    = [this] (int i, bool loadToo) { selectBank (i, loadToo); };
+    control.onBankName     = [this] (const juce::String& n) { selectBank (library.getBanks().indexOf (n), true); };
+    control.getBankName    = [this] { return library.getCurrentBank(); };
+    control.getBankIndex   = [this] { return library.getCurrentBankIndex(); };
     control.addChangeListener (this);
     control.setTuner (&tuner);
 
@@ -106,6 +113,12 @@ MainComponent::MainComponent()
     browser.onAddPlugin    = [this] (const juce::PluginDescription& d) { addPluginAtEnd (d); };
     browser.onLoadPreset   = [this] (const juce::File& f) { loadPresetFile (f); };
     browser.onDeletePreset = [this] (const juce::File& f) { deletePreset (f); };
+    browser.onNewBank      = [this] { newBank(); };
+    browser.onRenameBank   = [this] (const juce::String& b) { renameBank (b); };
+    browser.onDeleteBank   = [this] (const juce::String& b) { deleteBank (b); };
+    browser.onMovePreset   = [this] (const juce::File& f, const juce::String& b) { movePreset (f, b); };
+    library.addChangeListener (this);
+
     browser.refresh();
 
     controlPanel.onShowInRack = [this] (int uid) { rack.showModule (uid); };
@@ -118,6 +131,13 @@ MainComponent::MainComponent()
 
     // Restore last session
     currentPresetFile = juce::File (settings->getValue ("lastPreset"));
+    if (! currentPresetFile.existsAsFile())   // saved before banks: it now lives in "Default"
+    {
+        auto moved = library.getBankFolder ("Default").getChildFile (currentPresetFile.getFileName());
+        currentPresetFile = moved.existsAsFile() ? moved : juce::File();
+    }
+    library.setCurrentBank (currentPresetFile.existsAsFile() ? PresetLibrary::bankOf (currentPresetFile)
+                                                             : settings->getValue ("currentBank"));
     if (auto session = settings->getXmlValue ("session"))
         loadRack (*session);
     if (! settings->getBoolValue ("sessionModified", false))
@@ -145,6 +165,7 @@ MainComponent::~MainComponent()
     engine.clearRack();
     engine.onSlotAboutToBeRemoved = nullptr;
 
+    library.removeChangeListener (this);
     control.setTuner (nullptr);
     control.removeChangeListener (this);
     engine.knownPlugins.removeChangeListener (this);
@@ -164,6 +185,7 @@ void MainComponent::saveSettings()
         s->setValue ("session", rackXml.get());
 
     s->setValue ("lastPreset", currentPresetFile.getFullPathName());
+    s->setValue ("currentBank", library.getCurrentBank());
     s->setValue ("pipelineStages", engine.getPipelineStages());
     s->setValue ("sessionModified", engine.getChangeCounter() != savedChangeCounter);
     s->saveIfNeeded();
@@ -220,7 +242,9 @@ void MainComponent::timerCallback()
         statusBar.setText (old ? juce::String() : statusMessage, juce::dontSendNotification);
     }
 
-    header.setPresetName (getPresetDisplayName(), engine.getChangeCounter() != savedChangeCounter);
+    header.setPresetName ((currentPresetFile.existsAsFile() ? PresetLibrary::bankOf (currentPresetFile)
+                                                            : library.getCurrentBank()) + "  /  " + getPresetDisplayName(),
+                          engine.getChangeCounter() != savedChangeCounter);
 
     // Autosave the session every ~30 s so a crash (usually a misbehaving plugin) loses little.
     if (++autosaveTicks >= 150)
@@ -232,6 +256,9 @@ void MainComponent::timerCallback()
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
+    if (source == &library)
+        control.sendRackSummary();
+
     if (source == &engine.knownPlugins)
     {
         if (auto plugins = engine.knownPlugins.createXml())
@@ -246,9 +273,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 //==============================================================================
 juce::Array<juce::File> MainComponent::getPresetFiles() const
 {
-    auto files = presetDir.findChildFiles (juce::File::findFiles, false, "*.pqrack");
-    files.sort();
-    return files;
+    return library.getPresets (library.getCurrentBank());
 }
 
 juce::String MainComponent::getPresetDisplayName() const
@@ -286,6 +311,7 @@ void MainComponent::loadPresetFile (const juce::File& f)
 
     loadRack (*xml);
     currentPresetFile = f;
+    library.setCurrentBank (PresetLibrary::bankOf (f));
     savedChangeCounter = engine.getChangeCounter();
     browser.setCurrentPresetFile (f);
     control.sendRackSummary();
@@ -302,20 +328,132 @@ void MainComponent::loadPresetIndex (int index)
 
 void MainComponent::loadPresetByName (const juce::String& name)
 {
+    // Current bank first, then every other bank.
     for (auto& f : getPresetFiles())
         if (f.getFileNameWithoutExtension().equalsIgnoreCase (name.trim()))
             return loadPresetFile (f);
+    for (auto& bank : library.getBanks())
+        for (auto& f : library.getPresets (bank))
+            if (f.getFileNameWithoutExtension().equalsIgnoreCase (name.trim()))
+                return loadPresetFile (f);
     setStatus ("No preset called " + name);
 }
 
 void MainComponent::stepPreset (int delta)
 {
     auto files = getPresetFiles();
-    if (files.isEmpty()) return;
+    if (files.isEmpty()) { setStatus ("Bank " + library.getCurrentBank() + " is empty"); return; }
     auto idx = files.indexOf (currentPresetFile);
     idx = idx < 0 ? (delta > 0 ? 0 : files.size() - 1)
                   : (idx + delta + files.size()) % files.size();
     loadPresetFile (files[idx]);
+}
+
+//==============================================================================
+void MainComponent::selectBank (int index, bool loadPresetToo)
+{
+    auto banks = library.getBanks();
+    if (! juce::isPositiveAndBelow (index, banks.size())) return;
+
+    // Keep the same slot number when moving between banks (handy with footswitches).
+    const int slot = juce::jmax (0, getPresetFiles().indexOf (currentPresetFile));
+    library.setCurrentBank (banks[index]);
+
+    if (loadPresetToo)
+    {
+        auto files = getPresetFiles();
+        if (! files.isEmpty())
+            loadPresetFile (files[juce::jmin (slot, files.size() - 1)]);
+        else
+            setStatus ("Bank " + banks[index] + " is empty");
+    }
+    else
+    {
+        setStatus ("Bank " + banks[index]);
+    }
+}
+
+void MainComponent::stepBank (int delta)
+{
+    auto banks = library.getBanks();
+    if (banks.isEmpty()) return;
+    auto idx = library.getCurrentBankIndex();
+    selectBank ((juce::jmax (0, idx) + delta + banks.size()) % banks.size(), true);
+}
+
+void MainComponent::askForText (const juce::String& title, const juce::String& label, const juce::String& initial,
+                                std::function<void (const juce::String&)> onOk)
+{
+    auto* w = new juce::AlertWindow (title, label, juce::MessageBoxIconType::NoIcon, this);
+    w->addTextEditor ("text", initial);
+    w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("CANCEL", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([w, onOk] (int result)
+    {
+        if (result == 1) onOk (w->getTextEditorContents ("text").trim());
+    }), true);
+
+    if (auto* ed = w->getTextEditor ("text"))
+    {
+        ed->setFont (Pequod::body (15.0f));
+        ed->selectAll();
+        ed->grabKeyboardFocus();
+    }
+}
+
+void MainComponent::newBank()
+{
+    askForText ("NEW BANK", "Bank name", "Bank " + juce::String (library.getBanks().size() + 1), [this] (const juce::String& name)
+    {
+        auto err = library.createBank (name);
+        setStatus (err.isEmpty() ? "Created bank " + name : err);
+    });
+}
+
+void MainComponent::renameBank (const juce::String& bank)
+{
+    askForText ("RENAME BANK", "New name for " + bank, bank, [this, bank] (const juce::String& name)
+    {
+        const bool currentInside = PresetLibrary::bankOf (currentPresetFile) == bank && currentPresetFile.existsAsFile();
+        const auto fileName = currentPresetFile.getFileName();
+        auto err = library.renameBank (bank, name);
+        if (err.isNotEmpty()) { setStatus (err); return; }
+        if (currentInside)
+            currentPresetFile = library.getBankFolder (juce::File::createLegalFileName (name.trim())).getChildFile (fileName);
+        browser.setCurrentPresetFile (currentPresetFile);
+        setStatus ("Renamed bank to " + name);
+    });
+}
+
+void MainComponent::deleteBank (const juce::String& bank)
+{
+    const int count = library.getPresets (bank).size();
+    auto options = juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::WarningIcon, "Delete bank",
+                                                                 "Move bank \"" + bank + "\" and its " + juce::String (count)
+                                                                     + " preset(s) to the recycle bin?",
+                                                                 "DELETE", "CANCEL", this);
+    juce::AlertWindow::showAsync (options, [this, bank] (int result)
+    {
+        if (result != 1) return;
+        if (PresetLibrary::bankOf (currentPresetFile) == bank) currentPresetFile = juce::File();
+        auto err = library.deleteBank (bank);
+        setStatus (err.isEmpty() ? "Deleted bank " + bank : err);
+        browser.setCurrentPresetFile (currentPresetFile);
+    });
+}
+
+void MainComponent::movePreset (const juce::File& f, const juce::String& bank)
+{
+    juce::File moved;
+    auto err = library.movePreset (f, bank, moved);
+    if (err.isNotEmpty()) { setStatus (err); return; }
+    if (f == currentPresetFile)
+    {
+        currentPresetFile = moved;
+        library.setCurrentBank (bank);
+    }
+    browser.setCurrentPresetFile (currentPresetFile);
+    setStatus ("Moved " + f.getFileNameWithoutExtension() + " to " + bank);
 }
 
 void MainComponent::savePreset (const juce::File& f)
@@ -329,7 +467,8 @@ void MainComponent::savePreset (const juce::File& f)
     }
     currentPresetFile = f;
     savedChangeCounter = engine.getChangeCounter();
-    browser.refresh();
+    library.setCurrentBank (PresetLibrary::bankOf (f));
+    library.refresh();
     browser.setCurrentPresetFile (f);
     control.sendRackSummary();
     setStatus ("Saved " + f.getFileNameWithoutExtension());
@@ -345,15 +484,23 @@ void MainComponent::saveAs()
 {
     auto* w = new juce::AlertWindow ("SAVE PRESET", "Preset name", juce::MessageBoxIconType::NoIcon, this);
     w->addTextEditor ("name", currentPresetFile.existsAsFile() ? currentPresetFile.getFileNameWithoutExtension() : juce::String());
+    auto banks = library.getBanks();
+    w->addComboBox ("bank", banks, "Bank");
+    if (auto* cb = w->getComboBoxComponent ("bank"))
+        cb->setSelectedItemIndex (juce::jmax (0, banks.indexOf (library.getCurrentBank())), juce::dontSendNotification);
     w->addButton ("SAVE", 1, juce::KeyPress (juce::KeyPress::returnKey));
     w->addButton ("CANCEL", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int result)
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, banks] (int result)
     {
         if (result != 1) return;
         auto name = juce::File::createLegalFileName (w->getTextEditorContents ("name").trim());
         if (name.isEmpty()) return;
-        savePreset (presetDir.getChildFile (name + ".pqrack"));
+        auto bank = library.getCurrentBank();
+        if (auto* cb = w->getComboBoxComponent ("bank"))
+            if (juce::isPositiveAndBelow (cb->getSelectedItemIndex(), banks.size()))
+                bank = banks[cb->getSelectedItemIndex()];
+        savePreset (library.getBankFolder (bank).getChildFile (name + PresetLibrary::extension));
     }), true);
 
     if (auto* ed = w->getTextEditor ("name"))
@@ -387,21 +534,27 @@ void MainComponent::deletePreset (const juce::File& f)
         if (result != 1) return;
         f.moveToTrash();
         if (f == currentPresetFile) currentPresetFile = juce::File();
-        browser.refresh();
+        library.refresh();
     });
 }
 
 void MainComponent::showPresetMenu()
 {
     juce::PopupMenu m;
-    auto files = getPresetFiles();
-    for (int i = 0; i < files.size(); ++i)
-        m.addItem (juce::String (i + 1).paddedLeft ('0', 2) + "  " + files[i].getFileNameWithoutExtension(),
-                   true, files[i] == currentPresetFile, [this, f = files[i]] { loadPresetFile (f); });
-    if (files.isEmpty())
-        m.addItem ("No presets saved yet", false, false, nullptr);
+    for (auto& bank : library.getBanks())
+    {
+        juce::PopupMenu sub;
+        auto files = library.getPresets (bank);
+        for (int i = 0; i < files.size(); ++i)
+            sub.addItem (juce::String (i + 1).paddedLeft ('0', 2) + "  " + files[i].getFileNameWithoutExtension(),
+                         true, files[i] == currentPresetFile, [this, f = files[i]] { loadPresetFile (f); });
+        if (files.isEmpty())
+            sub.addItem ("(empty)", false, false, nullptr);
+        m.addSubMenu (bank, sub, true, nullptr, bank == library.getCurrentBank());
+    }
     m.addSeparator();
-    m.addItem ("Open presets folder", [this] { presetDir.revealToUser(); });
+    m.addItem ("New bank...", [this] { newBank(); });
+    m.addItem ("Open presets folder", [this] { library.getRoot().revealToUser(); });
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
@@ -446,15 +599,12 @@ void MainComponent::closePluginWindow (int uid)
 
 void MainComponent::showAudioSettings()
 {
-    auto* selector = new juce::AudioDeviceSelectorComponent (engine.deviceManager, 0, 2, 0, 2, true, false, true, false);
-    selector->setSize (560, 520);
-
     juce::DialogWindow::LaunchOptions o;
-    o.content.setOwned (selector);
-    o.dialogTitle = "Audio / MIDI settings";
+    o.content.setOwned (new SettingsPanel (engine, control));
+    o.dialogTitle = "Audio, MIDI & OSC settings";
     o.dialogBackgroundColour = Pequod::Colours::panel;
     o.useNativeTitleBar = true;
-    o.resizable = false;
+    o.resizable = true;
     o.componentToCentreAround = this;
     o.launchAsync();
 }
@@ -462,12 +612,11 @@ void MainComponent::showAudioSettings()
 void MainComponent::showPluginManager (bool autoScan)
 {
     auto deadMansPedal = appProperties->getUserSettings()->getFile().getSiblingFile ("RecentlyCrashedPluginsList");
-    auto* list = new juce::PluginListComponent (engine.formatManager, engine.knownPlugins, deadMansPedal,
-                                                appProperties->getUserSettings(), true);
-    list->setSize (760, 560);
+    auto* panel = new PluginManagerPanel (engine, *appProperties->getUserSettings(), deadMansPedal);
+    panel->onStatus = [this] (const juce::String& s) { setStatus (s); };
 
     juce::DialogWindow::LaunchOptions o;
-    o.content.setOwned (list);
+    o.content.setOwned (panel);
     o.dialogTitle = "Plugins";
     o.dialogBackgroundColour = Pequod::Colours::panel;
     o.useNativeTitleBar = true;
@@ -477,9 +626,7 @@ void MainComponent::showPluginManager (bool autoScan)
 
     if (autoScan)
     {
-        setStatus ("First run: scanning your VST3 folder...");
-        for (auto* format : engine.formatManager.getFormats())
-            if (format->getName() == "VST3")
-                list->scanFor (*format);
+        setStatus ("First run: scanning your VST3 folders...");
+        panel->scanFolders();
     }
 }

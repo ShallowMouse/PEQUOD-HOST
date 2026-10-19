@@ -4,7 +4,7 @@
 
 namespace
 {
-    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute" };
+    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev" };
     const char* sourceNames[] = { "cc", "note", "osc" };
 
     template <typename Enum>
@@ -247,6 +247,8 @@ void ControlSurface::sendRackSummary()
     for (auto* split : engine.getSplits())
         send ("/pequod/split/" + juce::String (k++) + "/mix", split->mix);
 
+    if (getBankName) send ("/pequod/bank/name", getBankName());
+    if (getBankIndex) send ("/pequod/bank/index", getBankIndex() + 1);
     if (getPresetName) send ("/pequod/preset/name", getPresetName());
     if (getPresetIndex) send ("/pequod/preset/index", getPresetIndex() + 1);
 }
@@ -360,6 +362,20 @@ bool ControlSurface::handleFixedOsc (const juce::OSCMessage& msg, float value)
         return true;
     }
 
+    if (parts[1] == "bank" && parts.size() >= 3)
+    {
+        if (parts[2] == "next" && press && onBankNext) onBankNext();
+        if (parts[2] == "prev" && press && onBankPrev) onBankPrev();
+        if (parts[2] == "load" && ! msg.isEmpty())
+        {
+            if (msg[0].isString()) { if (onBankName) onBankName (msg[0].getString()); }
+            else if (onBankIndex) onBankIndex ((int) value - 1, true);
+        }
+        if (parts[2] == "select" && ! msg.isEmpty() && onBankIndex)   // choose the bank without loading a preset
+            onBankIndex ((int) value - 1, false);
+        return true;
+    }
+
     if (parts[1] == "preset" && parts.size() >= 3)
     {
         if (parts[2] == "next" && press && onPresetNext) onPresetNext();
@@ -409,6 +425,20 @@ void ControlSurface::handleMidi (const juce::MidiMessage& m)
         return;
     }
 
+    // Standard MIDI bank select (CC 0) chooses the bank; the next Program Change loads from it.
+    if (isCC && number == 0 && onBankIndex)
+    {
+        const bool mapped = std::any_of (mappings.begin(), mappings.end(), [] (const Mapping& mp)
+        {
+            return mp.source == Mapping::Source::midiCC && mp.number == 0;
+        });
+        if (! mapped)
+        {
+            onBankIndex (m.getControllerValue(), false);
+            return;
+        }
+    }
+
     for (auto& map : mappings)
     {
         const bool srcMatch = (isCC && map.source == Mapping::Source::midiCC)
@@ -453,6 +483,8 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
         case Mapping::Target::outputGain: engine.getOutputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::presetNext: if (risingEdge && onPresetNext) onPresetNext(); break;
         case Mapping::Target::presetPrev: if (risingEdge && onPresetPrev) onPresetPrev(); break;
+        case Mapping::Target::bankNext:   if (risingEdge && onBankNext) onBankNext(); break;
+        case Mapping::Target::bankPrev:   if (risingEdge && onBankPrev) onBankPrev(); break;
         case Mapping::Target::mute:
             if (m.toggle) { if (risingEdge) setMuted (! isMuted()); }
             else          setMuted (isPress);
@@ -574,6 +606,8 @@ juce::String ControlSurface::describeTarget (const Mapping& m) const
         case Mapping::Target::presetNext: return "Preset NEXT";
         case Mapping::Target::presetPrev: return "Preset PREV";
         case Mapping::Target::mute:       return "MUTE";
+        case Mapping::Target::bankNext:   return "Bank NEXT";
+        case Mapping::Target::bankPrev:   return "Bank PREV";
     }
     return {};
 }
@@ -608,7 +642,7 @@ static juce::XmlElement* mappingToXml (const Mapping& m, int targetRef)
 static Mapping mappingFromXml (const juce::XmlElement& x)
 {
     Mapping m;
-    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 8, Mapping::Target::param);
+    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 10, Mapping::Target::param);
     m.paramIndex = x.getIntAttribute ("param", -1);
     m.source = enumFromName (x.getStringAttribute ("source"), sourceNames, 3, Mapping::Source::midiCC);
     m.midiChannel = x.getIntAttribute ("ch");

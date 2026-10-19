@@ -243,6 +243,29 @@ public:
 
     juce::Font getPopupMenuFont() override { return Pequod::body (14.0f); }
 
+    int getTabButtonBestWidth (juce::TabBarButton& b, int) override
+    {
+        return juce::GlyphArrangement::getStringWidthInt (Pequod::heading (13.0f), b.getButtonText()) + 40;
+    }
+
+    void drawTabButton (juce::TabBarButton& b, juce::Graphics& g, bool over, bool) override
+    {
+        auto r = b.getLocalBounds().reduced (2, 4).toFloat();
+        const bool front = b.isFrontTab();
+        g.setColour (front ? Pequod::Colours::mustard : (over ? Pequod::Colours::panelHi.brighter (0.05f) : Pequod::Colours::panelHi));
+        g.fillRoundedRectangle (r, 2.0f);
+        g.setColour (front ? Pequod::Colours::bg : Pequod::Colours::text);
+        g.setFont (Pequod::heading (13.0f));
+        g.drawText (b.getButtonText(), r, juce::Justification::centred);
+    }
+
+    void drawTabAreaBehindFrontButton (juce::TabbedButtonBar& bar, juce::Graphics& g, int w, int h) override
+    {
+        juce::ignoreUnused (bar);
+        g.setColour (Pequod::Colours::mustardLo);
+        g.fillRect (0, h - 1, w, 1);
+    }
+
     void drawScrollbar (juce::Graphics& g, juce::ScrollBar&, int x, int y, int w, int h, bool vertical,
                         int thumbStart, int thumbSize, bool over, bool) override
     {

@@ -51,7 +51,10 @@ target_sources(PequodHost PRIVATE
     Source/ChainMap.cpp
     Source/NativeClip.cpp
     Source/WorkerPool.cpp
-    Source/RackProcessor.cpp)
+    Source/RackProcessor.cpp
+    Source/PresetLibrary.cpp
+    Source/SettingsPanel.cpp
+    Source/PluginManagerPanel.cpp)
 
 target_compile_definitions(PequodHost PRIVATE
     JUCE_PLUGINHOST_VST3=1

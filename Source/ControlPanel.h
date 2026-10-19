@@ -25,21 +25,14 @@ private:
     HostEngine& engine;
     ControlSurface& control;
 
-    juce::Label oscInLabel, oscOutLabel;
-    juce::TextEditor oscInPort, oscOutHost, oscOutPort;
-    juce::TextButton syncButton { "SEND SYNC" };
-
-    juce::Label inputModeLabel;
-    juce::ComboBox inputMode;
-
     juce::TextButton learnButton { "LEARN" }, hostLearnButton { "+ HOST" }, clearButton { "CLEAR" };
     juce::ListBox mappingList { "mappings", this };
 
     juce::Viewport chainViewport;
     ChainMap chainMap;
 
-    juce::Rectangle<int> oscSection, inputSection, mapSection, chainSection;
-    juce::Rectangle<int> oscInLed, oscOutLed, midiLed;
+    juce::Rectangle<int> mapSection, chainSection;
+    juce::Rectangle<int> oscLed, midiLed;
 
     int getNumRows() override;
     void paintListBoxItem (int row, juce::Graphics&, int w, int h, bool selected) override;
@@ -47,6 +40,5 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
 
-    void applyOsc();
-    void styleLabel (juce::Label&, const juce::String&);
+
 };

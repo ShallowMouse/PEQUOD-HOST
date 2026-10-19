@@ -6,7 +6,7 @@
 //==============================================================================
 struct Mapping
 {
-    enum class Target { param, bypass, splitMix, inputGain, outputGain, presetNext, presetPrev, mute };
+    enum class Target { param, bypass, splitMix, inputGain, outputGain, presetNext, presetPrev, mute, bankNext, bankPrev };
     enum class Source { midiCC, midiNote, osc };
 
     Target target = Target::param;
@@ -23,7 +23,8 @@ struct Mapping
     bool lastPressed = false;
 
     bool isRackMapping() const { return target == Target::param || target == Target::bypass || target == Target::splitMix; }
-    bool isSwitchTarget() const { return target == Target::bypass || target == Target::presetNext || target == Target::presetPrev || target == Target::mute; }
+    bool isSwitchTarget() const { return target == Target::bypass || target == Target::presetNext || target == Target::presetPrev || target == Target::mute
+                                         || target == Target::bankNext || target == Target::bankPrev; }
 };
 
 //==============================================================================
@@ -77,7 +78,12 @@ public:
     std::function<void (int index)> onPresetIndex;        // 0-based
     std::function<void (const juce::String&)> onPresetName;
     std::function<juce::String()> getPresetName;
-    std::function<int()> getPresetIndex;                  // 0-based, -1 if unsaved
+    std::function<int()> getPresetIndex;                  // 0-based within the bank, -1 if unsaved
+    std::function<void()> onBankNext, onBankPrev;
+    std::function<void (int index, bool loadPreset)> onBankIndex;   // 0-based
+    std::function<void (const juce::String&)> onBankName;
+    std::function<juce::String()> getBankName;
+    std::function<int()> getBankIndex;
 
     void setTuner (Tuner* t) { tuner = t; }
     void setMuted (bool shouldMute);

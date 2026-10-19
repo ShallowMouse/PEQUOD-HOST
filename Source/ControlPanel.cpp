@@ -31,32 +31,6 @@ ControlPanel::ControlPanel (HostEngine& e, ControlSurface& c) : engine (e), cont
     chainViewport.setScrollBarThickness (8);
     addAndMakeVisible (chainViewport);
 
-    styleLabel (oscInLabel, "IN PORT");
-    styleLabel (oscOutLabel, "SEND TO");
-    styleLabel (inputModeLabel, "GUITAR INPUT");
-
-    for (auto* ed : { &oscInPort, &oscOutHost, &oscOutPort })
-    {
-        ed->setFont (Pequod::heading (13.0f, false));
-        ed->onReturnKey = [this] { applyOsc(); };
-        ed->onFocusLost = [this] { applyOsc(); };
-        addAndMakeVisible (ed);
-    }
-    oscInPort.setInputRestrictions (5, "0123456789");
-    oscOutPort.setInputRestrictions (5, "0123456789");
-    oscInPort.setText (juce::String (control.getOscInputPort()), false);
-    oscOutHost.setText (control.getOscOutHost(), false);
-    oscOutPort.setText (juce::String (control.getOscOutPort()), false);
-
-    syncButton.setTooltip ("Send every slot name, on/off state and parameter value to the controller");
-    syncButton.onClick = [this] { control.sendFullState(); };
-    addAndMakeVisible (syncButton);
-
-    inputMode.addItemList ({ "Stereo", "Left (input 1)", "Right (input 2)", "Left + Right" }, 1);
-    inputMode.setSelectedItemIndex (engine.getInputStage()->inputMode.load(), juce::dontSendNotification);
-    inputMode.onChange = [this] { engine.getInputStage()->inputMode = inputMode.getSelectedItemIndex(); };
-    addAndMakeVisible (inputMode);
-
     learnButton.setTooltip ("Move a control on a plugin, then a MIDI control (or send an OSC message)");
     learnButton.onClick = [this]
     {
@@ -71,6 +45,8 @@ ControlPanel::ControlPanel (HostEngine& e, ControlSurface& c) : engine (e), cont
         m.addItem ("Preset PREV",  [this] { control.armLearnFor (Mapping::Target::presetPrev); });
         m.addItem ("Master IN",    [this] { control.armLearnFor (Mapping::Target::inputGain); });
         m.addItem ("Master OUT",   [this] { control.armLearnFor (Mapping::Target::outputGain); });
+        m.addItem ("Bank NEXT",    [this] { control.armLearnFor (Mapping::Target::bankNext); });
+        m.addItem ("Bank PREV",    [this] { control.armLearnFor (Mapping::Target::bankPrev); });
         m.addItem ("MUTE",         [this] { control.armLearnFor (Mapping::Target::mute); });
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&hostLearnButton));
     };
@@ -95,31 +71,8 @@ ControlPanel::~ControlPanel()
     chainViewport.setViewedComponent (nullptr, false);
 }
 
-void ControlPanel::styleLabel (juce::Label& l, const juce::String& text)
-{
-    l.setText (text, juce::dontSendNotification);
-    l.setFont (Pequod::heading (11.0f, false));
-    l.setColour (juce::Label::textColourId, Pequod::Colours::textDim);
-    addAndMakeVisible (l);
-}
-
-void ControlPanel::applyOsc()
-{
-    auto in = oscInPort.getText().getIntValue();
-    auto host = oscOutHost.getText().trim();
-    auto out = oscOutPort.getText().getIntValue();
-
-    if (in != control.getOscInputPort() || ! control.isOscInConnected())
-        control.setOscInputPort (in);
-    if (host != control.getOscOutHost() || out != control.getOscOutPort() || ! control.isOscOutConnected())
-        control.setOscOutput (host, out);
-}
-
 void ControlPanel::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    if (! oscInPort.hasKeyboardFocus (false))  oscInPort.setText (juce::String (control.getOscInputPort()), false);
-    if (! oscOutHost.hasKeyboardFocus (false)) oscOutHost.setText (control.getOscOutHost(), false);
-    if (! oscOutPort.hasKeyboardFocus (false)) oscOutPort.setText (juce::String (control.getOscOutPort()), false);
     mappingList.updateContent();
     mappingList.repaint();
     mappingList.setVisible (! control.getMappings().empty());
@@ -130,11 +83,8 @@ void ControlPanel::changeListenerCallback (juce::ChangeBroadcaster*)
 void ControlPanel::timerCallback()
 {
     // Activity LEDs
-    repaint (oscInLed.expanded (4));
-    repaint (midiLed.expanded (4));
-
-    if (inputMode.getSelectedItemIndex() != engine.getInputStage()->inputMode.load())
-        inputMode.setSelectedItemIndex (engine.getInputStage()->inputMode.load(), juce::dontSendNotification);
+    repaint (oscLed.expanded (40, 4));
+    repaint (midiLed.expanded (40, 4));
 }
 
 //==============================================================================
@@ -193,18 +143,18 @@ void ControlPanel::paint (juce::Graphics& g)
     g.setColour (Pequod::Colours::line);
     g.drawVerticalLine (0, 0.0f, (float) getHeight());
 
-    drawSectionTitle (g, oscSection, "OSC");
-    drawSectionTitle (g, inputSection, "INPUT");
     drawSectionTitle (g, mapSection, "MAPPINGS");
     drawSectionTitle (g, chainSection, "EFFECTS MAP");
 
-    drawLed (g, oscInLed, control.isOscInConnected(), recent (control.lastOscActivity));
-    drawLed (g, oscOutLed, control.isOscOutConnected(), false);
     // MIDI activity LED beside the mappings title
     g.setFont (Pequod::heading (10.0f, false));
     g.setColour (Pequod::Colours::textDim);
     g.drawText ("MIDI", midiLed.withX (midiLed.getX() - 34).withWidth (30), juce::Justification::centredRight);
     drawLed (g, midiLed, false, recent (control.lastMidiActivity));
+    g.setFont (Pequod::heading (10.0f, false));
+    g.setColour (Pequod::Colours::textDim);
+    g.drawText ("OSC", oscLed.withX (oscLed.getX() - 34).withWidth (30), juce::Justification::centredRight);
+    drawLed (g, oscLed, control.isOscInConnected(), recent (control.lastOscActivity));
 
     if (control.getMappings().empty())
     {
@@ -223,37 +173,15 @@ void ControlPanel::resized()
 {
     auto r = getLocalBounds().reduced (12, 10).withTrimmedLeft (1);
 
-    // OSC
-    oscSection = r.removeFromTop (24 + 26 + 6 + 26 + 6 + 26);
-    {
-        auto s = oscSection.withTrimmedTop (26);
-        oscInLed = oscSection.withHeight (20).removeFromRight (14);
-        auto row1 = s.removeFromTop (26);
-        oscInLabel.setBounds (row1.removeFromLeft (64));
-        oscInPort.setBounds (row1);
-        s.removeFromTop (6);
-        auto row2 = s.removeFromTop (26);
-        oscOutLabel.setBounds (row2.removeFromLeft (64));
-        oscOutLed = row2.removeFromRight (14);
-        oscOutPort.setBounds (row2.removeFromRight (58));
-        row2.removeFromRight (4);
-        oscOutHost.setBounds (row2);
-        s.removeFromTop (6);
-        syncButton.setBounds (s.removeFromTop (26));
-    }
-
-    r.removeFromTop (14);
-    inputSection = r.removeFromTop (24 + 26);
-    {
-        auto s = inputSection.withTrimmedTop (26);
-        inputModeLabel.setBounds (s.removeFromLeft (90));
-        inputMode.setBounds (s);
-    }
-
-    r.removeFromTop (14);
-    const int mapHeight = juce::jmax (150, (r.getHeight() - 14) * 45 / 100);
+    r.removeFromTop (2);
+    const int mapHeight = juce::jmax (180, (r.getHeight() - 14) * 50 / 100);
     mapSection = r.removeFromTop (mapHeight);
-    midiLed = mapSection.withHeight (20).removeFromRight (14);
+    {
+        auto title = mapSection.withHeight (20);
+        oscLed = title.removeFromRight (14);
+        title.removeFromRight (40);
+        midiLed = title.removeFromRight (14);
+    }
     r.removeFromTop (14);
     chainSection = r;
     chainViewport.setBounds (chainSection.withTrimmedTop (26));
