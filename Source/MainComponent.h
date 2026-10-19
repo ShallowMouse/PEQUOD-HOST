@@ -40,6 +40,8 @@ private:
     RackView rack;
     ControlPanel controlPanel { engine, control };
     juce::Label statusBar;
+    juce::TextButton rackViewButton { "RACK" }, pedalboardViewButton { "PEDALBOARD" };
+    void setPedalboardView (bool);
     juce::TooltipWindow tooltips { this, 600 };
 
     std::map<int, std::unique_ptr<PluginWindow>> windows;

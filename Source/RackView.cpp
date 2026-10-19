@@ -160,6 +160,15 @@ public:
         }
     }
 
+    /** Pedalboard view: width that fits the plugin panel (or just the header when collapsed). */
+    int getDesiredWidth() const
+    {
+        const int minW = 320;
+        if (expanded && editor != nullptr)
+            return juce::jmax (minW, editor->getWidth() + 2 * ear + 16);
+        return minW;
+    }
+
     int getDesiredHeight (int width)
     {
         if (! expanded) return headerH;
@@ -539,6 +548,8 @@ public:
             mix.setValue (v, juce::dontSendNotification);
     }
 
+    int getDesiredWidth() const { return 560; }
+
     int getDesiredHeight() const
     {
         return headerH + 6 + juce::jmax (laneA.getDesiredHeight(), laneB.getDesiredHeight()) + 10;
@@ -671,8 +682,22 @@ public:
         layout();
     }
 
+    void setHorizontal (bool h)
+    {
+        if (horizontal == h) return;
+        horizontal = h;
+        layout();
+    }
+
+    bool isHorizontal() const { return horizontal; }
+
+    /** Size of the visible area this content lives in (set by RackView). */
+    juce::Rectangle<int> viewArea;
+
     void layout()
     {
+        if (horizontal) { layoutHorizontal(); return; }
+
         auto w = getWidth();
         if (w <= 0) return;
 
@@ -694,6 +719,36 @@ public:
         auto minH = getParentComponent() != nullptr ? getParentComponent()->getHeight() : 0;
         if (getHeight() != juce::jmax (y, minH))
             setSize (w, juce::jmax (y, minH));
+        repaint();
+
+        if (onLayoutChanged) onLayoutChanged();
+    }
+
+    /** Pedalboard: modules left to right, the drop zone and +SPLIT at the end. */
+    void layoutHorizontal()
+    {
+        const int viewH = juce::jmax (200, viewArea.getHeight());
+        int x = gap, tallest = 0;
+
+        for (auto* c : order)
+        {
+            int w = 320, h = headerH;
+            if (auto* pm = dynamic_cast<PluginModule*> (c)) { w = pm->getDesiredWidth(); h = pm->getDesiredHeight (w); w = pm->getDesiredWidth(); }
+            if (auto* sm = dynamic_cast<SplitModule*> (c))  { w = sm->getDesiredWidth(); h = sm->getDesiredHeight(); }
+            c->setBounds (x, gap + 8, w, h);
+            tallest = juce::jmax (tallest, h);
+            x += w + gap;
+        }
+
+        const int zoneW = order.empty() ? juce::jmax (400, viewArea.getWidth() - 2 * gap) : 200;
+        const int zoneH = order.empty() ? 160 : juce::jmax (headerH * 2, juce::jmin (tallest, viewH - 3 * gap - 44));
+        dropZone = juce::Rectangle<int> (x, gap + 8, zoneW, zoneH);
+        addSplitButton.setBounds (juce::Rectangle<int> (x + ear, dropZone.getBottom() + gap, 110, 28));
+        x = dropZone.getRight() + gap * 2;
+
+        const int contentH = juce::jmax (viewH, gap * 2 + 8 + juce::jmax (tallest, dropZone.getHeight() + gap + 28));
+        if (getWidth() != juce::jmax (x, viewArea.getWidth()) || getHeight() != contentH)
+            setSize (juce::jmax (x, viewArea.getWidth()), contentH);
         repaint();
 
         if (onLayoutChanged) onLayoutChanged();
@@ -729,18 +784,32 @@ public:
     {
         g.fillAll (Pequod::Colours::rail);
 
-        // Rack rails with mounting holes, Guitar Rig style.
-        for (int x : { 2, getWidth() - 8 })
+        // Rack rails with mounting holes, Guitar Rig style (along the top and bottom on the pedalboard).
+        if (horizontal)
         {
-            g.setColour (juce::Colour (0xff1d1d1d));
-            g.fillRect (x, 0, 6, getHeight());
-            g.setColour (juce::Colour (0xff0a0a0a));
-            for (int y = 8; y < getHeight(); y += 22)
-                g.fillRect (x + 1, y, 4, 8);
+            for (int y : { 2, getHeight() - 8 })
+            {
+                g.setColour (juce::Colour (0xff1d1d1d));
+                g.fillRect (0, y, getWidth(), 6);
+                g.setColour (juce::Colour (0xff0a0a0a));
+                for (int x = 8; x < getWidth(); x += 22)
+                    g.fillRect (x, y + 1, 8, 4);
+            }
+        }
+        else
+        {
+            for (int x : { 2, getWidth() - 8 })
+            {
+                g.setColour (juce::Colour (0xff1d1d1d));
+                g.fillRect (x, 0, 6, getHeight());
+                g.setColour (juce::Colour (0xff0a0a0a));
+                for (int y = 8; y < getHeight(); y += 22)
+                    g.fillRect (x + 1, y, 4, 8);
+            }
         }
 
         g.setColour (dragOver && insertIndex == (int) order.size() ? Pequod::Colours::mustard : Pequod::Colours::line);
-        g.drawRoundedRectangle (dropZone.toFloat().reduced (ear, 4), 3.0f, 1.0f);
+        g.drawRoundedRectangle (horizontal ? dropZone.toFloat().reduced (4, 0) : dropZone.toFloat().reduced (ear, 4), 3.0f, 1.0f);
         g.setColour (Pequod::Colours::textDim);
         g.setFont (Pequod::heading (order.empty() ? 18.0f : 12.0f));
         g.drawText (order.empty() ? "DRAG PLUGINS HERE" : "+ DROP PLUGIN", dropZone, juce::Justification::centred);
@@ -761,9 +830,16 @@ public:
         }
 
         if (! dragOver || insertIndex < 0) return;
+        g.setColour (Pequod::Colours::mustard);
+        if (horizontal)
+        {
+            int x = insertIndex < (int) order.size() ? order[(size_t) insertIndex]->getX() - gap / 2
+                                                     : dropZone.getX() - gap / 2;
+            g.fillRect (x - 1, gap, 3, juce::jmax (dropZone.getBottom(), 120) - gap);
+            return;
+        }
         int y = insertIndex < (int) order.size() ? order[(size_t) insertIndex]->getY() - gap / 2
                                                  : dropZone.getY() - gap / 2;
-        g.setColour (Pequod::Colours::mustard);
         g.fillRect (gap, y - 1, getWidth() - 2 * gap, 3);
     }
 
@@ -779,7 +855,8 @@ public:
         dragOver = true;
         insertIndex = (int) order.size();
         for (int i = 0; i < (int) order.size(); ++i)
-            if (d.localPosition.y < order[(size_t) i]->getBounds().getCentreY())
+            if (horizontal ? d.localPosition.x < order[(size_t) i]->getBounds().getCentreX()
+                           : d.localPosition.y < order[(size_t) i]->getBounds().getCentreY())
             {
                 insertIndex = i;
                 break;
@@ -821,6 +898,7 @@ private:
     std::vector<juce::Component*> order;
     juce::TextButton addSplitButton;
     juce::Rectangle<int> dropZone;
+    bool horizontal = false;
     bool dragOver = false;
     int insertIndex = -1;
     juce::Rectangle<int> flashArea;
@@ -885,20 +963,45 @@ void RackView::paint (juce::Graphics& g) { g.fillAll (Pequod::Colours::rail); }
 void RackView::updateNativeClipping()
 {
     if (content != nullptr && isShowing())
-        NativeClip::clipToArea (*content, viewport.getScreenBounds().withTrimmedRight (viewport.getScrollBarThickness()));
+        NativeClip::clipToArea (*content, juce::Rectangle<int> (viewport.getScreenX(), viewport.getScreenY(),
+                                                                viewport.getMaximumVisibleWidth(),
+                                                                viewport.getMaximumVisibleHeight()));
 }
+
+void RackView::setPedalboard (bool shouldBeHorizontal)
+{
+    content->setHorizontal (shouldBeHorizontal);
+    resized();
+}
+
+bool RackView::isPedalboard() const { return content->isHorizontal(); }
 
 void RackView::showModule (int uid)
 {
     auto b = content->getModuleBoundsFor (uid);
     if (b.isEmpty()) return;
-    viewport.setViewPosition (0, juce::jmax (0, b.getY() - 8));
+    if (content->isHorizontal())
+        viewport.setViewPosition (juce::jmax (0, b.getX() - 8), 0);
+    else
+        viewport.setViewPosition (0, juce::jmax (0, b.getY() - 8));
     content->flash (b);
 }
 
 void RackView::resized()
 {
     viewport.setBounds (getLocalBounds());
-    content->setSize (viewport.getWidth() - viewport.getScrollBarThickness(), content->getHeight());
+
+    if (content->isHorizontal())
+    {
+        viewport.setScrollBarsShown (true, true);
+        content->viewArea = getLocalBounds().withTrimmedBottom (viewport.getScrollBarThickness());
+        content->setSize (juce::jmax (content->getWidth(), 1), content->viewArea.getHeight());
+    }
+    else
+    {
+        viewport.setScrollBarsShown (true, false);
+        content->viewArea = getLocalBounds().withTrimmedRight (viewport.getScrollBarThickness());
+        content->setSize (viewport.getWidth() - viewport.getScrollBarThickness(), content->getHeight());
+    }
     content->layout();
 }

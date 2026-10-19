@@ -126,8 +126,17 @@ MainComponent::MainComponent()
     statusBar.setFont (Pequod::heading (12.0f, false));
     statusBar.setColour (juce::Label::textColourId, Pequod::Colours::textDim);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &header, &browser, &rack, &controlPanel, &statusBar })
+    for (auto* c : std::initializer_list<juce::Component*> { &header, &browser, &rack, &controlPanel, &statusBar,
+                                                            &rackViewButton, &pedalboardViewButton })
         addAndMakeVisible (c);
+
+    rackViewButton.setTooltip ("Vertical rack");
+    pedalboardViewButton.setTooltip ("Horizontal pedalboard");
+    for (auto* b : { &rackViewButton, &pedalboardViewButton })
+        b->setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
+    rackViewButton.onClick       = [this] { setPedalboardView (false); };
+    pedalboardViewButton.onClick = [this] { setPedalboardView (true); };
+    setPedalboardView (settings->getBoolValue ("pedalboardView", false));
 
     // Restore last session
     currentPresetFile = juce::File (settings->getValue ("lastPreset"));
@@ -187,6 +196,7 @@ void MainComponent::saveSettings()
     s->setValue ("lastPreset", currentPresetFile.getFullPathName());
     s->setValue ("currentBank", library.getCurrentBank());
     s->setValue ("pipelineStages", engine.getPipelineStages());
+    s->setValue ("pedalboardView", rack.isPedalboard());
     s->setValue ("sessionModified", engine.getChangeCounter() != savedChangeCounter);
     s->saveIfNeeded();
 }
@@ -206,7 +216,12 @@ void MainComponent::resized()
 {
     auto r = getLocalBounds();
     header.setBounds (r.removeFromTop (64));
-    statusBar.setBounds (r.removeFromBottom (24).reduced (10, 0));
+    auto status = r.removeFromBottom (24);
+    auto toggles = status.removeFromRight (190).reduced (4, 3);
+    pedalboardViewButton.setBounds (toggles.removeFromRight (100));
+    toggles.removeFromRight (4);
+    rackViewButton.setBounds (toggles.removeFromRight (60));
+    statusBar.setBounds (status.reduced (10, 0));
     browser.setBounds (r.removeFromLeft (260));
     controlPanel.setBounds (r.removeFromRight (280));
     rack.setBounds (r);
@@ -218,6 +233,13 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     if (k == juce::KeyPress ('s', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)) { saveAs(); return true; }
     if (k == juce::KeyPress::escapeKey && control.getLearnState() != ControlSurface::LearnState::off) { control.cancelLearn(); return true; }
     return false;
+}
+
+void MainComponent::setPedalboardView (bool horizontal)
+{
+    rack.setPedalboard (horizontal);
+    rackViewButton.setToggleState (! horizontal, juce::dontSendNotification);
+    pedalboardViewButton.setToggleState (horizontal, juce::dontSendNotification);
 }
 
 void MainComponent::setStatus (const juce::String& s)

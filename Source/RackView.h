@@ -32,6 +32,10 @@ public:
     /** Scrolls to the module for a slot or split and flashes it. */
     void showModule (int uid);
 
+    /** Horizontal pedalboard instead of the vertical rack (same modules, same behaviour). */
+    void setPedalboard (bool horizontal);
+    bool isPedalboard() const;
+
     void collapseAll();
     void expandAll();
 

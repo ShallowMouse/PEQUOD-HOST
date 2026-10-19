@@ -19,6 +19,7 @@ A standalone VST3 host for Windows with a Guitar Rig-style layout, MIDI and OSC 
 
 - **Add plugins**: drag from the browser into the rack (or into a split lane), or double-click to add at the end. First launch scans your VST3 folder; use **PLUGINS** to rescan.
 - **Rack modules**: power LED = on/off, **EDIT** = floating window, **+/-** = show/hide the plugin panel in the rack, drag the module header to reorder or to move it into a split lane.
+- **Rack or pedalboard**: the **RACK / PEDALBOARD** buttons at the bottom right switch between the vertical rack and a horizontal pedalboard (modules left to right, scrolling sideways). Everything else works the same; your choice is remembered.
 - **Split**: **+ SPLIT** adds an A/B parallel module. The fader crossfades: centre plays both lanes at full level, the ends fade the other lane out.
 - **Presets and banks**: presets live in banks, which are folders under `Documents\PEQUOD Host\Presets` (presets from before banks existed are moved into **Default**). The PRESETS tab lists every bank; click a bank to make it current, **+ BANK** makes a new one, right-click a bank to rename or delete it, right-click a preset to move it to another bank. **SAVE AS** asks which bank to save into. `<` / `>` step through the presets in the current bank; click the name for every bank and preset. Ctrl+S saves, Ctrl+Shift+S saves as. Your last session is restored on launch.
 - **Guitar input**: defaults to *Left (input 1)* copied to both channels, so a guitar in input 1 comes out in stereo. Change it under **AUDIO**.
