@@ -4,6 +4,7 @@
 #include <atomic>
 #include <memory>
 #include <vector>
+#include "RackProcessor.h"
 
 //==============================================================================
 /** Input conditioning + gain + peak metering. Used for the master IN and OUT stages. */
@@ -93,63 +94,6 @@ private:
 };
 
 //==============================================================================
-/** Crossfades the two lanes of a split module: in 0-1 = lane A, in 2-3 = lane B. */
-class SplitMixerProcessor : public juce::AudioProcessor
-{
-public:
-    SplitMixerProcessor()
-        : AudioProcessor (BusesProperties().withInput  ("A",   juce::AudioChannelSet::stereo(), true)
-                                           .withInput  ("B",   juce::AudioChannelSet::stereo(), true)
-                                           .withOutput ("Out", juce::AudioChannelSet::stereo(), true)) {}
-
-    std::atomic<float> mix { 0.5f }; // 0 = all A, 1 = all B, 0.5 = both at full level
-
-    void prepareToPlay (double sr, int) override { smoothed.reset (sr > 0 ? sr : 48000.0, 0.02); smoothed.setCurrentAndTargetValue (mix.load()); }
-    void releaseResources() override {}
-
-    using AudioProcessor::processBlock;
-
-    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
-    {
-        if (buffer.getNumChannels() < 4) return;
-        const int n = buffer.getNumSamples();
-        smoothed.setTargetValue (mix.load());
-
-        auto* aL = buffer.getWritePointer (0);
-        auto* aR = buffer.getWritePointer (1);
-        auto* bL = buffer.getReadPointer (2);
-        auto* bR = buffer.getReadPointer (3);
-
-        for (int i = 0; i < n; ++i)
-        {
-            const float m = smoothed.getNextValue();
-            // Guitar Rig style: centre = both lanes at unity, edges fade the other lane out.
-            const float ga = juce::jlimit (0.0f, 1.0f, 2.0f * (1.0f - m));
-            const float gb = juce::jlimit (0.0f, 1.0f, 2.0f * m);
-            aL[i] = aL[i] * ga + bL[i] * gb;
-            aR[i] = aR[i] * ga + bR[i] * gb;
-        }
-    }
-
-    const juce::String getName() const override             { return "SplitMix"; }
-    bool acceptsMidi() const override                        { return false; }
-    bool producesMidi() const override                       { return false; }
-    double getTailLengthSeconds() const override             { return 0.0; }
-    juce::AudioProcessorEditor* createEditor() override      { return nullptr; }
-    bool hasEditor() const override                          { return false; }
-    int getNumPrograms() override                            { return 1; }
-    int getCurrentProgram() override                         { return 0; }
-    void setCurrentProgram (int) override                    {}
-    const juce::String getProgramName (int) override         { return {}; }
-    void changeProgramName (int, const juce::String&) override {}
-    void getStateInformation (juce::MemoryBlock&) override   {}
-    void setStateInformation (const void*, int) override     {}
-
-private:
-    juce::SmoothedValue<float> smoothed;
-};
-
-//==============================================================================
 /** Receives every parameter change of every hosted plugin (from any thread). */
 struct ParamObserver
 {
@@ -162,17 +106,21 @@ struct ParamObserver
 struct PluginSlot
 {
     int uid = 0;
-    juce::AudioProcessorGraph::Node::Ptr node;
+    std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::PluginDescription description;
-    bool bypassed = false;
+    std::atomic<bool> bypassed { false };
+    std::atomic<float> cpuLoad { 0.0f };    // share of one block's time this plugin takes (0..1+)
 
-    juce::AudioPluginInstance* instance() const
-    {
-        return node != nullptr ? dynamic_cast<juce::AudioPluginInstance*> (node->getProcessor()) : nullptr;
-    }
+    juce::AudioPluginInstance* instance() const { return plugin.get(); }
 
     struct Listener;
     std::unique_ptr<Listener> listener;
+};
+
+/** Split settings shared with the audio thread. */
+struct SplitState
+{
+    std::atomic<float> mix { 0.5f };
 };
 
 struct RackItem
@@ -184,13 +132,8 @@ struct RackItem
 
     std::shared_ptr<PluginSlot> plugin;                    // Type::plugin
     std::vector<std::shared_ptr<PluginSlot>> lanes[2];     // Type::split
-    juce::AudioProcessorGraph::Node::Ptr mixerNode;        // Type::split
+    std::shared_ptr<SplitState> state;                     // Type::split
     float mix = 0.5f;
-
-    SplitMixerProcessor* mixer() const
-    {
-        return mixerNode != nullptr ? dynamic_cast<SplitMixerProcessor*> (mixerNode->getProcessor()) : nullptr;
-    }
 };
 
 /** Where a plugin sits / should go. lane == -1 means the top level of the rack. */
@@ -203,7 +146,8 @@ struct RackLocation
 
 //==============================================================================
 class HostEngine : public juce::ChangeBroadcaster,
-                   private juce::ChangeListener
+                   private juce::ChangeListener,
+                   private juce::Timer
 {
 public:
     HostEngine();
@@ -258,20 +202,40 @@ public:
 
     std::function<void (int slotUid)> onSlotAboutToBeRemoved;
 
+    /** Rebuilds the audio thread's render plan from the rack (call after any structural change). */
     void rewire();
 
-    juce::AudioProcessorGraph& getGraph() noexcept { return graph; }
+    RackProcessor& getRack() noexcept { return *rack; }
+
+    //== Multi-core
+    /** How many cores the serial chain is spread over (1 = no pipeline, no extra latency). */
+    void setPipelineStages (int stages);
+    int getPipelineStages() const noexcept { return pipelineStages; }
+    int getMaxPipelineStages() const noexcept;
+    /** Extra latency added by the pipeline, in samples. */
+    int getPipelineLatencySamples() const noexcept;
+    /** Combined CPU share of a rack item (both lanes for a split). */
+    float getItemLoad (const RackItem&) const;
+    /** Plugin CPU on the busiest core, as a share of the block time. */
+    float getBusiestCoreLoad() const;
 
     /** Increments on every rack change (used to show the preset as modified). */
     int getChangeCounter() const noexcept { return changeCounter; }
     void changed() { ++changeCounter; sendChangeMessage(); }
 
+    /** Call after structural changes: the pipeline is re-balanced once CPU use has been measured. */
+    void scheduleRebalance() { rebalanceAt = juce::Time::getMillisecondCounterHiRes() + 3000.0; }
+
 private:
     int changeCounter = 0;
-    juce::AudioProcessorGraph graph;
-    juce::AudioProcessorGraph::Node::Ptr audioIn, audioOut, midiIn, inNode, outNode;
+    std::unique_ptr<GainMeterProcessor> inputStageOwned, outputStageOwned;
     GainMeterProcessor* inputStage = nullptr;
     GainMeterProcessor* outputStage = nullptr;
+    std::unique_ptr<RackProcessor> rack;
+
+    int pipelineStages = 1;
+    double rebalanceAt = 0;
+    int lastPlanLatency = 0;
 
     std::vector<RackItem> items;
     int nextUid = 1;
@@ -283,12 +247,14 @@ private:
     void insertSlot (std::shared_ptr<PluginSlot>, RackLocation where);
     void attachListener (PluginSlot&);
 
-    void connectAudio (juce::AudioProcessorGraph::NodeID src, int srcChans,
-                       juce::AudioProcessorGraph::NodeID dst, int dstChans, int dstOffset = 0);
-    int numOuts (const juce::AudioProcessorGraph::Node::Ptr&) const;
-    int numIns  (const juce::AudioProcessorGraph::Node::Ptr&) const;
+    std::unique_ptr<RenderPlugin> makeRenderPlugin (PluginSlot&, int maxBlock) const;
+    int computeChainLatency() const;
+    std::vector<int> computePartition (int numStages) const;
+    float busiestStageLoad (const std::vector<int>&) const;
+    std::vector<int> currentPartition;
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    void timerCallback() override;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostEngine)
 };

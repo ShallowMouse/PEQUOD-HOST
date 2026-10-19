@@ -117,10 +117,9 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
     addAndMakeVisible (inMeter);
     addAndMakeVisible (outMeter);
 
-    cpuLabel.setFont (Pequod::heading (12.0f, false));
-    cpuLabel.setColour (juce::Label::textColourId, Pequod::Colours::textDim);
-    cpuLabel.setJustificationType (juce::Justification::centredRight);
-    addAndMakeVisible (cpuLabel);
+    cpuButton.setTooltip ("CPU load. Click to spread the effects chain over more CPU cores.");
+    cpuButton.onClick = [this] { showCoresMenu(); };
+    addAndMakeVisible (cpuButton);
 
     startTimerHz (30);
 }
@@ -170,8 +169,57 @@ void HeaderBar::timerCallback()
 
     static int tick = 0;
     if (++tick % 10 == 0)
-        cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (engine.deviceManager.getCpuUsage() * 100.0)) + "%",
-                          juce::dontSendNotification);
+    {
+        const int cpu = juce::roundToInt (engine.deviceManager.getCpuUsage() * 100.0);
+        const int stages = engine.getPipelineStages();
+        cpuButton.top = "CPU " + juce::String (cpu) + "%";
+        cpuButton.bottom = stages <= 1 ? juce::String ("1 CORE")
+                                       : juce::String (stages) + " CORES +" + juce::String ((double) engine.getPipelineLatencySamples() * 1000.0
+                                                                                               / juce::jmax (1.0, engine.getRack().getCurrentSampleRate()), 1) + "MS";
+        cpuButton.hot = cpu >= 85;
+        cpuButton.repaint();
+    }
+}
+
+void HeaderBar::CpuButton::paintButton (juce::Graphics& g, bool over, bool)
+{
+    auto r = getLocalBounds().toFloat();
+    if (over)
+    {
+        g.setColour (Pequod::Colours::panelHi);
+        g.fillRoundedRectangle (r, 2.0f);
+    }
+    auto t = r.reduced (4.0f, 4.0f);
+    g.setFont (Pequod::heading (12.0f));
+    g.setColour (hot ? Pequod::Colours::danger : Pequod::Colours::text);
+    g.drawText (top, t.removeFromTop (t.getHeight() * 0.55f), juce::Justification::bottomRight);
+    g.setFont (Pequod::heading (9.5f, false));
+    g.setColour (Pequod::Colours::mustard);
+    g.drawText (bottom, t, juce::Justification::topRight);
+}
+
+void HeaderBar::showCoresMenu()
+{
+    const double sr = juce::jmax (1.0, engine.getRack().getCurrentSampleRate());
+    const int block = engine.getRack().getCurrentBlockSize();
+
+    juce::PopupMenu m;
+    m.addSectionHeader ("SPREAD THE CHAIN OVER");
+    for (int n = 1; n <= engine.getMaxPipelineStages(); ++n)
+    {
+        const double extraMs = (double) ((n - 1) * block) * 1000.0 / sr;
+        auto text = n == 1 ? juce::String ("1 core  (no extra latency)")
+                           : juce::String (n) + " cores  (+" + juce::String (extraMs, 1) + " ms latency)";
+        m.addItem (text, true, engine.getPipelineStages() == n, [this, n]
+        {
+            if (onPipelineStagesChanged) onPipelineStagesChanged (n);
+        });
+    }
+    m.addSeparator();
+    m.addItem ("Split lanes always run on separate cores (no extra latency)", false, false, nullptr);
+    m.addItem ("Busiest core now: " + juce::String (juce::roundToInt (engine.getBusiestCoreLoad() * 100.0f)) + "% of the buffer time",
+               false, false, nullptr);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&cpuButton));
 }
 
 void HeaderBar::paint (juce::Graphics& g)
@@ -209,7 +257,7 @@ void HeaderBar::resized()
     r.removeFromRight (6);
     knobBlock (inKnob, inLabel, inMeter);
     r.removeFromRight (8);
-    cpuLabel.setBounds (row (r.removeFromRight (58)));
+    cpuButton.setBounds (row (r.removeFromRight (104), 40));
     r.removeFromRight (8);
     pluginsButton.setBounds (row (r.removeFromRight (78)));
     r.removeFromRight (4);

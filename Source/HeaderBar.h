@@ -42,6 +42,7 @@ public:
 
     std::function<void()> onPrev, onNext, onSave, onSaveAs, onInit, onAudioSettings, onPluginManager, onToggleLearn;
     std::function<void()> onPresetMenu;
+    std::function<void (int stages)> onPipelineStagesChanged;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -58,7 +59,18 @@ private:
     LearnableButton muteButton { "MUTE" };
 
     LearnableSlider inKnob, outKnob;
-    juce::Label inLabel, outLabel, cpuLabel;
+    juce::Label inLabel, outLabel;
+
+    /** CPU meter that doubles as the multi-core setting. */
+    struct CpuButton : public juce::Button
+    {
+        CpuButton() : Button ("cpu") {}
+        juce::String top, bottom;
+        bool hot = false;
+        void paintButton (juce::Graphics&, bool over, bool down) override;
+    };
+    CpuButton cpuButton;
+    void showCoresMenu();
     PeakMeter inMeter, outMeter;
 
     juce::Rectangle<int> wordmarkArea;

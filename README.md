@@ -24,6 +24,7 @@ A standalone VST3 host for Windows with a Guitar Rig-style layout, MIDI and OSC 
 - **Guitar input**: defaults to *Left (input 1)* copied to both channels, so a guitar in input 1 comes out in stereo. Change it in the right panel.
 - **AUDIO**: device, sample rate, buffer size (ASIO, WASAPI, DirectSound), and which MIDI inputs are enabled.
 - **Tuner**: always listening to the guitar input (top bar). Right-click it to change the reference pitch (A = 432–444 Hz). **MUTE** silences the output, e.g. while tuning; right-click it to learn a footswitch.
+- **Multi-core**: plugins in the two lanes of a split always run on separate CPU cores, with no added latency. To spread a long serial chain over more cores, click the **CPU** readout in the top bar and pick 2–4 cores; each extra core adds one buffer of latency (5.3 ms at 256 samples / 48 kHz), shown in the menu. The chain is split between cores automatically by measured CPU use, and every module shows its own CPU share so you can find the heavy ones.
 - **Effects map** (right panel): the whole signal chain at a glance. Click a block to jump to it in the rack, click its LED to switch it on or off.
 
 ## MIDI

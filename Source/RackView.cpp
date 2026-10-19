@@ -23,6 +23,21 @@ namespace
                 c->startDragging (id, source, juce::ScaledImage (source->createComponentSnapshot (imageArea)));
     }
 
+    /** Draws a module's CPU share right-aligned in `area`. */
+    void drawLoad (juce::Graphics& g, juce::Rectangle<int> area, float load)
+    {
+        if (load < 0.005f) return;
+        g.setFont (Pequod::heading (10.0f, false));
+        g.setColour (load > 0.5f ? Pequod::Colours::danger : Pequod::Colours::textDim);
+        g.drawText ("CPU " + juce::String (juce::roundToInt (load * 100.0f)) + "%", area, juce::Justification::centredRight);
+    }
+
+    float readLoad (HostEngine& engine, int uid)
+    {
+        auto s = engine.findSlot (uid);
+        return s != nullptr ? s->cpuLoad.load() : 0.0f;
+    }
+
     void styleSmallButton (juce::TextButton& b)
     {
         b.setColour (juce::TextButton::buttonColourId, Pequod::Colours::well);
@@ -126,6 +141,16 @@ public:
 
     bool isExpanded() const { return expanded; }
 
+    void updateLoad()
+    {
+        const float l = readLoad (ctx.engine, uid);
+        if (std::abs (l - shownLoad) > 0.004f)
+        {
+            shownLoad = l;
+            repaint (getLocalBounds().withHeight (headerH));
+        }
+    }
+
     void dropEditor()
     {
         if (editor != nullptr)
@@ -171,6 +196,8 @@ public:
         g.setFont (Pequod::heading (16.0f));
         auto nameW = juce::jmin (nameArea.getWidth(), juce::GlyphArrangement::getStringWidthInt (Pequod::heading (16.0f), name.toUpperCase()) + 4);
         g.drawText (name.toUpperCase(), nameArea.removeFromLeft (nameW), juce::Justification::centredLeft, true);
+
+        drawLoad (g, nameArea.removeFromRight (64), shownLoad);
 
         g.setColour (Pequod::Colours::textDim);
         g.setFont (Pequod::body (12.0f));
@@ -243,6 +270,7 @@ private:
     bool expanded = true;
     juce::String name, maker, note;
     int number = 0;
+    float shownLoad = 0.0f;
 
     void componentMovedOrResized (juce::Component&, bool, bool wasResized) override
     {
@@ -296,9 +324,16 @@ public:
         g.setColour (Pequod::Colours::textDim);
         g.setFont (Pequod::heading (10.0f, false));
         g.drawText (juce::String (number).paddedLeft ('0', 2), t.removeFromLeft (20), juce::Justification::centredLeft);
+        drawLoad (g, t.removeFromRight (56), shownLoad);
         g.setColour (power.getToggleState() ? Pequod::Colours::text : Pequod::Colours::textDim);
         g.setFont (Pequod::heading (13.0f));
         g.drawText (name.toUpperCase(), t, juce::Justification::centredLeft, true);
+    }
+
+    void updateLoad()
+    {
+        const float l = readLoad (ctx.engine, uid);
+        if (std::abs (l - shownLoad) > 0.004f) { shownLoad = l; repaint(); }
     }
 
     void resized() override
@@ -335,6 +370,7 @@ private:
     juce::TextButton editButton { "EDIT" }, removeButton { "X" };
     juce::String name;
     int number = 0;
+    float shownLoad = 0.0f;
 };
 
 //==============================================================================
@@ -358,6 +394,8 @@ public:
     }
 
     int getDesiredHeight() const { return 22 + (int) rows.size() * laneRowH + 34; }
+
+    void updateLoads() { for (auto& r : rows) r->updateLoad(); }
 
     void paint (juce::Graphics& g) override
     {
@@ -492,6 +530,8 @@ public:
         number = ctx.engine.getSplitNumber (uid);
         repaint();
     }
+
+    void updateLoads() { laneA.updateLoads(); laneB.updateLoads(); }
 
     void syncMix (float v)
     {
@@ -785,6 +825,7 @@ private:
     int insertIndex = -1;
     juce::Rectangle<int> flashArea;
     double flashUntil = 0;
+    int loadTick = 0;
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { rebuild(); }
     void handleAsyncUpdate() override { layout(); }
@@ -806,6 +847,12 @@ private:
                 if (it != splitModules.end())
                     it->second->syncMix (item.mix);
             }
+
+        if (++loadTick % 4 == 0)
+        {
+            for (auto& [uid, m] : pluginModules) m->updateLoad();
+            for (auto& [uid, m] : splitModules)  m->updateLoads();
+        }
     }
 };
 

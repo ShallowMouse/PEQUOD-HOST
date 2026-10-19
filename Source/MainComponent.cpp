@@ -59,6 +59,8 @@ MainComponent::MainComponent()
     auto deviceXml = settings->getXmlValue ("audioDevice");
     engine.initialiseAudio (deviceXml.get());
 
+    engine.setPipelineStages (settings->getIntValue ("pipelineStages", 1));
+
     // MIDI / OSC
     auto controlXml = settings->getXmlValue ("control");
     control.loadGlobalXml (controlXml.get());
@@ -88,6 +90,12 @@ MainComponent::MainComponent()
     header.onInit          = [this] { initRack(); };
     header.onAudioSettings = [this] { showAudioSettings(); };
     header.onPluginManager = [this] { showPluginManager (false); };
+    header.onPipelineStagesChanged = [this] (int n)
+    {
+        engine.setPipelineStages (n);
+        setStatus (n == 1 ? juce::String ("Running the chain on 1 core")
+                          : "Chain spread over " + juce::String (n) + " cores");
+    };
     header.onToggleLearn   = [this]
     {
         if (control.getLearnState() != ControlSurface::LearnState::off) control.cancelLearn();
@@ -156,6 +164,7 @@ void MainComponent::saveSettings()
         s->setValue ("session", rackXml.get());
 
     s->setValue ("lastPreset", currentPresetFile.getFullPathName());
+    s->setValue ("pipelineStages", engine.getPipelineStages());
     s->setValue ("sessionModified", engine.getChangeCounter() != savedChangeCounter);
     s->saveIfNeeded();
 }
