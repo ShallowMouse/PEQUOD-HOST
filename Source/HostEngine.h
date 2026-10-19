@@ -106,6 +106,7 @@ struct ParamObserver
 struct PluginSlot
 {
     int uid = 0;
+    juce::String stableId;                  // saved in presets; survives reordering and reloading
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::PluginDescription description;
     std::atomic<bool> bypassed { false };
@@ -128,6 +129,7 @@ struct RackItem
     enum class Type { plugin, split };
 
     int uid = 0;
+    juce::String stableId;                  // splits: saved in presets, used by mappings
     Type type = Type::plugin;
 
     std::shared_ptr<PluginSlot> plugin;                    // Type::plugin
@@ -177,6 +179,10 @@ public:
     void setSplitMix (int itemUid, float mix);
 
     std::shared_ptr<PluginSlot> findSlot (int slotUid) const;
+    /** Runtime uid of the slot or split with this saved ID, 0 if it isn't in the rack. */
+    int findUidByStableId (const juce::String& stableId, bool isSplit) const;
+    juce::String getStableId (int uid, bool isSplit) const;
+    static juce::String newStableId() { return juce::Uuid().toString().substring (0, 12); }
     RackItem* findItem (int itemUid);
     bool locateSlot (int slotUid, RackLocation& out) const;
 

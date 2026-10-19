@@ -34,7 +34,8 @@ A standalone VST3 host for Windows with a Guitar Rig-style layout, MIDI and OSC 
 - **Program Change** loads the preset at that position in the current bank (PC 0 = first preset). **Bank Select (CC 0)** chooses the bank (0 = first bank); the next Program Change loads from it. If you map CC 0 to something with LEARN, that mapping wins.
 - **Learn**: click **LEARN**, move a control on any plugin panel, then move a MIDI knob/fader/footswitch (CC or note). Right-click an on/off LED, a split fader or the IN/OUT knobs to learn those directly. **+ HOST** learns preset next/prev, bank next/prev, master levels and MUTE. Bank next/prev keeps the same preset number in the new bank.
 - Footswitch mappings default to **Toggle** (each press flips the state). Click a mapping and pick **Direct** for latching pedals that send 127 = on, 0 = off.
-- Mappings to plugins are saved with the preset; host mappings (preset next/prev, master) are global.
+- Mappings to plugins, on/off and split faders are saved with the preset; host mappings (preset/bank next/prev, master, mute) are global.
+- Every module and split has a permanent ID saved in the preset, and mappings point at that ID, so reordering modules or a plugin failing to load never moves a mapping onto the wrong module. (Mappings to a module that didn't load are skipped.) Presets from earlier versions get IDs the next time they're saved.
 
 ## OSC
 

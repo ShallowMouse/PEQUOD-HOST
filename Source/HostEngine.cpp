@@ -358,6 +358,7 @@ std::shared_ptr<PluginSlot> HostEngine::createSlot (const juce::PluginDescriptio
 
     auto slot = std::make_shared<PluginSlot>();
     slot->uid = nextUid++;
+    slot->stableId = newStableId();
     slot->description = desc;
     slot->plugin = std::move (inst);
     attachListener (*slot);
@@ -421,6 +422,7 @@ int HostEngine::addSplit (int itemIndex)
     RackItem item;
     item.uid = nextUid++;
     item.type = RackItem::Type::split;
+    item.stableId = newStableId();
     item.state = std::make_shared<SplitState>();
 
     auto pos = juce::jlimit (0, (int) items.size(), itemIndex < 0 ? (int) items.size() : itemIndex);
@@ -578,6 +580,43 @@ std::shared_ptr<PluginSlot> HostEngine::findSlot (int slotUid) const
     return {};
 }
 
+int HostEngine::findUidByStableId (const juce::String& stableId, bool isSplit) const
+{
+    if (stableId.isEmpty()) return 0;
+    for (auto& item : items)
+    {
+        if (isSplit)
+        {
+            if (item.type == RackItem::Type::split && item.stableId == stableId) return item.uid;
+            continue;
+        }
+        if (item.type == RackItem::Type::plugin && item.plugin && item.plugin->stableId == stableId)
+            return item.plugin->uid;
+        for (auto& lane : item.lanes)
+            for (auto& sl : lane)
+                if (sl->stableId == stableId)
+                    return sl->uid;
+    }
+    return 0;
+}
+
+juce::String HostEngine::getStableId (int uid, bool isSplit) const
+{
+    for (auto& item : items)
+    {
+        if (isSplit)
+        {
+            if (item.uid == uid && item.type == RackItem::Type::split) return item.stableId;
+            continue;
+        }
+        if (item.type == RackItem::Type::plugin && item.plugin && item.plugin->uid == uid) return item.plugin->stableId;
+        for (auto& lane : item.lanes)
+            for (auto& sl : lane)
+                if (sl->uid == uid) return sl->stableId;
+    }
+    return {};
+}
+
 RackItem* HostEngine::findItem (int itemUid)
 {
     for (auto& item : items)
@@ -654,6 +693,7 @@ int HostEngine::getSplitNumber (int itemUid) const
 static std::unique_ptr<juce::XmlElement> slotToXml (const PluginSlot& s)
 {
     auto x = std::make_unique<juce::XmlElement> ("SLOT");
+    x->setAttribute ("id", s.stableId);
     x->setAttribute ("bypass", s.bypassed);
     x->addChildElement (s.description.createXml().release());
 
@@ -686,6 +726,7 @@ std::unique_ptr<juce::XmlElement> HostEngine::createRackXml() const
         else
         {
             xi->setAttribute ("type", "split");
+            xi->setAttribute ("sid", item.stableId);
             xi->setAttribute ("mix", item.mix);
             for (int l = 0; l < 2; ++l)
             {
@@ -750,6 +791,8 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
         }
 
         slot->bypassed = xs.getBoolAttribute ("bypass", false);
+        if (xs.hasAttribute ("id"))
+            slot->stableId = xs.getStringAttribute ("id");   // older presets keep the fresh ID
         return slot;
     };
 
@@ -761,6 +804,7 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
         if (xi->getStringAttribute ("type") == "split")
         {
             item.type = RackItem::Type::split;
+            item.stableId = xi->getStringAttribute ("sid", newStableId());
             item.mix = (float) xi->getDoubleAttribute ("mix", 0.5);
             item.state = std::make_shared<SplitState>();
             item.state->mix = item.mix;

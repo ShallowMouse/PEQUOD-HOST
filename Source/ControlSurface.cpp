@@ -658,10 +658,14 @@ std::unique_ptr<juce::XmlElement> ControlSurface::createRackMappingsXml() const
     for (auto& m : mappings)
     {
         if (! m.isRackMapping()) continue;
-        int ref = m.target == Mapping::Target::splitMix ? engine.getSplitNumber (m.slotUid)
-                                                        : engine.getFlatIndex (m.slotUid);
+        const bool isSplit = m.target == Mapping::Target::splitMix;
+        int ref = isSplit ? engine.getSplitNumber (m.slotUid) : engine.getFlatIndex (m.slotUid);
         if (ref > 0)
-            root->addChildElement (mappingToXml (m, ref));
+        {
+            auto* x = mappingToXml (m, ref);                       // "ref" kept for older versions
+            x->setAttribute ("sid", engine.getStableId (m.slotUid, isSplit));
+            root->addChildElement (x);
+        }
     }
     return root;
 }
@@ -681,8 +685,20 @@ void ControlSurface::loadRackMappingsXml (const juce::XmlElement* rackRoot)
             for (auto* x : xm->getChildWithTagNameIterator ("MAPPING"))
             {
                 auto m = mappingFromXml (*x);
+                const bool isSplit = m.target == Mapping::Target::splitMix;
+
+                // Newer presets: follow the module's saved ID wherever it sits in the rack.
+                // If that module didn't load, the mapping is dropped rather than landing elsewhere.
+                if (x->hasAttribute ("sid"))
+                {
+                    m.slotUid = engine.findUidByStableId (x->getStringAttribute ("sid"), isSplit);
+                    if (m.slotUid != 0)
+                        mappings.push_back (m);
+                    continue;
+                }
+
                 auto ref = x->getIntAttribute ("ref");
-                if (m.target == Mapping::Target::splitMix)
+                if (isSplit)
                 {
                     if (ref < 1 || ref > (int) splits.size()) continue;
                     m.slotUid = splits[(size_t) ref - 1]->uid;
