@@ -105,7 +105,7 @@ void ControlPanel::paintListBoxItem (int row, juce::Graphics& g, int w, int h, b
 
     const bool overridden = control.isOverridden (m);
     auto top = r.removeFromTop (r.getHeight() / 2);
-    auto tags = top.removeFromRight (m.isSwitchTarget() && m.source != Mapping::Source::osc ? 104 : 52);
+    auto tags = top.removeFromRight (m.isSwitchTarget() && m.source != Mapping::Source::osc ? 122 : 52);
 
     g.setFont (Pequod::heading (10.0f, false));
     g.setColour (m.perPreset ? Pequod::Colours::mustard : Pequod::Colours::textDim);
@@ -113,7 +113,7 @@ void ControlPanel::paintListBoxItem (int row, juce::Graphics& g, int w, int h, b
     if (m.isSwitchTarget() && m.source != Mapping::Source::osc)
     {
         g.setColour (Pequod::Colours::textDim);
-        g.drawText (m.toggle ? "TOGGLE" : "DIRECT", tags, juce::Justification::centredRight);
+        g.drawText (m.toggle ? "LATCHING" : "MOMENTARY", tags, juce::Justification::centredRight);
     }
 
     g.setColour (overridden ? Pequod::Colours::textDim : Pequod::Colours::mustard);
@@ -141,8 +141,8 @@ void ControlPanel::listBoxItemClicked (int row, const juce::MouseEvent&)
     m.addSeparator();
     if (maps[(size_t) row].isSwitchTarget())
     {
-        m.addItem ("Toggle on each press", true, maps[(size_t) row].toggle, [this, row] { if (! control.getMappings()[(size_t) row].toggle) control.toggleMappingMode (row); });
-        m.addItem ("Direct (high = on, low = off)", true, ! maps[(size_t) row].toggle, [this, row] { if (control.getMappings()[(size_t) row].toggle) control.toggleMappingMode (row); });
+        m.addItem ("Latching (press on, press again off)", true, maps[(size_t) row].toggle, [this, row] { if (! control.getMappings()[(size_t) row].toggle) control.toggleMappingMode (row); });
+        m.addItem ("Momentary (on while held)", true, ! maps[(size_t) row].toggle, [this, row] { if (control.getMappings()[(size_t) row].toggle) control.toggleMappingMode (row); });
         m.addSeparator();
     }
     m.addItem ("Delete mapping", [this, row] { control.removeMapping (row); });

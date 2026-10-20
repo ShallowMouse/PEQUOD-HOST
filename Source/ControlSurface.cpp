@@ -473,7 +473,11 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
         case Mapping::Target::param:
             if (auto* p = getParam (m.slotUid, m.paramIndex))
             {
-                if (m.source == Mapping::Source::midiNote || m.isControllerButton())
+                if (m.isControllerButton() && ! m.toggle)
+                {
+                    p->setValueNotifyingHost (isPress ? 1.0f : 0.0f);       // momentary: on while held
+                }
+                else if (m.source == Mapping::Source::midiNote || m.isControllerButton())
                 {
                     if (risingEdge) p->setValueNotifyingHost (p->getValue() >= 0.5f ? 0.0f : 1.0f);
                 }
@@ -493,7 +497,9 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
             break;
 
         case Mapping::Target::splitMix:
-            if (m.isControllerButton())
+            if (m.isControllerButton() && ! m.toggle)
+                engine.setSplitMix (m.slotUid, isPress ? 1.0f : 0.0f);          // B only while held
+            else if (m.isControllerButton())
             {
                 if (risingEdge)
                     if (auto* item = engine.findItem (m.slotUid))

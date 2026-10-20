@@ -380,7 +380,7 @@ public:
     Inspector (ControllerManager& m, HostEngine& e, ControlSurface& c) : mgr (m), engine (e), control (c)
     {
         for (auto* comp : std::initializer_list<juce::Component*> { &title, &sub, &identifyButton, &unitName, &modeBox, &functionButton,
-                                                                   &latchToggle, &midiTypeBox, &numberSlider, &channelBox, &midiLatchToggle,
+                                                                   &latchButton, &momentaryButton, &midiTypeBox, &numberSlider, &channelBox,
                                                                    &layerActionBox, &layerNumBox, &swatches, &pequodSwatches, &ledModeBox, &meter, &everyPresetButton, &thisPresetButton, &useGlobalButton,
                                                                    &calibrateButton, &invertToggle, &hint })
             addChildComponent (comp);
@@ -407,7 +407,16 @@ public:
 
         functionButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::well);
         functionButton.onClick = [this] { showFunctionMenu(); };
-        latchToggle.onClick = [this] { latchChanged(); };
+        for (auto* b : { &latchButton, &momentaryButton })
+        {
+            b->setColour (juce::TextButton::buttonOnColourId, Pequod::Colours::mustard);
+            b->setColour (juce::TextButton::textColourOnId, Pequod::Colours::rail);
+            setWidth (*b, 118);
+        }
+        latchButton.setTooltip ("Press once for on, press again for off");
+        momentaryButton.setTooltip ("On only while your foot is down");
+        latchButton.onClick     = [this] { setLatching (true); };
+        momentaryButton.onClick = [this] { setLatching (false); };
 
         midiTypeBox.onChange = [this] { setAction ("mode", midiModes()[midiTypeBox.getSelectedItemIndex()]); refresh(); };
         numberSlider.setSliderStyle (juce::Slider::IncDecButtons);
@@ -418,8 +427,6 @@ public:
         for (int ch = 1; ch <= 16; ++ch) channelBox.addItem ("Channel " + juce::String (ch), ch);
         channelBox.onChange = [this] { setAction ("ch", channelBox.getSelectedId()); };
         setWidth (channelBox, 120);
-        midiLatchToggle.setButtonText ("Latching (press on, press again off)");
-        midiLatchToggle.onClick = [this] { setAction ("toggle", midiLatchToggle.getToggleState()); };
 
         layerActionBox.addItemList ({ "Next layer", "Previous layer", "Go to layer", "Hold for layer (back when released)" }, 1);
         layerActionBox.onChange = [this]
@@ -538,12 +545,9 @@ public:
                     showHint (m->pluginName + " isn't in this preset, so this switch does nothing here.");
             }
             if (m != nullptr && sw && (m->target == Mapping::Target::bypass || m->target == Mapping::Target::stompSlot
-                                       || m->target == Mapping::Target::mute || m->target == Mapping::Target::tuner))
-            {
-                latchToggle.setButtonText ("Latching (press on, press again off)");
-                latchToggle.setToggleState (m->toggle, juce::dontSendNotification);
-                form.row ({}, { &latchToggle });
-            }
+                                       || m->target == Mapping::Target::mute || m->target == Mapping::Target::tuner
+                                       || m->target == Mapping::Target::param || m->target == Mapping::Target::splitMix))
+                showLatch (m->toggle);
             if (m != nullptr && ! m->perPreset && (m->target == Mapping::Target::bypass || m->target == Mapping::Target::param))
                 showHint ("Follows " + m->pluginName + (m->pluginOccurrence > 0 ? " #" + juce::String (m->pluginOccurrence + 1) : juce::String())
                           + " in every preset that has it.");
@@ -565,8 +569,7 @@ public:
             form.row ("Channel", { &channelBox });
             if (sw && (mode == "cc" || mode == "note"))
             {
-                midiLatchToggle.setToggleState ((bool) mgr.get (ControllerManager::actionPath (uid, code, lay) + ".toggle"), juce::dontSendNotification);
-                form.row ({}, { &midiLatchToggle });
+                showLatch ((bool) mgr.get (ControllerManager::actionPath (uid, code, lay) + ".toggle"));
             }
             showHint (midiOutHint());
         }
@@ -670,7 +673,8 @@ private:
     juce::TextButton identifyButton { "FIND IT" }, functionButton, calibrateButton { "CALIBRATE" };
     juce::TextEditor unitName;
     juce::ComboBox modeBox, midiTypeBox, channelBox, layerActionBox, layerNumBox, ledModeBox;
-    juce::ToggleButton latchToggle, midiLatchToggle, invertToggle;
+    juce::ToggleButton invertToggle;
+    juce::TextButton latchButton { "LATCHING" }, momentaryButton { "MOMENTARY" };
     juce::Slider numberSlider;
     SwatchRow swatches, pequodSwatches;
     juce::TextButton everyPresetButton { "EVERY PRESET" }, thisPresetButton { "THIS PRESET" }, useGlobalButton;
@@ -793,11 +797,27 @@ private:
         refresh();
     }
 
-    void latchChanged()
+    void showLatch (bool latching)
     {
-        if (auto* m = mgr.mappingFor (uid, code, mgr.getLayer()))
-            mgr.assign (uid, code, mgr.getLayer(), m->target, m->target == Mapping::Target::stompSlot ? m->paramIndex : m->slotUid,
-                        latchToggle.getToggleState());
+        latchButton.setToggleState (latching, juce::dontSendNotification);
+        momentaryButton.setToggleState (! latching, juce::dontSendNotification);
+        form.row ("Switch", { &latchButton, &momentaryButton });
+    }
+
+    void setLatching (bool latching)
+    {
+        const int lay = mgr.getLayer();
+        if (mgr.modeOf (uid, code, lay) == "pequod")
+        {
+            if (auto* m = mgr.mappingFor (uid, code, lay))
+            {
+                Mapping copy = *m;
+                copy.toggle = latching;
+                control.setControllerMapping (copy);
+            }
+        }
+        else
+            setAction ("toggle", latching);
         refresh();
     }
 
