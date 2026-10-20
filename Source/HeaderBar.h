@@ -41,7 +41,8 @@ public:
     void setPresetName (const juce::String& name, bool modified);
 
     std::function<void()> onPrev, onNext, onSave, onSaveAs, onInit, onAudioSettings, onPluginManager, onToggleLearn;
-    std::function<void()> onPresetMenu;
+    std::function<void()> onPresetMenu, onController;
+    std::function<int()> controllerState;   // 0 none, 1 connected, 2 updating
     std::function<void (int stages)> onPipelineStagesChanged;
 
     void paint (juce::Graphics&) override;
@@ -54,6 +55,15 @@ private:
     juce::TextButton prevButton { "<" }, nextButton { ">" }, presetButton,
                      saveButton { "SAVE" }, saveAsButton { "SAVE AS" }, initButton { "INIT" },
                      learnButton { "LEARN" }, audioButton { "AUDIO" }, pluginsButton { "PLUGINS" };
+
+    /** Opens the foot controller window; the dot shows whether one is connected. */
+    struct ControllerButton : public juce::TextButton
+    {
+        ControllerButton() : TextButton ("CONTROLLER") {}
+        int state = 0;
+        void paintButton (juce::Graphics&, bool over, bool down) override;
+    };
+    ControllerButton controllerButton;
 
     TunerDisplay tunerDisplay;
     LearnableButton muteButton { "MUTE" };

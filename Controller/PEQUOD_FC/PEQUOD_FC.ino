@@ -3,15 +3,19 @@
    ----------------------------------------------------------------------------
    * Talks to the existing slave boards with exactly the same I2C commands as
      the previous master (0x00 id, 0x01 type, 0x02 read, 0x04 encoder,
-     0x20/0x21/0x22 LEDs), so slave firmware is unchanged.
-   * Native link to PEQUOD Host over USB (MIDI SysEx) and Wi-Fi (UDP 9124),
-     see docs/controller-protocol.md. All settings are edited from PEQUOD.
+     0x20/0x21/0x22 LEDs), so the slave firmware is unchanged.
+   * Native link to PEQUOD Host over USB (MIDI SysEx) and Wi-Fi (UDP 7400),
+     see docs/controller-protocol.md. Every setting is edited from PEQUOD.
    * Controls can also send plain MIDI (USB + 5-pin DIN) to other gear.
 
-   Board: ESP32S3 Dev Module, USB Mode: "USB-OTG (TinyUSB)", USB CDC On Boot: Disabled
-   (the USB port is then a pure MIDI device named after the controller; debug output
-   goes to the UART pins).
-   Libraries: ArduinoJson 7, Adafruit SSD1306, Adafruit GFX.
+   Arduino IDE settings
+     Board ............ ESP32S3 Dev Module
+     USB Mode ......... USB-OTG (TinyUSB)
+     USB CDC On Boot .. Disabled   (the USB port is a pure MIDI device named after
+                                    the controller; debug output goes to the UART pins)
+     Partition Scheme . any scheme with OTA + SPIFFS, e.g. "Default 4MB with spiffs"
+                        (keep the same scheme as before to keep your old settings)
+   Libraries: ArduinoJson 7, Adafruit SSD1306, Adafruit GFX
    ============================================================================ */
 
 #include <Arduino.h>
@@ -21,14 +25,17 @@
 #include <ESPmDNS.h>
 #include <SPIFFS.h>
 #include <Preferences.h>
+#include <Update.h>
 #include <ArduinoJson.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "USB.h"
 #include "USBMIDI.h"
+#include "mbedtls/base64.h"
+#include "esp_ota_ops.h"
 
 #define FW_VERSION    "2.0.0"
-#define PROTO_VERSION 1
+#define PROTO_VERSION 2
 
 // ── Hardware (same as the previous master) ──────────────────────────────────
 static const int SDA_PIN = 8, SCL_PIN = 18;          // slave bus (Wire)
@@ -36,15 +43,21 @@ static const int OLED_SDA = 4, OLED_SCL = 5;         // display bus (Wire1)
 static const uint8_t OLED_ADDR = 0x3C;
 static const int MIDI_TX = 17, MIDI_RX = 16;         // 5-pin DIN (Serial1)
 static const int RGB_PIN = 48;                       // onboard RGB LED
-static const uint16_t LINK_PORT = 9124;
+static const uint16_t LINK_PORT = 7400;
+static const unsigned long HOST_TIMEOUT_MS = 4500;
 
 static const int MAX_BOARDS = 16;
 static const int MAX_SLOTS = 8;
 static const int MAX_CTRLS = 4;
 static const int MAX_LAYERS = 4;
 
+// Control numbers on the link (and in the settings):
+//   0-3 = switches (a pedal-with-switch board's switch is 0), 100 = expression pedal,
+//   200 = encoder rotation, 201 = encoder push
+static const int C_PEDAL = 100, C_ENC_TURN = 200, C_ENC_PUSH = 201;
+
 // ── Types ───────────────────────────────────────────────────────────────────
-enum Kind : uint8_t { KIND_NONE, KIND_SWITCHES, KIND_PEDAL, KIND_ENCODER, KIND_KNOB };
+enum Kind : uint8_t { KIND_NONE, KIND_FOOTSWITCH, KIND_BUTTON, KIND_PEDAL, KIND_PEDAL_SWITCH, KIND_ENCODER, KIND_KNOB };
 
 enum Mode : uint8_t {
   M_NONE, M_PEQUOD, M_CC, M_NOTE, M_PC,
@@ -62,6 +75,7 @@ struct Action {
 };
 
 struct Control {
+  int code = 0;                 // link number (see above)
   Action act[MAX_LAYERS];
   uint32_t color = 0xE0A82E;
   bool colorIsLayer = false;
@@ -82,7 +96,7 @@ struct Board {
   uint8_t addr = 0;
   uint64_t id = 0;
   uint8_t type = 0;
-  char key[9] = { 0 };
+  char key[9] = { 0 };          // 8 hex digits of the slave's unique ID (same key as the old firmware)
   Kind kind = KIND_NONE;
   int slot = -1;
   int numCtrls = 0;
@@ -102,26 +116,28 @@ struct Board {
   uint8_t lastPedalBtn = 0;
   unsigned long failUntil = 0;
   unsigned long identifyUntil = 0;
+  int identifyCode = -1;        // -1 = whole board
+  bool calWatch = false;
 };
 
 struct Reassembler {
-  String buf;
-  int seq = -1, nextPart = 0, parts = 0;
-  unsigned long started = 0;
+  String text;
+  int id = -1, next = 0, count = 0;
 };
 
-enum Transport : uint8_t { T_NONE, T_USB, T_UDP };
+enum Transport : uint8_t { T_USB = 0, T_UDP = 1, T_NONE = 2 };
 
 // ── Globals ─────────────────────────────────────────────────────────────────
 USBMIDI usbMidi;
 WiFiUDP udp;
+bool udpRunning = false;
 Adafruit_SSD1306 display(128, 64, &Wire1, -1);
 bool displayOk = false;
 
 Board boards[MAX_BOARDS];
 int numBoards = 0;
 
-JsonDocument cfg;            // master copy of the settings (also what PEQUOD edits)
+JsonDocument cfg;            // master copy of the settings (what PEQUOD edits)
 bool cfgDirty = false;
 unsigned long cfgDirtySince = 0;
 
@@ -136,27 +152,31 @@ uint8_t lastPcCh = 0, lastPcNum = 255;
 
 // link
 Transport active = T_NONE;
-unsigned long lastRx[3] = { 0, 0, 0 };
+unsigned long lastRx[2] = { 0, 0 };
 IPAddress udpPeer;
 uint16_t udpPeerPort = 0;
-uint8_t txSeq = 0;
+uint8_t txId = 0;
 Reassembler rxUsb, rxUdp;
-bool rawStream = false;
 bool wasLinked = false;
 
-// display data from PEQUOD
-String dispBank, dispPreset, dispMsg;
-int dispIdx = 0;
-bool dispMuted = false;
-unsigned long dispMsgUntil = 0;
-String tunNote = "-";
-float tunCents = 0, tunHz = 0;
-unsigned long tunAt = 0;
+// screen content sent by PEQUOD
+struct Screen {
+  bool valid = false;
+  String mode = "preset", top, main, sub, note, flash;
+  float cents = 0;
+  bool inTune = false;
+  unsigned long flashUntil = 0;
+} screen;
 bool displayDirty = true;
+
+// firmware update
+struct FwUpdate { bool running = false; int lastN = -1; size_t written = 0, size = 0; } fw;
 
 // wifi
 bool wifiWasConnected = false;
 bool wifiScanPending = false;
+unsigned long wifiStartedAt = 0;
+bool usingFallbackWifi = false;
 
 // ── Small helpers ───────────────────────────────────────────────────────────
 uint32_t parseColor(const char* s, uint32_t fallback) {
@@ -186,7 +206,9 @@ uint32_t scaleColor(uint32_t c, uint8_t scale) {
 }
 
 Kind kindForType(uint8_t t) {
-  if ((t >= 20 && t <= 39) || (t >= 60 && t <= 79)) return KIND_SWITCHES;
+  if (t == 41) return KIND_PEDAL_SWITCH;
+  if (t >= 20 && t <= 39) return KIND_FOOTSWITCH;
+  if (t >= 60 && t <= 79) return KIND_BUTTON;
   if (t >= 40 && t <= 59) return KIND_PEDAL;
   if (t >= 100 && t <= 119) return KIND_ENCODER;
   if (t >= 80 && t <= 99) return KIND_KNOB;
@@ -195,35 +217,42 @@ Kind kindForType(uint8_t t) {
 
 const char* kindName(Kind k) {
   switch (k) {
-    case KIND_SWITCHES: return "switches";
-    case KIND_PEDAL:    return "pedal";
-    case KIND_ENCODER:  return "encoder";
-    case KIND_KNOB:     return "knob";
-    default:            return "other";
+    case KIND_FOOTSWITCH:   return "footswitch";
+    case KIND_BUTTON:       return "button";
+    case KIND_PEDAL:        return "pedal";
+    case KIND_PEDAL_SWITCH: return "pedal_switch";
+    case KIND_ENCODER:      return "encoder";
+    case KIND_KNOB:         return "knob";
+    default:                return "other";
   }
 }
 
-int controlCount(const Board& b) {
+bool hasSwitchRow(const Board& b) { return b.kind == KIND_FOOTSWITCH || b.kind == KIND_BUTTON; }
+
+// The link numbers of a board's controls, in order.
+int controlCodes(const Board& b, int out[MAX_CTRLS]) {
   switch (b.kind) {
-    case KIND_SWITCHES: return 4;
-    case KIND_PEDAL:    return b.type == 41 ? 2 : 1;
-    case KIND_ENCODER:  return 2;
-    default:            return 0;
+    case KIND_FOOTSWITCH:
+    case KIND_BUTTON:       for (int i = 0; i < 4; i++) out[i] = i; return 4;
+    case KIND_PEDAL:        out[0] = C_PEDAL; return 1;
+    case KIND_PEDAL_SWITCH: out[0] = C_PEDAL; out[1] = 0; return 2;
+    case KIND_ENCODER:      out[0] = C_ENC_TURN; out[1] = C_ENC_PUSH; return 2;
+    default:                return 0;
   }
 }
 
-// Is control c of board b a push switch (as opposed to a pedal or encoder rotation)?
-bool isSwitch(const Board& b, int c) {
-  if (b.kind == KIND_SWITCHES) return true;
-  if (b.kind == KIND_PEDAL) return c == 1;
-  if (b.kind == KIND_ENCODER) return c == 1;
-  return false;
+bool isSwitchCode(int code) { return (code >= 0 && code < 4) || code == C_ENC_PUSH; }
+
+Control* findControl(Board& b, int code) {
+  for (int i = 0; i < b.numCtrls; i++)
+    if (b.ctl[i].code == code) return &b.ctl[i];
+  return nullptr;
 }
 
-// Physical LED number on the slave for control c, or 0 if the control has no LED.
-int ledIndex(const Board& b, int c) {
-  if (b.kind == KIND_SWITCHES) return c + 1;
-  if (b.kind == KIND_PEDAL && b.type == 41 && c == 1) return 1;
+// Physical LED number on the slave for a control, or 0 if it has no LED.
+int ledIndex(const Board& b, int code) {
+  if (hasSwitchRow(b) && code >= 0 && code < 4) return code + 1;
+  if (b.kind == KIND_PEDAL_SWITCH && code == 0) return 1;
   return 0;
 }
 
@@ -251,10 +280,6 @@ uint8_t modeFromName(const char* s) {
   return M_NONE;
 }
 
-const char* ledName(uint8_t l) {
-  switch (l) { case LED_ON: return "on"; case LED_OFF: return "off"; case LED_MIDI: return "midi"; default: return "auto"; }
-}
-
 uint8_t ledFromName(const char* s) {
   if (!s) return LED_AUTO;
   if (!strcmp(s, "on")) return LED_ON;
@@ -264,7 +289,14 @@ uint8_t ledFromName(const char* s) {
 }
 
 bool linked() {
-  return active != T_NONE && millis() - lastRx[active] < 3000;
+  return active != T_NONE && millis() - lastRx[active] < HOST_TIMEOUT_MS;
+}
+
+String macId() {
+  uint64_t mac = ESP.getEfuseMac();
+  char buf[13];
+  snprintf(buf, sizeof(buf), "%012llX", (unsigned long long) (mac & 0xFFFFFFFFFFFFULL));
+  return String(buf);
 }
 
 // ── MIDI out ────────────────────────────────────────────────────────────────
@@ -290,15 +322,17 @@ void midiPC(uint8_t num, uint8_t ch) {
   lastPcNum = num;
 }
 
-// ── Link: sending ───────────────────────────────────────────────────────────
+// ── Link: framing ───────────────────────────────────────────────────────────
+//   USB  : F0 7D 'P' 'Q' 'J' id index count <≤100 bytes of JSON> F7
+//   Wi-Fi: "PQL1" 'J' id index count <≤1000 bytes of JSON>          (UDP 7400)
 void usbSendSysEx(const uint8_t* data, size_t n) {
   // USB-MIDI 1.0 SysEx: CIN 0x4 = start/continue (3 bytes), 0x5/0x6/0x7 = end with 1/2/3 bytes.
   size_t i = 0;
   while (i < n) {
     size_t left = n - i;
     midiEventPacket_t p;
-    uint8_t cin;
     uint8_t b[3] = { 0, 0, 0 };
+    uint8_t cin;
     if (left > 3) { cin = 0x4; memcpy(b, data + i, 3); i += 3; }
     else          { cin = (uint8_t) (0x4 + left); memcpy(b, data + i, left); i += left; }
     p.header = cin;
@@ -311,109 +345,143 @@ void usbSendSysEx(const uint8_t* data, size_t n) {
   }
 }
 
-void sendFrame(Transport tr, const uint8_t* frame, size_t n) {
-  if (tr == T_USB) {
-    uint8_t sx[220];
-    sx[0] = 0xF0; sx[1] = 0x7D;
-    memcpy(sx + 2, frame, n);
-    sx[n + 2] = 0xF7;
-    usbSendSysEx(sx, n + 3);
-  } else if (tr == T_UDP && udpPeerPort != 0 && WiFi.isConnected()) {
-    udp.beginPacket(udpPeer, udpPeerPort);
-    udp.write(frame, n);
-    udp.endPacket();
+void sendTextOn(Transport tr, const String& json) {
+  if (tr == T_NONE) return;
+  if (tr == T_UDP && (!udpRunning || udpPeerPort == 0)) return;
+  const int chunk = (tr == T_USB) ? 100 : 1000;
+  const int len = json.length();
+  const int count = max(1, (len + chunk - 1) / chunk);
+  if (count > 127) return;
+  const uint8_t id = (txId++) & 0x7F;
+  static uint8_t frame[4 + 5 + 1000 + 1];
+  for (int i = 0; i < count; i++) {
+    int n = 0;
+    if (tr == T_USB) { frame[n++] = 0xF0; frame[n++] = 0x7D; frame[n++] = 'P'; frame[n++] = 'Q'; }
+    else             { frame[n++] = 'P'; frame[n++] = 'Q'; frame[n++] = 'L'; frame[n++] = '1'; }
+    frame[n++] = 'J'; frame[n++] = id; frame[n++] = (uint8_t) i; frame[n++] = (uint8_t) count;
+    const int off = i * chunk, m = min(chunk, len - off);
+    for (int k = 0; k < m; k++) {
+      uint8_t ch = (uint8_t) json[off + k];
+      frame[n++] = ch < 0x80 ? ch : '?';         // keep every byte 7-bit (non-ASCII is escaped below)
+    }
+    if (tr == T_USB) { frame[n++] = 0xF7; usbSendSysEx(frame, n); }
+    else { udp.beginPacket(udpPeer, udpPeerPort); udp.write(frame, n); udp.endPacket(); }
   }
 }
 
-void sendTextOn(Transport tr, const String& json) {
-  if (tr == T_NONE) return;
-  const int chunk = 200;
-  int len = json.length();
-  int parts = max(1, (len + chunk - 1) / chunk);
-  if (parts > 127) return;   // too big for one message
-  uint8_t seq = txSeq++ & 0x7F;
-  uint8_t frame[6 + chunk];
-  for (int p = 0; p < parts; p++) {
-    frame[0] = 0x50; frame[1] = 0x51; frame[2] = 0x01;
-    frame[3] = seq; frame[4] = (uint8_t) p; frame[5] = (uint8_t) parts;
-    int off = p * chunk, n = min(chunk, len - off);
-    for (int k = 0; k < n; k++) {
-      uint8_t ch = (uint8_t) json[off + k];
-      frame[6 + k] = ch < 0x80 ? ch : '?';      // keep every byte 7-bit for SysEx
-    }
-    sendFrame(tr, frame, 6 + n);
+// JSON for SysEx must be 7-bit: escape UTF-8 as \uXXXX.
+String asciiJson(const String& in) {
+  String out;
+  out.reserve(in.length() + 8);
+  for (unsigned i = 0; i < in.length();) {
+    uint8_t c = (uint8_t) in[i];
+    if (c < 0x80) { out += (char) c; i++; continue; }
+    uint32_t cp = '?'; int n = 1;
+    if ((c & 0xE0) == 0xC0 && i + 1 < in.length()) { cp = ((c & 0x1F) << 6) | (in[i + 1] & 0x3F); n = 2; }
+    else if ((c & 0xF0) == 0xE0 && i + 2 < in.length()) { cp = ((c & 0x0F) << 12) | ((in[i + 1] & 0x3F) << 6) | (in[i + 2] & 0x3F); n = 3; }
+    else if ((c & 0xF8) == 0xF0) { n = 4; }
+    char buf[8];
+    snprintf(buf, sizeof(buf), "\\u%04X", (unsigned) (cp > 0xFFFF ? '?' : cp));
+    out += buf;
+    i += n;
   }
+  return out;
 }
 
 void sendDoc(Transport tr, JsonDocument& doc) {
   String s;
   serializeJson(doc, s);
-  sendTextOn(tr, s);
+  sendTextOn(tr, asciiJson(s));
 }
 
-void sendToPequod(JsonDocument& doc) {
+void sendToHost(JsonDocument& doc) {
   if (linked()) sendDoc(active, doc);
 }
 
+void sendError(Transport tr, const String& what) {
+  JsonDocument d; d["t"] = "err"; d["msg"] = what;
+  sendDoc(tr, d);
+}
+
 // ── Config → runtime ────────────────────────────────────────────────────────
-void defaultControl(JsonObject c, const Board& b, int idx) {
+JsonObject objectAt(JsonObject parent, const char* key) {
+  return parent[key].is<JsonObject>() ? parent[key].as<JsonObject>() : parent[key].to<JsonObject>();
+}
+
+void defaultControl(JsonObject c, const Board& b, int code, int position) {
   static const char* palette[4] = { "#E0A82E", "#4CAF50", "#2196F3", "#E91E63" };
-  c["color"] = palette[idx & 3];
+  c["color"] = palette[position & 3];
   c["led"] = "auto";
   JsonArray layers = c["layers"].to<JsonArray>();
   for (int l = 0; l < MAX_LAYERS; l++) {
     JsonObject a = layers.add<JsonObject>();
     a["mode"] = "pequod";
-    a["num"] = (b.kind == KIND_PEDAL && idx == 0) ? 11 : 20 + l * 8 + idx;
+    a["num"] = code == C_PEDAL ? 11 : 20 + l * 8 + position;
     a["ch"] = 1;
     a["toggle"] = true;
   }
 }
 
-// Makes sure cfg has an entry for every connected board, with the right number of controls.
+String defaultBoardName(const Board& b, int n) {
+  switch (b.kind) {
+    case KIND_PEDAL: case KIND_PEDAL_SWITCH: return "Pedal " + String(n);
+    case KIND_ENCODER: return "Knob " + String(n);
+    default: return "Switches " + String(n);
+  }
+}
+
+// Every connected board gets a settings entry with all of its controls.
 void ensureBoardEntries() {
-  JsonObject devs = cfg["devices"].is<JsonObject>() ? cfg["devices"].as<JsonObject>() : cfg["devices"].to<JsonObject>();
+  JsonObject units = objectAt(cfg.as<JsonObject>(), "units");
+  int counter[8] = { 0 };
   for (int i = 0; i < numBoards; i++) {
     Board& b = boards[i];
-    JsonObject d = devs[b.key].is<JsonObject>() ? devs[b.key].as<JsonObject>() : devs[b.key].to<JsonObject>();
-    if (!d["name"].is<const char*>()) d["name"] = String(b.kind == KIND_PEDAL ? "Pedal " : b.kind == KIND_ENCODER ? "Knob " : "Board ") + String(i + 1);
-    JsonArray ctrls = d["controls"].is<JsonArray>() ? d["controls"].as<JsonArray>() : d["controls"].to<JsonArray>();
-    while ((int) ctrls.size() < controlCount(b)) {
-      int idx = (int) ctrls.size();
-      defaultControl(ctrls.add<JsonObject>(), b, idx);
-    }
-    for (JsonObject c : ctrls) {
+    JsonObject u = objectAt(units, b.key);
+    counter[b.kind]++;
+    if (!u["name"].is<const char*>()) u["name"] = defaultBoardName(b, counter[b.kind]);
+    JsonObject ctrls = objectAt(u, "controls");
+    int codes[MAX_CTRLS];
+    int n = controlCodes(b, codes);
+    for (int k = 0; k < n; k++) {
+      String key = String(codes[k]);
+      if (!ctrls[key].is<JsonObject>()) defaultControl(ctrls[key].to<JsonObject>(), b, codes[k], k);
+      JsonObject c = ctrls[key];
       JsonArray layers = c["layers"].is<JsonArray>() ? c["layers"].as<JsonArray>() : c["layers"].to<JsonArray>();
       while (layers.size() < MAX_LAYERS) {
         JsonObject a = layers.add<JsonObject>();
         a["mode"] = "pequod"; a["num"] = 20; a["ch"] = 1; a["toggle"] = true;
       }
     }
-    if (b.kind == KIND_PEDAL && !d["pedal"].is<JsonObject>()) {
-      JsonObject p = d["pedal"].to<JsonObject>();
+    if ((b.kind == KIND_PEDAL || b.kind == KIND_PEDAL_SWITCH) && !u["pedal"].is<JsonObject>()) {
+      JsonObject p = u["pedal"].to<JsonObject>();
       p["min"] = 0; p["max"] = 4095; p["invert"] = false;
     }
-    if (b.kind == KIND_ENCODER && !d["encoder"].is<JsonObject>()) d["encoder"].to<JsonObject>()["invert"] = false;
+    if (b.kind == KIND_ENCODER && !u["encoder"].is<JsonObject>()) u["encoder"].to<JsonObject>()["invert"] = false;
   }
 }
 
 void assignSlots() {
-  JsonObject devs = cfg["devices"].as<JsonObject>();
+  JsonObject units = cfg["units"].as<JsonObject>();
   bool used[MAX_SLOTS] = { false };
   for (int i = 0; i < numBoards; i++) boards[i].slot = -1;
 
-  // Keep each board's remembered slot when it's free...
+  // Keep each board's remembered position when it's free...
   for (int i = 0; i < numBoards; i++) {
-    int s = devs[boards[i].key]["slot"] | -1;
+    int s = units[boards[i].key]["slot"] | -1;
     if (s >= 0 && s < MAX_SLOTS && !used[s]) { boards[i].slot = s; used[s] = true; }
   }
   // ...and give new boards the first free one.
   for (int i = 0; i < numBoards; i++) {
-    if (boards[i].slot >= 0) continue;
-    for (int s = 0; s < MAX_SLOTS; s++)
-      if (!used[s]) { boards[i].slot = s; used[s] = true; break; }
-    devs[boards[i].key]["slot"] = boards[i].slot;
+    if (boards[i].slot < 0)
+      for (int s = 0; s < MAX_SLOTS; s++)
+        if (!used[s]) { boards[i].slot = s; used[s] = true; break; }
+    units[boards[i].key]["slot"] = boards[i].slot;
   }
+  // Poll and report boards in slot order.
+  for (int i = 1; i < numBoards; i++)
+    for (int j = i; j > 0 && boards[j - 1].slot > boards[j].slot; j--) {
+      Board t = boards[j]; boards[j] = boards[j - 1]; boards[j - 1] = t;
+    }
 }
 
 void applyConfig() {
@@ -430,15 +498,16 @@ void applyConfig() {
   midiUsb = cfg["midi"]["usb"] | true;
   midiDin = cfg["midi"]["din"] | true;
 
-  JsonObject devs = cfg["devices"].as<JsonObject>();
+  JsonObject units = cfg["units"].as<JsonObject>();
   for (int i = 0; i < numBoards; i++) {
     Board& b = boards[i];
-    JsonObject d = devs[b.key];
-    b.numCtrls = controlCount(b);
-    JsonArray ctrls = d["controls"];
-    for (int c = 0; c < b.numCtrls; c++) {
-      JsonObject jc = ctrls[c];
-      Control& ctl = b.ctl[c];
+    JsonObject u = units[b.key];
+    int codes[MAX_CTRLS];
+    b.numCtrls = controlCodes(b, codes);
+    for (int k = 0; k < b.numCtrls; k++) {
+      Control& ctl = b.ctl[k];
+      ctl.code = codes[k];
+      JsonObject jc = u["controls"][String(codes[k])];
       const char* col = jc["color"] | "#E0A82E";
       ctl.colorIsLayer = !strcmp(col, "layer");
       ctl.color = parseColor(col, 0xE0A82E);
@@ -452,13 +521,13 @@ void applyConfig() {
         ctl.act[l].toggle = a["toggle"] | true;
       }
     }
-    if (b.kind == KIND_PEDAL) {
-      b.pedalMin = d["pedal"]["min"] | 0;
-      b.pedalMax = d["pedal"]["max"] | 4095;
+    if (b.kind == KIND_PEDAL || b.kind == KIND_PEDAL_SWITCH) {
+      b.pedalMin = u["pedal"]["min"] | 0;
+      b.pedalMax = u["pedal"]["max"] | 4095;
       if (b.pedalMax <= b.pedalMin + 10) b.pedalMax = b.pedalMin + 10;
-      b.pedalInvert = d["pedal"]["invert"] | false;
+      b.pedalInvert = u["pedal"]["invert"] | false;
     }
-    if (b.kind == KIND_ENCODER) b.encInvert = d["encoder"]["invert"] | false;
+    if (b.kind == KIND_ENCODER) b.encInvert = u["encoder"]["invert"] | false;
   }
   displayDirty = true;
 }
@@ -477,7 +546,7 @@ void saveConfig() {
   Serial.println("[CFG] saved");
 }
 
-// ── Import from the previous master's files (first boot only) ───────────────
+// ── Defaults, and import from the previous master's files (first boot only) ─
 bool readJsonFile(const char* path, JsonDocument& doc) {
   if (!SPIFFS.exists(path)) return false;
   File f = SPIFFS.open(path, "r");
@@ -485,76 +554,6 @@ bool readJsonFile(const char* path, JsonDocument& doc) {
   bool ok = !deserializeJson(doc, f);
   f.close();
   return ok;
-}
-
-void importOldSettings() {
-  Serial.println("[CFG] first boot: importing previous settings");
-  cfg.clear();
-  cfg["name"] = "Longsleeves";
-
-  JsonDocument w;
-  if (readJsonFile("/wifi.json", w)) {
-    cfg["wifi"]["ssid"] = w["primarySSID"] | "";
-    cfg["wifi"]["pass"] = w["primaryPass"] | "";
-    String host = w["hostname"] | "pequod-fc";
-    cfg["wifi"]["hostname"] = host.length() ? host : String("pequod-fc");
-  }
-  cfg["wifi"]["enabled"] = true;
-
-  JsonDocument ui;
-  if (readJsonFile("/ui.json", ui)) {
-    int m = ui["midiOutputMode"] | 2;           // 0 DIN only, 1 USB only, 2 both
-    cfg["midi"]["usb"] = (m != 0);
-    cfg["midi"]["din"] = (m != 1);
-  }
-
-  JsonDocument lc;
-  JsonArray colors = cfg["layerColors"].to<JsonArray>();
-  bool haveLc = readJsonFile("/layer_colors.json", lc);
-  for (int l = 0; l < MAX_LAYERS; l++)
-    colors.add(haveLc && lc["layer" + String(l)].is<const char*>() ? String(lc["layer" + String(l)].as<const char*>())
-                                                                    : colorToHex(layerColors[l]));
-
-  Preferences prefs;
-  prefs.begin("ui", true);
-  cfg["layers"] = constrain(prefs.getInt("numLayers", 1), 1, MAX_LAYERS);
-  cfg["brightness"] = constrain(prefs.getInt("ledBright", 200), 5, 255);
-  prefs.end();
-
-  // Per-board settings: slot order, colours, pedal calibration, MIDI numbers.
-  // Modes start as "pequod"; the old MIDI numbers are kept for when you switch a control back to MIDI.
-  JsonObject devs = cfg["devices"].to<JsonObject>();
-  for (int i = 0; i < numBoards; i++) {
-    Board& b = boards[i];
-    JsonDocument od;
-    String path = String("/device_") + b.key + ".json";
-    if (!readJsonFile(path.c_str(), od)) continue;
-
-    JsonObject d = devs[b.key].to<JsonObject>();
-    d["slot"] = od["preferredSlot"] | -1;
-    JsonArray ctrls = d["controls"].to<JsonArray>();
-    int n = controlCount(b);
-    for (int c = 0; c < n; c++) {
-      JsonObject jc = ctrls.add<JsonObject>();
-      defaultControl(jc, b, c);
-      int oldBtn = (b.kind == KIND_PEDAL && c == 1) ? 1 : c;   // old firmware: pedal switch used index 1
-      if (od["leds"][oldBtn]["color"].is<const char*>()) jc["color"] = od["leds"][oldBtn]["color"].as<const char*>();
-      for (int l = 0; l < MAX_LAYERS; l++) {
-        JsonObject ob = od["layers"][l]["buttons"][oldBtn];
-        if (ob.isNull()) continue;
-        JsonObject a = jc["layers"][l];
-        a["num"] = constrain((int) (ob["mapping"] | a["num"].as<int>()), 0, 127);
-        a["ch"] = constrain((int) (ob["channel"] | 1), 1, 16);
-        a["toggle"] = strcmp(ob["behavior"] | "momentary", "toggle") == 0;
-      }
-    }
-    if (b.kind == KIND_PEDAL) {
-      d["pedal"]["min"] = od["pedal"]["calMin"] | 0;
-      d["pedal"]["max"] = od["pedal"]["calMax"] | 4095;
-      d["pedal"]["invert"] = od["pedal"]["invert"] | false;
-    }
-    if (b.kind == KIND_ENCODER) d["encoder"]["invert"] = od["encoder"]["invertDirection"] | false;
-  }
 }
 
 void defaultSettings() {
@@ -570,29 +569,97 @@ void defaultSettings() {
   cfg["wifi"]["enabled"] = true;
   cfg["wifi"]["ssid"] = "";
   cfg["wifi"]["pass"] = "";
+  cfg["wifi"]["ssid2"] = "";
+  cfg["wifi"]["pass2"] = "";
   cfg["wifi"]["hostname"] = "pequod-fc";
   cfg["display"]["contrast"] = 200;
-  cfg["display"]["tunerWhenMuted"] = true;
-  cfg["devices"].to<JsonObject>();
+  cfg["units"].to<JsonObject>();
+}
+
+void importOldSettings() {
+  Serial.println("[CFG] first boot: importing the previous firmware's settings");
+
+  JsonDocument w;
+  if (readJsonFile("/wifi.json", w)) {
+    cfg["wifi"]["ssid"] = w["primarySSID"] | "";
+    cfg["wifi"]["pass"] = w["primaryPass"] | "";
+    cfg["wifi"]["ssid2"] = w["fallbackSSID"] | "";
+    cfg["wifi"]["pass2"] = w["fallbackPass"] | "";
+    String host = w["hostname"] | "";
+    if (host.length()) cfg["wifi"]["hostname"] = host;
+  }
+
+  JsonDocument ui;
+  if (readJsonFile("/ui.json", ui)) {
+    int m = ui["midiOutputMode"] | 2;           // 0 DIN only, 1 USB only, 2 both
+    cfg["midi"]["usb"] = (m != 0);
+    cfg["midi"]["din"] = (m != 1);
+  }
+
+  JsonDocument lc;
+  if (readJsonFile("/layer_colors.json", lc))
+    for (int l = 0; l < MAX_LAYERS; l++) {
+      String k = "layer" + String(l);
+      if (lc[k].is<const char*>()) cfg["layerColors"][l] = lc[k].as<const char*>();
+    }
+
+  Preferences prefs;
+  if (prefs.begin("ui", true)) {
+    cfg["layers"] = constrain(prefs.getInt("numLayers", 1), 1, MAX_LAYERS);
+    cfg["brightness"] = constrain(prefs.getInt("ledBright", 200), 5, 255);
+    prefs.end();
+  }
+
+  // Per board: position, colours, pedal calibration and MIDI numbers.
+  // Controls start in PEQUOD mode; their old MIDI numbers are kept for when you
+  // switch a control to "MIDI to other gear".
+  JsonObject units = cfg["units"].as<JsonObject>();
+  for (int i = 0; i < numBoards; i++) {
+    Board& b = boards[i];
+    JsonDocument od;
+    String path = String("/device_") + b.key + ".json";
+    if (!readJsonFile(path.c_str(), od)) continue;
+
+    JsonObject u = objectAt(units, b.key);
+    u["slot"] = od["preferredSlot"] | -1;
+    JsonObject ctrls = objectAt(u, "controls");
+    int codes[MAX_CTRLS];
+    int n = controlCodes(b, codes);
+    for (int k = 0; k < n; k++) {
+      JsonObject jc = ctrls[String(codes[k])].to<JsonObject>();
+      defaultControl(jc, b, codes[k], k);
+      // old firmware: switch buttons at index 0-3; pedal at 0; a pedal's switch at 1
+      int oldBtn = (codes[k] == C_PEDAL) ? 0 : (b.kind == KIND_PEDAL_SWITCH ? 1 : codes[k]);
+      if (codes[k] >= 0 && codes[k] < 4 && od["leds"][oldBtn]["color"].is<const char*>())
+        jc["color"] = od["leds"][oldBtn]["color"].as<const char*>();
+      for (int l = 0; l < MAX_LAYERS; l++) {
+        JsonObject ob = od["layers"][l]["buttons"][oldBtn];
+        if (ob.isNull()) continue;
+        JsonObject a = jc["layers"][l];
+        a["num"] = constrain((int) (ob["mapping"] | a["num"].as<int>()), 0, 127);
+        a["ch"] = constrain((int) (ob["channel"] | 1), 1, 16);
+        a["toggle"] = strcmp(ob["behavior"] | "momentary", "toggle") == 0;
+      }
+    }
+    if (b.kind == KIND_PEDAL || b.kind == KIND_PEDAL_SWITCH) {
+      u["pedal"]["min"] = od["pedal"]["calMin"] | 0;
+      u["pedal"]["max"] = od["pedal"]["calMax"] | 4095;
+      u["pedal"]["invert"] = od["pedal"]["invert"] | false;
+    }
+    if (b.kind == KIND_ENCODER) u["encoder"]["invert"] = od["encoder"]["invertDirection"] | false;
+  }
 }
 
 void loadConfig() {
   JsonDocument d;
   if (readJsonFile("/pqfc.json", d)) {
     cfg = d;
-  } else {
-    defaultSettings();
-    if (SPIFFS.exists("/wifi.json") || SPIFFS.exists("/ui.json") || SPIFFS.exists("/layer_colors.json")) {
-      importOldSettings();
-      JsonDocument defs;
-      defs.set(cfg);
-      defaultSettings();              // fill anything the import didn't set
-      for (JsonPair kv : defs.as<JsonObject>()) cfg[kv.key()] = kv.value();
-    }
-    markConfigDirty();
+    return;
   }
-  if (!cfg["display"].is<JsonObject>()) { cfg["display"]["contrast"] = 200; cfg["display"]["tunerWhenMuted"] = true; }
-  if (!cfg["offGlow"].is<int>()) cfg["offGlow"] = 10;
+  defaultSettings();
+  if (SPIFFS.exists("/wifi.json") || SPIFFS.exists("/ui.json") || SPIFFS.exists("/layer_colors.json"))
+    importOldSettings();
+  markConfigDirty();
 }
 
 // ── I2C slave protocol (unchanged from the previous master) ─────────────────
@@ -617,21 +684,23 @@ bool slaveType(uint8_t addr, uint8_t& type) {
   return true;
 }
 
+void writeRgb(uint32_t c) {
+  Wire.write((uint8_t) ((c >> 16) & 0xFF));
+  Wire.write((uint8_t) ((c >> 8) & 0xFF));
+  Wire.write((uint8_t) (c & 0xFF));
+}
+
 void slaveSetAllLeds(uint8_t addr, const uint32_t leds[5]) {
   Wire.beginTransmission(addr);
   Wire.write(0x21);
-  for (int i = 0; i < 5; i++) {
-    uint32_t c = scaleColor(leds[i], brightness);
-    Wire.write((uint8_t) ((c >> 16) & 0xFF)); Wire.write((uint8_t) ((c >> 8) & 0xFF)); Wire.write((uint8_t) (c & 0xFF));
-  }
+  for (int i = 0; i < 5; i++) writeRgb(scaleColor(leds[i], brightness));
   Wire.endTransmission();
 }
 
 void slaveSetLayerColor(uint8_t addr, uint32_t color) {
-  uint32_t c = scaleColor(color, brightness);
   Wire.beginTransmission(addr);
   Wire.write(0x22);
-  Wire.write((uint8_t) ((c >> 16) & 0xFF)); Wire.write((uint8_t) ((c >> 8) & 0xFF)); Wire.write((uint8_t) (c & 0xFF));
+  writeRgb(scaleColor(color, brightness));
   Wire.endTransmission();
 }
 
@@ -641,14 +710,16 @@ void scanBoards() {
     uint64_t id; uint8_t type;
     if (slaveId(addr, id) && slaveType(addr, type)) {
       Kind k = kindForType(type);
-      if (k == KIND_NONE) continue;          // another master or unknown device
+      if (k == KIND_NONE) continue;          // another master or an unknown device
       Board& b = boards[numBoards];
       b = Board();
       b.addr = addr; b.id = id; b.type = type; b.kind = k;
-      snprintf(b.key, sizeof(b.key), "%08lX", (unsigned long) (id & 0xFFFFFFFFULL));   // same key as the old firmware
-      b.numCtrls = controlCount(b);
+      snprintf(b.key, sizeof(b.key), "%08lX", (unsigned long) (id & 0xFFFFFFFFULL));
+      int codes[MAX_CTRLS];
+      b.numCtrls = controlCodes(b, codes);
+      for (int c = 0; c < b.numCtrls; c++) b.ctl[c].code = codes[c];
       numBoards++;
-      Serial.printf("[I2C] 0x%02X id %s type %d (%s)\n", addr, b.key, type, kindName(k));
+      Serial.printf("[I2C] 0x%02X  id %s  type %d (%s)\n", addr, b.key, type, kindName(k));
     }
     delay(5);
   }
@@ -658,8 +729,8 @@ void scanBoards() {
 // ── Layers ──────────────────────────────────────────────────────────────────
 void sendLayer() {
   JsonDocument d;
-  d["t"] = "layer"; d["v"] = layer;
-  sendToPequod(d);
+  d["t"] = "layer"; d["l"] = layer;
+  sendToHost(d);
 }
 
 void setLayer(int l) {
@@ -667,36 +738,34 @@ void setLayer(int l) {
   if (l == layer) return;
   layer = l;
   for (int i = 0; i < numBoards; i++)
-    if (boards[i].type >= 20 && boards[i].type <= 39) slaveSetLayerColor(boards[i].addr, layerColors[layer]);
+    if (boards[i].kind == KIND_FOOTSWITCH) slaveSetLayerColor(boards[i].addr, layerColors[layer]);
   sendLayer();
   displayDirty = true;
 }
 
 // ── Control handling ────────────────────────────────────────────────────────
-void sendEvent(Board& b, int c, int lay, int v, float f, bool withF) {
+void sendEvent(Board& b, int code, int lay, float v, float f, bool withF) {
   JsonDocument d;
-  d["t"] = "ev"; d["dev"] = b.key; d["c"] = c; d["l"] = lay; d["v"] = v;
+  d["t"] = "ev"; d["u"] = b.key; d["c"] = code; d["l"] = lay; d["v"] = v;
   if (withF) d["f"] = f;
-  sendToPequod(d);
+  sendToHost(d);
 }
 
-void sendPress(Board& b, int c, bool pressed) {
-  JsonDocument d;
-  d["t"] = "press"; d["dev"] = b.key; d["c"] = c; d["v"] = pressed ? 1 : 0;
-  sendToPequod(d);
-}
-
-void onSwitch(Board& b, int c, bool pressed) {
-  Control& ctl = b.ctl[c];
+void onSwitch(Board& b, Control& ctl, bool pressed) {
   ctl.down = pressed;
   if (pressed) ctl.pressLayer = layer;
-  const int lay = ctl.pressLayer;          // a release uses the layer it was pressed on
+  const int lay = ctl.pressLayer;          // a release belongs to the layer it was pressed on
   const Action& a = ctl.act[lay];
-  sendPress(b, c, pressed);
+
+  { // every press, whatever its mode: lets PEQUOD's window follow your feet
+    JsonDocument d;
+    d["t"] = "press"; d["u"] = b.key; d["c"] = ctl.code; d["v"] = pressed ? 1 : 0;
+    sendToHost(d);
+  }
 
   switch (a.mode) {
     case M_PEQUOD:
-      if (linked()) sendEvent(b, c, lay, pressed ? 1 : 0, 0, false);
+      if (linked()) sendEvent(b, ctl.code, lay, pressed ? 1 : 0, 0, false);
       break;
     case M_CC:
       if (a.toggle) { if (pressed) { ctl.toggled[lay] = !ctl.toggled[lay]; midiCC(a.num, ctl.toggled[lay] ? 127 : 0, a.ch); } }
@@ -722,16 +791,18 @@ void onSwitch(Board& b, int c, bool pressed) {
 
 void onPedal(Board& b, int raw) {
   b.rawPedal = raw;
+  Control* ctl = findControl(b, C_PEDAL);
+  if (!ctl) return;
   int lo = b.pedalMin, hi = b.pedalMax;
   int v10 = map(constrain(raw, lo, hi), lo, hi, 0, 1023);
   if (b.pedalInvert) v10 = 1023 - v10;
-  if (abs(v10 - b.lastPedal10) < 4 && v10 != 0 && v10 != 1023) return;   // ignore jitter, always reach the ends
   if (v10 == b.lastPedal10) return;
+  if (abs(v10 - b.lastPedal10) < 4 && v10 != 0 && v10 != 1023) return;   // ignore jitter, always reach the ends
   b.lastPedal10 = v10;
   int v7 = (v10 * 127 + 511) / 1023;
-  const Action& a = b.ctl[0].act[layer];
+  const Action& a = ctl->act[layer];
   if (a.mode == M_PEQUOD) {
-    if (linked()) sendEvent(b, 0, layer, v7, v10 / 1023.0f, true);
+    if (linked()) sendEvent(b, C_PEDAL, layer, v7, v10 / 1023.0f, true);
   } else if (a.mode == M_CC && v7 != b.lastPedal7) {
     midiCC(a.num, v7, a.ch);
   }
@@ -740,14 +811,15 @@ void onPedal(Board& b, int raw) {
 
 void onEncoder(Board& b, int steps) {
   if (b.encInvert) steps = -steps;
-  Control& ctl = b.ctl[0];
-  const Action& a = ctl.act[layer];
+  Control* ctl = findControl(b, C_ENC_TURN);
+  if (!ctl) return;
+  const Action& a = ctl->act[layer];
   switch (a.mode) {
-    case M_PEQUOD: if (linked()) sendEvent(b, 0, layer, steps, 0, false); break;
+    case M_PEQUOD: if (linked()) sendEvent(b, C_ENC_TURN, layer, steps, 0, false); break;
     case M_CC_REL: midiCC(a.num, constrain(64 + steps, 1, 127), a.ch); break;
     case M_CC_ABS:
-      ctl.absValue = constrain((int) ctl.absValue + steps, 0, 127);
-      midiCC(a.num, ctl.absValue, a.ch);
+      ctl->absValue = constrain((int) ctl->absValue + steps, 0, 127);
+      midiCC(a.num, ctl->absValue, a.ch);
       break;
     case M_PC: {
       int p = ((lastPcNum == 255 ? 0 : lastPcNum) + steps) % 128;
@@ -761,10 +833,10 @@ void onEncoder(Board& b, int steps) {
 }
 
 // ── LEDs ────────────────────────────────────────────────────────────────────
-uint32_t controlColor(Board& b, int c, bool& on) {
-  Control& ctl = b.ctl[c];
+uint32_t controlColor(Board& b, Control& ctl) {
   const Action& a = ctl.act[layer];
   uint32_t col = ctl.colorIsLayer ? layerColors[layer] : ctl.color;
+  bool on = false;
 
   switch (ctl.led) {
     case LED_ON:   on = true; break;
@@ -786,11 +858,9 @@ uint32_t controlColor(Board& b, int c, bool& on) {
       }
   }
 
-  if (millis() < b.identifyUntil) {                       // "which board is this?" flash
-    on = ((millis() / 150) % 2) == 0;
-    col = 0xFFFFFF;
-    return on ? col : 0;
-  }
+  if (millis() < b.identifyUntil && (b.identifyCode < 0 || b.identifyCode == ctl.code))
+    return ((millis() / 150) % 2) == 0 ? 0xFFFFFF : 0;    // "which one is this?" flash
+
   if (ctl.led == LED_OFF) return 0;
   if (!on) return offGlow == 0 ? 0 : scaleColor(col, (uint8_t) (offGlow * 255 / 100));
   return col;
@@ -798,11 +868,9 @@ uint32_t controlColor(Board& b, int c, bool& on) {
 
 void boardLeds(Board& b, uint32_t leds[5]) {
   for (int i = 0; i < 5; i++) leds[i] = 0;
-  for (int c = 0; c < b.numCtrls; c++) {
-    int idx = ledIndex(b, c);
-    if (idx <= 0) continue;
-    bool on = false;
-    leds[idx] = controlColor(b, c, on);
+  for (int k = 0; k < b.numCtrls; k++) {
+    int idx = ledIndex(b, b.ctl[k].code);
+    if (idx > 0) leds[idx] = controlColor(b, b.ctl[k]);
   }
 }
 
@@ -821,7 +889,7 @@ void pollBoards() {
     Board& b = boards[i];
     if (millis() < b.failUntil) continue;
 
-    if (b.kind == KIND_SWITCHES) {
+    if (hasSwitchRow(b)) {
       uint32_t leds[5];
       boardLeds(b, leds);
       slaveSetAllLeds(b.addr, leds);                   // LEDs first, then read (as before)
@@ -834,12 +902,12 @@ void pollBoards() {
       uint8_t states = Wire.read();
       for (int c = 0; c < 4; c++) {
         bool now = states & (1 << c), before = b.lastButtons & (1 << c);
-        if (now != before) onSwitch(b, c, now);
+        if (now != before) if (Control* ctl = findControl(b, c)) onSwitch(b, *ctl, now);
       }
       b.lastButtons = states;
     }
-    else if (b.kind == KIND_PEDAL) {
-      bool withSwitch = (b.type == 41);
+    else if (b.kind == KIND_PEDAL || b.kind == KIND_PEDAL_SWITCH) {
+      bool withSwitch = (b.kind == KIND_PEDAL_SWITCH);
       if (withSwitch) {
         uint32_t leds[5];
         boardLeds(b, leds);
@@ -848,16 +916,15 @@ void pollBoards() {
       Wire.beginTransmission(b.addr);
       Wire.write(0x02);
       if (Wire.endTransmission() != 0) { b.failUntil = millis() + 50; continue; }
-      uint8_t want = withSwitch ? 3 : 2;
-      Wire.requestFrom(b.addr, want);
+      Wire.requestFrom(b.addr, (uint8_t) (withSwitch ? 3 : 2));
       if (Wire.available() < 2) continue;
-      int raw = (Wire.read() << 8);
+      int raw = Wire.read() << 8;
       raw |= Wire.read();
       onPedal(b, raw);
       if (withSwitch && Wire.available() >= 1) {
         uint8_t btn = Wire.read();
         bool now = btn & 0x01, before = b.lastPedalBtn & 0x01;
-        if (now != before) onSwitch(b, 1, now);
+        if (now != before) if (Control* ctl = findControl(b, 0)) onSwitch(b, *ctl, now);
         b.lastPedalBtn = btn;
       }
     }
@@ -875,36 +942,49 @@ void pollBoards() {
       if (delta < -32768) delta += 65536;
       if (delta != 0) onEncoder(b, delta);
       b.lastEncPos = pos;
-      if (btn & 0x02) onSwitch(b, 1, btn & 0x01);
+      if (btn & 0x02) if (Control* ctl = findControl(b, C_ENC_PUSH)) onSwitch(b, *ctl, btn & 0x01);
     }
   }
 }
 
-// ── Link: receiving ─────────────────────────────────────────────────────────
-void sendHello(Transport tr) {
-  JsonDocument d;
-  d["t"] = "hello";
-  d["name"] = cfg["name"] | "Longsleeves";
-  d["fw"] = FW_VERSION;
+// ── Messages to PEQUOD ──────────────────────────────────────────────────────
+void fillInfo(JsonDocument& d, Transport tr) {
+  d["t"] = "info";
   d["proto"] = PROTO_VERSION;
-  d["layer"] = layer;
+  d["fw"] = FW_VERSION;
+  d["id"] = macId();
+  d["name"] = cfg["name"] | "Longsleeves";
+  d["via"] = tr == T_USB ? "usb" : "wifi";
   d["layers"] = numLayers;
-  d["transport"] = tr == T_USB ? "usb" : "wifi";
-  d["wifi"]["connected"] = WiFi.isConnected();
-  d["wifi"]["ssid"] = WiFi.isConnected() ? WiFi.SSID() : String();
-  d["wifi"]["ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : String();
-  sendDoc(tr, d);
+  d["layer"] = layer;
+  d["globalLayers"] = true;
+  d["brightness"] = brightness;
+  JsonObject w = d["wifi"].to<JsonObject>();
+  w["connected"] = WiFi.isConnected();
+  w["ap"] = false;
+  w["ssid"] = cfg["wifi"]["ssid"] | "";
+  w["ssid2"] = cfg["wifi"]["ssid2"] | "";
+  w["ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : String();
+  w["rssi"] = WiFi.isConnected() ? WiFi.RSSI() : 0;
+  const esp_partition_t* next = esp_ota_get_next_update_partition(NULL);
+  JsonObject o = d["ota"].to<JsonObject>();
+  o["ok"] = next != nullptr;
+  o["max"] = next ? (uint32_t) next->size : 0;
+  JsonArray units = d["units"].to<JsonArray>();
+  for (int i = 0; i < numBoards; i++) {
+    JsonObject u = units.add<JsonObject>();
+    u["slot"] = boards[i].slot;
+    u["type"] = boards[i].type;
+    u["kind"] = kindName(boards[i].kind);
+    u["name"] = cfg["units"][boards[i].key]["name"] | kindName(boards[i].kind);
+    u["uid"] = boards[i].key;
+    u["layer"] = layer;
+  }
 }
 
-void sendDevices(Transport tr) {
+void sendInfo(Transport tr) {
   JsonDocument d;
-  d["t"] = "devices";
-  JsonArray list = d["list"].to<JsonArray>();
-  for (int i = 0; i < numBoards; i++) {
-    JsonObject o = list.add<JsonObject>();
-    o["dev"] = boards[i].key; o["addr"] = boards[i].addr; o["type"] = boards[i].type;
-    o["kind"] = kindName(boards[i].kind); o["slot"] = boards[i].slot;
-  }
+  fillInfo(d, tr);
   sendDoc(tr, d);
 }
 
@@ -912,83 +992,156 @@ void sendConfig(Transport tr) {
   JsonDocument d;
   d["t"] = "cfg";
   d["cfg"].set(cfg);
-  const char* pass = cfg["wifi"]["pass"] | "";
-  d["cfg"]["wifi"]["hasPass"] = strlen(pass) > 0;
-  d["cfg"]["wifi"]["pass"] = nullptr;                   // never send the password back
+  for (const char* k : { "pass", "pass2" }) {           // passwords never leave the controller
+    String has = String("has") + (k[4] ? "Pass2" : "Pass");
+    d["cfg"]["wifi"][has] = String(cfg["wifi"][k] | "").length() > 0;
+    d["cfg"]["wifi"][k] = nullptr;
+  }
   sendDoc(tr, d);
 }
 
-void sendWifiStatus() {
+// ── Firmware update over the link ───────────────────────────────────────────
+void fwAck(Transport tr, int n, bool ok, const String& err) {
   JsonDocument d;
-  d["t"] = "wifi";
-  d["connected"] = WiFi.isConnected();
-  d["ssid"] = WiFi.isConnected() ? WiFi.SSID() : String();
-  d["ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : String();
-  d["rssi"] = WiFi.isConnected() ? WiFi.RSSI() : 0;
-  sendToPequod(d);
+  d["t"] = "fw_ack"; d["n"] = n; d["ok"] = ok;
+  if (err.length()) d["err"] = err;
+  sendDoc(tr, d);
 }
 
+void fwBegin(Transport tr, JsonDocument& in) {
+  size_t size = in["size"] | 0;
+  const esp_partition_t* next = esp_ota_get_next_update_partition(NULL);
+  if (!next) { fwAck(tr, -1, false, "This controller was flashed without an update partition"); return; }
+  if (size == 0 || size > next->size) { fwAck(tr, -1, false, "Firmware is too big for this controller"); return; }
+  if (fw.running) Update.abort();
+  if (!Update.begin(size, U_FLASH)) { fwAck(tr, -1, false, String("Update.begin failed: ") + Update.errorString()); return; }
+  if (in["md5"].is<const char*>()) Update.setMD5(in["md5"].as<const char*>());
+  fw.running = true; fw.lastN = -1; fw.written = 0; fw.size = size;
+  screen.valid = true; screen.mode = "text"; screen.top = "UPDATING"; screen.main = "0%"; screen.sub = "keep plugged in";
+  displayDirty = true;
+  fwAck(tr, -1, true, "");
+}
+
+void fwData(Transport tr, JsonDocument& in) {
+  int n = in["n"] | -1;
+  if (!fw.running) { fwAck(tr, n, false, "No update in progress"); return; }
+  if (n == fw.lastN) { fwAck(tr, n, true, ""); return; }          // a resend: already written
+  if (n != fw.lastN + 1) { fwAck(tr, n, false, "Out of order"); return; }
+  const char* b64 = in["d"] | "";
+  static uint8_t bin[1024];
+  size_t outLen = 0;
+  if (mbedtls_base64_decode(bin, sizeof(bin), &outLen, (const unsigned char*) b64, strlen(b64)) != 0) { fwAck(tr, n, false, "Bad data"); return; }
+  if (Update.write(bin, outLen) != outLen) { fwAck(tr, n, false, String("Write failed: ") + Update.errorString()); return; }
+  fw.lastN = n;
+  fw.written += outLen;
+  String pct = String((int) (fw.written * 100 / max((size_t) 1, fw.size))) + "%";
+  if (pct != screen.main) { screen.main = pct; displayDirty = true; }
+  fwAck(tr, n, true, "");
+}
+
+void fwEnd(Transport tr) {
+  if (!fw.running) { fwAck(tr, -2, false, "No update in progress"); return; }
+  fw.running = false;
+  bool ok = Update.end(true);
+  JsonDocument d;
+  d["t"] = "fw_done"; d["ok"] = ok;
+  if (!ok) d["err"] = Update.errorString();
+  sendDoc(tr, d);
+  if (ok) {
+    if (cfgDirty) saveConfig();
+    if (displayOk) { display.clearDisplay(); display.setTextSize(1); display.setCursor(0, 28); display.print(" UPDATED - RESTARTING"); display.display(); }
+    delay(400);
+    ESP.restart();
+  }
+}
+
+// ── Messages from PEQUOD ────────────────────────────────────────────────────
 void startWifi();
 
-void handleMessage(Transport tr, JsonDocument& m) {
-  const char* t = m["t"] | "";
-  lastRx[tr] = millis();
-  if (strcmp(t, "hello") != 0) active = tr;           // the transport PEQUOD chose to use
+void applyContrast() {
+  if (!displayOk) return;
+  display.ssd1306_command(SSD1306_SETCONTRAST);
+  display.ssd1306_command((uint8_t) (cfg["display"]["contrast"] | 200));
+}
 
-  if (!strcmp(t, "hello"))          { sendHello(tr); }
-  else if (!strcmp(t, "ping"))      { /* keep-alive */ }
-  else if (!strcmp(t, "getcfg"))    { sendConfig(tr); }
-  else if (!strcmp(t, "getdev"))    { sendDevices(tr); }
-  else if (!strcmp(t, "rescan"))    { scanBoards(); applyConfig(); markConfigDirty(); sendDevices(tr); sendConfig(tr); }
-  else if (!strcmp(t, "setcfg")) {
-    String oldSsid = cfg["wifi"]["ssid"] | "", oldPass = cfg["wifi"]["pass"] | "";
-    bool oldEnabled = cfg["wifi"]["enabled"] | true;
+void handleMessage(Transport tr, JsonDocument& m) {
+  const String t = m["t"] | "";
+  lastRx[tr] = millis();
+  if (t != "hello") {
+    if (active != tr && active != T_NONE && linked() && tr == T_UDP) return;   // USB already in use: ignore Wi-Fi
+    active = tr;                                                            // PEQUOD chose this route
+  }
+
+  if (t == "hello")         { sendInfo(tr); return; }
+  if (t == "ping")          { JsonDocument d; d["t"] = "pong"; sendDoc(tr, d); return; }
+  if (t == "bye")           { if (active == tr) { lastRx[tr] = 0; } return; }
+  if (t == "get_cfg")       { sendConfig(tr); return; }
+  if (t == "rescan")        { scanBoards(); applyConfig(); markConfigDirty(); sendInfo(tr); sendConfig(tr); return; }
+
+  if (t == "set_cfg") {
+    String oldWifi;
+    serializeJson(cfg["wifi"], oldWifi);
+    String oldName = cfg["name"] | "";
     JsonDocument incoming;
     incoming.set(m["cfg"]);
-    if (incoming["wifi"]["pass"].isNull()) incoming["wifi"]["pass"] = oldPass;  // null = keep
+    for (const char* k : { "pass", "pass2" })            // null = keep the stored password
+      if (incoming["wifi"][k].isNull()) incoming["wifi"][k] = cfg["wifi"][k] | "";
     incoming["wifi"].remove("hasPass");
+    incoming["wifi"].remove("hasPass2");
     cfg = incoming;
     applyConfig();
     markConfigDirty();
-    JsonDocument ok; ok["t"] = "cfgok"; sendDoc(tr, ok);
-    String newSsid = cfg["wifi"]["ssid"] | "", newPass = cfg["wifi"]["pass"] | "";
-    bool newEnabled = cfg["wifi"]["enabled"] | true;
-    if (newSsid != oldSsid || newPass != oldPass || newEnabled != oldEnabled) startWifi();
-    if (displayOk) { display.ssd1306_command(SSD1306_SETCONTRAST); display.ssd1306_command((uint8_t) (cfg["display"]["contrast"] | 200)); }
+    applyContrast();
+    String newWifi;
+    serializeJson(cfg["wifi"], newWifi);
+    if (newWifi != oldWifi) startWifi();
+    JsonDocument ok; ok["t"] = "cfg_ok"; ok["restart"] = (oldName != String(cfg["name"] | "")); sendDoc(tr, ok);
+    if (oldName != String(cfg["name"] | "")) sendInfo(tr);
+    return;
   }
-  else if (!strcmp(t, "leds")) {
+
+  if (t == "leds") {
     for (int i = 0; i < numBoards; i++)
       for (int c = 0; c < MAX_CTRLS; c++) { boards[i].ctl[c].pqOn = false; boards[i].ctl[c].pqHasColor = false; }
-    for (JsonVariant ev : m["v"].as<JsonArray>()) {
+    for (JsonVariant ev : m["l"].as<JsonArray>()) {
       JsonArray e = ev.as<JsonArray>();
       Board* b = boardByKey(e[0] | "");
-      int c = e[1] | -1;
-      if (!b || c < 0 || c >= b->numCtrls) continue;
-      b->ctl[c].pqOn = (e[2] | 0) != 0;
-      if (e[3].is<const char*>()) { b->ctl[c].pqHasColor = true; b->ctl[c].pqColor = parseColor(e[3].as<const char*>(), b->ctl[c].color); }
+      if (!b) continue;
+      Control* ctl = findControl(*b, e[1] | -1);
+      if (!ctl) continue;
+      ctl->pqOn = (e[2] | 0) != 0;
+      if (e[3].is<const char*>()) { ctl->pqHasColor = true; ctl->pqColor = parseColor(e[3].as<const char*>(), ctl->color); }
     }
+    return;
   }
-  else if (!strcmp(t, "disp")) {
-    dispBank = m["bank"] | "";
-    dispPreset = m["preset"] | "";
-    dispIdx = m["idx"] | 0;
-    dispMuted = m["muted"] | false;
-    String msg = m["msg"] | "";
-    if (msg.length()) { dispMsg = msg; dispMsgUntil = millis() + 1500; }
+
+  if (t == "screen") {
+    screen.valid = true;
+    screen.mode = m["mode"] | "preset";
+    screen.top = m["top"] | "";
+    screen.main = m["main"] | "";
+    screen.sub = m["sub"] | "";
+    screen.note = m["note"] | "";
+    screen.cents = m["cents"] | 0.0f;
+    screen.inTune = m["inTune"] | false;
+    if (m["flash"].is<const char*>()) { screen.flash = m["flash"].as<const char*>(); screen.flashUntil = millis() + 1200; }
     displayDirty = true;
+    return;
   }
-  else if (!strcmp(t, "tun")) {
-    tunNote = m["n"] | "-";
-    tunCents = m["c"] | 0.0f;
-    tunHz = m["hz"] | 0.0f;
-    tunAt = millis();
-    displayDirty = true;
+
+  if (t == "layer")         { setLayer(m["l"] | 0); return; }
+  if (t == "identify")      {
+    if (Board* b = boardByKey(m["u"] | "")) { b->identifyUntil = millis() + 2500; b->identifyCode = m["c"] | -1; }
+    return;
   }
-  else if (!strcmp(t, "raw"))       { rawStream = (m["on"] | 0) != 0; }
-  else if (!strcmp(t, "identify"))  { if (Board* b = boardByKey(m["dev"] | "")) b->identifyUntil = millis() + 3000; }
-  else if (!strcmp(t, "wifiscan"))  { WiFi.scanNetworks(true); wifiScanPending = true; }
-  else if (!strcmp(t, "reboot"))    { if (cfgDirty) saveConfig(); delay(100); ESP.restart(); }
-  else if (!strcmp(t, "factory"))   {
+  if (t == "cal")           { if (Board* b = boardByKey(m["u"] | "")) b->calWatch = m["on"] | false; return; }
+  if (t == "wifiscan")      { WiFi.scanNetworks(true); wifiScanPending = true; return; }
+  if (t == "fw_begin")      { fwBegin(tr, m); return; }
+  if (t == "fw_data")       { fwData(tr, m); return; }
+  if (t == "fw_end")        { fwEnd(tr); return; }
+  if (t == "fw_abort")      { if (fw.running) { Update.abort(); fw.running = false; screen.valid = false; displayDirty = true; } return; }
+  if (t == "reboot")        { if (cfgDirty) saveConfig(); delay(100); ESP.restart(); }
+  if (t == "factory") {
     String name = cfg["name"] | "Longsleeves";
     defaultSettings();
     cfg["name"] = name;
@@ -999,25 +1152,24 @@ void handleMessage(Transport tr, JsonDocument& m) {
 }
 
 void feedFrame(Transport tr, Reassembler& r, const uint8_t* f, size_t n) {
-  if (n < 6 || f[0] != 0x50 || f[1] != 0x51 || f[2] != 0x01) return;
-  int seq = f[3], part = f[4], parts = f[5];
-  if (parts < 1) return;
-  if (part == 0) { r.buf = ""; r.seq = seq; r.nextPart = 0; r.parts = parts; r.started = millis(); }
-  if (seq != r.seq || part != r.nextPart || parts != r.parts || millis() - r.started > 1000) { r.seq = -1; return; }
-  r.buf.concat((const char*) (f + 6), n - 6);
-  r.nextPart++;
-  if (r.nextPart < r.parts) return;
-  r.seq = -1;
+  if (n < 4 || f[0] != 'J') return;
+  const int id = f[1], index = f[2], count = f[3];
+  if (index == 0) { r.id = id; r.next = 0; r.count = count; r.text = ""; }
+  if (id != r.id || index != r.next || count != r.count) { r.id = -1; return; }
+  r.text.concat((const char*) (f + 4), n - 4);
+  if (++r.next < r.count) return;
+  r.id = -1;
   JsonDocument m;
-  if (deserializeJson(m, r.buf)) return;
-  r.buf = "";
+  DeserializationError err = deserializeJson(m, r.text);
+  r.text = "";
+  if (err) { Serial.println("[LINK] bad JSON"); return; }
   handleMessage(tr, m);
 }
 
-// USB-MIDI input: SysEx carries the link; notes/CCs drive LEDs in "midi" mode.
-uint8_t usbSx[1400];
-size_t usbSxLen = 0;
-bool usbSxActive = false;
+// USB-MIDI input: SysEx carries the link; notes/CCs drive LEDs set to follow MIDI.
+static uint8_t usbSx[1200];
+static size_t usbSxLen = 0;
+static bool usbSxActive = false;
 
 void midiInMessage(uint8_t status, uint8_t d1, uint8_t d2) {
   uint8_t type = status & 0xF0, ch = (status & 0x0F) + 1;
@@ -1039,7 +1191,9 @@ void usbSysExByte(uint8_t b) {
   if (!usbSxActive) return;
   if (b == 0xF7) {
     usbSxActive = false;
-    if (usbSxLen >= 1 && usbSx[0] == 0x7D) feedFrame(T_USB, rxUsb, usbSx + 1, usbSxLen - 1);
+    // 7D 'P' 'Q' <frame>
+    if (usbSxLen >= 7 && usbSx[0] == 0x7D && usbSx[1] == 'P' && usbSx[2] == 'Q')
+      feedFrame(T_USB, rxUsb, usbSx + 3, usbSxLen - 3);
     return;
   }
   if (usbSxLen < sizeof(usbSx)) usbSx[usbSxLen++] = b;
@@ -1048,10 +1202,9 @@ void usbSysExByte(uint8_t b) {
 
 void pollUsbMidi() {
   midiEventPacket_t p;
-  int budget = 64;
+  int budget = 96;
   while (budget-- > 0 && usbMidi.readPacket(&p)) {
-    uint8_t cin = p.header & 0x0F;
-    switch (cin) {
+    switch (p.header & 0x0F) {
       case 0x4: usbSysExByte(p.byte1); usbSysExByte(p.byte2); usbSysExByte(p.byte3); break;
       case 0x5: usbSysExByte(p.byte1); break;
       case 0x6: usbSysExByte(p.byte1); usbSysExByte(p.byte2); break;
@@ -1066,7 +1219,7 @@ void pollDinMidi() {
   static uint8_t status = 0, d1 = 0, count = 0;
   while (Serial1.available()) {
     uint8_t b = Serial1.read();
-    if (b >= 0xF8) continue;                      // real-time
+    if (b >= 0xF8) continue;                      // real-time bytes
     if (b & 0x80) { status = (b < 0xF0) ? b : 0; count = 0; continue; }
     if (!status) continue;
     if (count == 0) { d1 = b; count = 1; }
@@ -1075,31 +1228,38 @@ void pollDinMidi() {
 }
 
 void pollUdp() {
-  if (!WiFi.isConnected()) return;
-  int size;
-  while ((size = udp.parsePacket()) > 0) {
-    uint8_t buf[256];
+  if (!udpRunning) return;
+  static uint8_t buf[1100];
+  for (int k = 0; k < 8; k++) {
+    if (udp.parsePacket() <= 0) break;
     int n = udp.read(buf, sizeof(buf));
-    if (n <= 0) continue;
+    if (n < 8 || buf[0] != 'P' || buf[1] != 'Q' || buf[2] != 'L' || buf[3] != '1') continue;
     udpPeer = udp.remoteIP();
     udpPeerPort = udp.remotePort();
-    feedFrame(T_UDP, rxUdp, buf, n);
+    feedFrame(T_UDP, rxUdp, buf + 4, n - 4);
   }
 }
 
 // ── Wi-Fi ───────────────────────────────────────────────────────────────────
-void startWifi() {
-  WiFi.disconnect(true);
-  udp.stop();
-  bool enabled = cfg["wifi"]["enabled"] | true;
-  String ssid = cfg["wifi"]["ssid"] | "";
-  if (!enabled || ssid.length() == 0) { WiFi.mode(WIFI_OFF); return; }
+void beginNetwork(const char* ssidKey, const char* passKey) {
+  String ssid = cfg["wifi"][ssidKey] | "";
   String host = cfg["wifi"]["hostname"] | "pequod-fc";
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(host.c_str());
   WiFi.setSleep(false);                           // lowest latency
-  WiFi.begin(ssid.c_str(), (const char*) (cfg["wifi"]["pass"] | ""));
+  WiFi.begin(ssid.c_str(), (const char*) (cfg["wifi"][passKey] | ""));
+  wifiStartedAt = millis();
+}
+
+void startWifi() {
+  if (udpRunning) { udp.stop(); udpRunning = false; }
+  WiFi.disconnect(true);
+  bool enabled = cfg["wifi"]["enabled"] | true;
+  String ssid = cfg["wifi"]["ssid"] | "";
   wifiWasConnected = false;
+  usingFallbackWifi = false;
+  if (!enabled || ssid.length() == 0) { WiFi.mode(WIFI_OFF); return; }
+  beginNetwork("ssid", "pass");
 }
 
 void loopWifi() {
@@ -1107,17 +1267,32 @@ void loopWifi() {
   if (now != wifiWasConnected) {
     wifiWasConnected = now;
     if (now) {
-      udp.begin(LINK_PORT);
+      udpRunning = udp.begin(LINK_PORT);
       String host = cfg["wifi"]["hostname"] | "pequod-fc";
       MDNS.end();
-      if (MDNS.begin(host.c_str())) MDNS.addService("pequod-fc", "udp", LINK_PORT);
+      if (MDNS.begin(host.c_str())) MDNS.addService("pequod", "udp", LINK_PORT);
       Serial.printf("[WiFi] %s  %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
-    } else {
+    } else if (udpRunning) {
       udp.stop();
+      udpRunning = false;
     }
-    sendWifiStatus();
+    if (linked()) sendInfo(active);
     displayDirty = true;
   }
+
+  // Can't reach the main network for 20 s: try the backup one (and back again).
+  bool enabled = cfg["wifi"]["enabled"] | true;
+  if (enabled && !now && wifiStartedAt != 0 && millis() - wifiStartedAt > 20000) {
+    String ssid2 = cfg["wifi"]["ssid2"] | "";
+    if (ssid2.length()) {
+      usingFallbackWifi = !usingFallbackWifi;
+      WiFi.disconnect();
+      if (usingFallbackWifi) beginNetwork("ssid2", "pass2"); else beginNetwork("ssid", "pass");
+    } else {
+      wifiStartedAt = millis();
+    }
+  }
+
   if (wifiScanPending) {
     int n = WiFi.scanComplete();
     if (n >= 0 || n == WIFI_SCAN_FAILED) {
@@ -1125,13 +1300,14 @@ void loopWifi() {
       JsonDocument d;
       d["t"] = "wifilist";
       JsonArray nets = d["nets"].to<JsonArray>();
-      for (int i = 0; i < n && i < 20; i++) {
+      for (int i = 0; i < n && i < 24; i++) {
         JsonObject o = nets.add<JsonObject>();
-        o["ssid"] = WiFi.SSID(i); o["rssi"] = WiFi.RSSI(i);
+        o["ssid"] = WiFi.SSID(i);
+        o["rssi"] = WiFi.RSSI(i);
         o["lock"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
       }
       WiFi.scanDelete();
-      sendToPequod(d);
+      sendToHost(d);
     }
   }
 }
@@ -1144,71 +1320,62 @@ void drawCentered(const String& s, int y, int size) {
   display.print(s);
 }
 
-String fit(const String& s, int maxChars) {
-  return (int) s.length() <= maxChars ? s : s.substring(0, maxChars);
+void drawHostScreen() {
+  if (screen.mode == "tuner") {
+    drawCentered(screen.note.length() ? screen.note : String("-"), 6, 4);
+    const int y = 50, cx = 64;
+    display.drawFastHLine(8, y, 112, SSD1306_WHITE);
+    for (int c = -50; c <= 50; c += 25)
+      display.drawFastVLine(cx + c * 112 / 100, y - (c == 0 ? 6 : 3), c == 0 ? 12 : 6, SSD1306_WHITE);
+    if (screen.note.length()) {
+      int x = cx + (int) (constrain(screen.cents, -50.0f, 50.0f) * 112 / 100.0f);
+      display.fillRect(x - 2, y - 8, 5, 16, SSD1306_WHITE);
+    }
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print(screen.inTune ? "IN TUNE" : screen.top);
+  } else {
+    drawCentered(screen.top, 0, 1);
+    display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+    String m = screen.main;
+    if ((int) m.length() <= 10) drawCentered(m, 22, 2);
+    else {
+      int cut = m.lastIndexOf(' ', 10);
+      if (cut <= 0) cut = 10;
+      drawCentered(m.substring(0, cut), 14, 2);
+      String rest = m.substring(cut);
+      rest.trim();
+      if (rest.length() > 10) rest = rest.substring(0, 10);
+      drawCentered(rest, 32, 2);
+    }
+    drawCentered(screen.sub, 56, 1);
+  }
+  if (screen.flash.length() && millis() < screen.flashUntil) {
+    display.fillRect(0, 52, 128, 12, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+    drawCentered(screen.flash, 54, 1);
+    display.setTextColor(SSD1306_WHITE);
+  }
+}
+
+void drawStandalone() {
+  drawCentered(String(cfg["name"] | "PEQUOD FC"), 2, 1);
+  display.drawFastHLine(0, 12, 128, SSD1306_WHITE);
+  drawCentered("PEQUOD", 20, 2);
+  display.setTextSize(1);
+  drawCentered("not connected", 38, 1);
+  display.setCursor(0, 56);
+  if (WiFi.isConnected()) display.print(WiFi.localIP().toString());
+  else display.print(String(cfg["wifi"]["ssid"] | "").length() ? "Wi-Fi..." : "USB");
+  if (numLayers > 1) { display.setCursor(104, 56); display.print("L"); display.print(layer + 1); }
 }
 
 void drawDisplay() {
   if (!displayOk) return;
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
-  bool link = linked();
-  bool tunerUp = link && dispMuted && (cfg["display"]["tunerWhenMuted"] | true);
-
-  if (tunerUp) {
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.print("MUTED");
-    bool haveNote = tunNote != "-" && millis() - tunAt < 1500;
-    if (!haveNote) {
-      drawCentered("TUNER", 22, 2);
-      display.setTextSize(1);
-      drawCentered("play a string", 48, 1);
-    } else {
-      drawCentered(tunNote, 8, 4);
-      // cents bar: centre tick, needle
-      display.drawFastHLine(4, 54, 120, SSD1306_WHITE);
-      display.drawFastVLine(64, 48, 12, SSD1306_WHITE);
-      int x = 64 + (int) constrain(tunCents, -50.0f, 50.0f) * 58 / 50;
-      if (fabs(tunCents) < 3) display.fillRect(x - 3, 46, 7, 16, SSD1306_WHITE);
-      else display.fillTriangle(x - 4, 46, x + 4, 46, x, 56, SSD1306_WHITE);
-      display.setTextSize(1);
-      display.setCursor(0, 40); display.print("b");
-      display.setCursor(122, 40); display.print("#");
-    }
-  }
-  else if (link) {
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.print(fit(dispBank, numLayers > 1 ? 17 : 21));
-    if (numLayers > 1) { display.setCursor(110, 0); display.print("L"); display.print(layer + 1); }
-    display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
-
-    if (millis() < dispMsgUntil) {
-      drawCentered(fit(dispMsg, 10), 24, 2);
-    } else {
-      String p = dispPreset;
-      if (p.length() <= 10) drawCentered(p, 22, 2);
-      else { display.setTextSize(1); display.setCursor(0, 20); display.print(fit(p, 21)); display.setCursor(0, 30); display.print(fit(p.substring(min(21, (int) p.length())), 21)); }
-    }
-    display.setTextSize(1);
-    display.setCursor(0, 56);
-    if (dispIdx > 0) { if (dispIdx < 10) display.print("0"); display.print(dispIdx); }
-    display.setCursor(80, 56);
-    display.print(active == T_USB ? "USB" : "WI-FI");
-    display.print(" OK");
-  }
-  else {
-    drawCentered("PEQUOD", 4, 2);
-    display.setTextSize(1);
-    drawCentered("waiting for host", 26, 1);
-    display.setCursor(0, 44);
-    if (WiFi.isConnected()) { display.print(WiFi.localIP().toString()); }
-    else display.print(String(cfg["wifi"]["ssid"] | "").length() ? "Wi-Fi connecting..." : "USB only");
-    display.setCursor(0, 56);
-    display.print(numBoards); display.print(numBoards == 1 ? " board" : " boards");
-    if (numLayers > 1) { display.setCursor(104, 56); display.print("L"); display.print(layer + 1); }
-  }
+  if ((linked() || fw.running) && screen.valid) drawHostScreen();
+  else drawStandalone();
   display.display();
 }
 
@@ -1216,6 +1383,7 @@ void drawDisplay() {
 void setup() {
   Serial.begin(115200);
   Serial1.begin(31250, SERIAL_8N1, MIDI_RX, MIDI_TX);
+  esp_ota_mark_app_valid_cancel_rollback();      // we booted fine: keep this firmware
 
   if (!SPIFFS.begin(true)) Serial.println("[FS] mount failed");
 
@@ -1229,7 +1397,6 @@ void setup() {
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
     drawCentered("PEQUOD FC", 20, 2);
-    display.setTextSize(1);
     drawCentered("v" FW_VERSION, 44, 1);
     display.display();
   }
@@ -1238,7 +1405,7 @@ void setup() {
   loadConfig();
   applyConfig();
 
-  // USB name comes from the settings (shown as the MIDI port name on the PC).
+  // The controller's name is also its USB-MIDI port name on the computer.
   static String usbName;
   usbName = cfg["name"] | "Longsleeves";
   USB.productName(usbName.c_str());
@@ -1246,9 +1413,9 @@ void setup() {
   usbMidi.begin();
   USB.begin();
 
-  if (displayOk) { display.ssd1306_command(SSD1306_SETCONTRAST); display.ssd1306_command((uint8_t) (cfg["display"]["contrast"] | 200)); }
+  applyContrast();
   for (int i = 0; i < numBoards; i++)
-    if (boards[i].type >= 20 && boards[i].type <= 39) slaveSetLayerColor(boards[i].addr, layerColors[layer]);
+    if (boards[i].kind == KIND_FOOTSWITCH) slaveSetLayerColor(boards[i].addr, layerColors[layer]);
 
   startWifi();
   if (cfgDirty) saveConfig();
@@ -1264,38 +1431,42 @@ void loop() {
   static unsigned long lastPoll = 0;
   if (millis() - lastPoll >= 10) { lastPoll = millis(); pollBoards(); }
 
-  // keep-alive, and notice when PEQUOD goes away
-  static unsigned long lastPing = 0;
+  // Notice PEQUOD arriving and leaving.
   bool link = linked();
-  if (link && millis() - lastPing >= 1000) {
-    lastPing = millis();
-    JsonDocument d; d["t"] = "ping"; sendToPequod(d);
-  }
   if (link != wasLinked) {
     wasLinked = link;
-    if (!link) { active = T_NONE; rawStream = false; dispMuted = false; }
-    else sendLayer();
+    if (!link) {
+      active = T_NONE;
+      screen.valid = false;
+      for (int i = 0; i < numBoards; i++) boards[i].calWatch = false;
+      if (fw.running) { Update.abort(); fw.running = false; }
+      Serial.println("[LINK] PEQUOD disconnected");
+    } else {
+      sendLayer();
+      Serial.println("[LINK] PEQUOD connected");
+    }
     displayDirty = true;
   }
 
-  // raw pedal values while PEQUOD's calibration screen is open
+  // Raw pedal readings while PEQUOD's calibration screen is open.
   static unsigned long lastRaw = 0;
-  if (rawStream && link && millis() - lastRaw >= 50) {
+  if (link && millis() - lastRaw >= 50) {
     lastRaw = millis();
     for (int i = 0; i < numBoards; i++)
-      if (boards[i].kind == KIND_PEDAL) {
-        JsonDocument d; d["t"] = "raw"; d["dev"] = boards[i].key; d["v"] = boards[i].rawPedal;
-        sendToPequod(d);
+      if (boards[i].calWatch) {
+        JsonDocument d;
+        d["t"] = "raw"; d["u"] = boards[i].key; d["raw"] = boards[i].rawPedal; d["v"] = boards[i].lastPedal7;
+        sendToHost(d);
       }
   }
 
-  // save settings shortly after the last change (saves wear on the flash while dragging sliders)
+  // Save settings shortly after the last change (spares the flash while sliders move).
   if (cfgDirty && millis() - cfgDirtySince > 1500) saveConfig();
 
   static unsigned long lastDraw = 0;
-  bool msgExpired = dispMsgUntil != 0 && millis() >= dispMsgUntil;
-  if ((displayDirty || msgExpired || (link && dispMuted)) && millis() - lastDraw >= 50) {
-    if (msgExpired) dispMsgUntil = 0;
+  bool flashExpired = screen.flashUntil != 0 && millis() >= screen.flashUntil;
+  if ((displayDirty || flashExpired) && millis() - lastDraw >= 40) {
+    if (flashExpired) screen.flashUntil = 0;
     lastDraw = millis();
     displayDirty = false;
     drawDisplay();

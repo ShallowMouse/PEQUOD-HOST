@@ -1,102 +1,112 @@
-# PEQUOD Link — controller protocol (v1)
+# PEQUOD Link — controller protocol (v2)
 
-The link between PEQUOD Host and the PEQUOD FC foot controller (ESP32-S3 master + I2C slave boards).
-The same messages travel over USB (inside MIDI SysEx) or Wi-Fi (UDP), so everything works the same either way.
+How PEQUOD Host talks to the PEQUOD FC foot controller (ESP32-S3 master, `Controller/PEQUOD_FC`).
+The same JSON messages travel over USB (inside MIDI SysEx) or Wi-Fi (UDP), so everything works the same either way.
+The slave boards are untouched: the master still talks to them with the original I2C commands.
 
 ## Framing
 
-Every message is one JSON object, written as ASCII (non-ASCII characters escaped as `\uXXXX`), split into frames:
+Every message is one JSON object, written as 7-bit ASCII (anything else escaped as `\uXXXX`), split into frames:
 
-```
-0x50 'P'  0x51 'Q'  0x01 version  seq  part  parts  payload...
-```
+| route | frame |
+|---|---|
+| USB | `F0 7D 'P' 'Q' 'J' id index count <up to 100 bytes of JSON> F7` on the controller's USB-MIDI port |
+| Wi-Fi | `'P' 'Q' 'L' '1' 'J' id index count <up to 1000 bytes of JSON>` as one UDP datagram |
 
-* `seq` 0–127 — message number (wraps); all frames of one message share it
-* `part` 0-based frame index, `parts` total frames (1–127)
-* payload ≤ 200 bytes per frame; a message may be up to 127 × 200 bytes
-* all bytes are < 0x80, so a frame fits in SysEx unchanged
+* `id` 0–127 — message number (wraps); all frames of one message share it
+* `index` 0-based frame number, `count` total frames (1–127)
+* 0x7D is the MIDI "non-commercial" manufacturer ID, so other gear ignores the SysEx
 
-**USB:** each frame is sent as SysEx `F0 7D <frame> F7` (0x7D = non-commercial manufacturer ID) on the controller's USB-MIDI port.
-**Wi-Fi:** each frame is one UDP datagram. The controller listens on **UDP 9124**; PEQUOD broadcasts discovery to `255.255.255.255:9124` and the controller answers to the sender's address and port.
+The controller listens on **UDP 7400** and answers to whatever address and port a message came from.
+It also announces itself with mDNS as `_pequod._udp`.
 
-A receiver collects frames with the same `seq` until it has `parts` of them, then parses the JSON. Incomplete messages are dropped after 1 s.
+## Finding each other
 
-## Session
+1. PEQUOD sends `hello` to every MIDI port whose input and output share a name (it opens the port itself; it does not need to be switched on under AUDIO), and broadcasts `hello` to `255.255.255.255:7400` every 2 s (plus a fixed IP if one is set).
+2. The controller answers with `info`. The first answer wins; USB is preferred over Wi-Fi for the same controller.
+3. PEQUOD sends `ping` every second; the controller answers `pong`. Nothing heard for 4.5 s = link lost on both sides.
+4. On connect PEQUOD asks for `get_cfg`.
 
-1. PEQUOD sends `hello` every 2 s (to USB ports whose name matches a known controller name, and as a Wi-Fi broadcast) until a controller answers.
-2. The controller answers `hello`. PEQUOD then asks for `getdev` and `getcfg`.
-3. Both sides send `ping` once a second. No message for 3 s = link lost; PEQUOD goes back to step 1.
-4. If both USB and Wi-Fi answer, USB is used.
-
-## Messages — PEQUOD → controller
+## PEQUOD → controller
 
 | `t` | fields | meaning |
 |---|---|---|
-| `hello` | `app`, `ver`, `proto` | discovery / start a session |
-| `ping` | | keep-alive |
-| `getcfg` | | reply `cfg` |
-| `setcfg` | `cfg` | replace the whole config (applied at once, saved to flash) → `cfgok` |
-| `getdev` | | reply `devices` |
-| `rescan` | | rescan the I2C bus → `devices` |
-| `leds` | `v`: `[[dev, ctrl, on, "#rrggbb" or null], …]` | LED state for controls in PEQUOD mode (current layer) |
-| `disp` | `bank`, `preset`, `idx`, `muted`, `msg` | text for the OLED (`msg` shows briefly) |
-| `tun` | `n` note, `c` cents, `hz` | tuner reading (≈10/s while muted); `n:"-"` = no note |
-| `raw` | `on` 0/1 | stream raw pedal readings (for calibration) |
-| `identify` | `dev` | flash that board's LEDs for 3 s |
+| `hello` | `app`, `proto` | discovery → `info` |
+| `ping` | | → `pong` |
+| `bye` | | PEQUOD is closing |
+| `get_cfg` | | → `cfg` |
+| `set_cfg` | `cfg` | replace the whole config, applied at once, saved to flash 1.5 s later → `cfg_ok` |
+| `rescan` | | look for boards again → `info` + `cfg` |
+| `leds` | `l`: `[[unit, control, on, "#rrggbb"?], …]` | which PEQUOD-mode controls are lit (everything not listed is off); colour optional |
+| `screen` | `mode` `preset`/`tuner`/`text`, `top`, `main`, `sub`, `note`, `cents`, `inTune`, `flash` | OLED content; `flash` shows for 1.2 s at the bottom |
+| `layer` | `l` | switch to layer `l` (0-based) |
+| `identify` | `u`, `c` (-1 = whole board) | flash that control's LED for 2.5 s |
+| `cal` | `u`, `on` | stream raw pedal readings (`raw`) for calibration |
 | `wifiscan` | | → `wifilist` |
-| `reboot` | | restart the controller |
-| `factory` | | erase settings and restart |
+| `fw_begin` | `size`, `md5`? | start a firmware update → `fw_ack n:-1` |
+| `fw_data` | `n`, `d` (base64, ≤ 768 bytes) | chunk `n` (resending the last one is fine) → `fw_ack n` |
+| `fw_end` | | check + install → `fw_done`, then the controller restarts |
+| `fw_abort` | | cancel the update |
+| `reboot` | | restart |
+| `factory` | | erase all settings except the name, restart |
 
-## Messages — controller → PEQUOD
+## Controller → PEQUOD
 
 | `t` | fields | meaning |
 |---|---|---|
-| `hello` | `name`, `fw`, `proto`, `layer`, `layers`, `wifi` | answer to `hello` |
-| `ping` | | keep-alive |
-| `cfg` | `cfg` | full config |
-| `cfgok` | | config saved |
-| `devices` | `list`: `[{dev, addr, type, kind, slot}]` | connected boards, by slot |
-| `ev` | `dev`, `c`, `l`, `v`, `f` | a control in PEQUOD mode moved: switch `v` 1/0; pedal `v` 0–127, `f` 0–1; encoder `v` = steps (±) |
-| `press` | `dev`, `c`, `v` | any switch pressed/released, whatever its mode (used for "press a switch to select it") |
-| `layer` | `v` | active layer changed (0-based) |
-| `raw` | `dev`, `v` | raw pedal reading (while `raw` is on) |
-| `wifi` | `connected`, `ssid`, `ip`, `rssi` | Wi-Fi status changed |
-| `wifilist` | `nets`: `[{ssid, rssi, lock}]` | scan result |
+| `info` | `proto`, `fw`, `id`, `name`, `via`, `layers`, `layer`, `brightness`, `wifi{connected, ssid, ssid2, ip, rssi}`, `ota{ok, max}`, `units[{slot, type, kind, name, uid}]` | who it is and which boards are connected |
+| `pong` | | |
+| `cfg` | `cfg` | the full config (passwords left out) |
+| `cfg_ok` | | config applied |
+| `ev` | `u`, `c`, `l`, `v`, `f`? | a control set to **Control PEQUOD** moved: switch `v` 1/0; pedal `v` 0–127 and `f` 0–1; encoder turn `v` = steps (±) |
+| `press` | `u`, `c`, `v` | any switch pressed (1) or released (0), whatever it is set to do — PEQUOD uses it to select the switch in its window |
+| `layer` | `l` | the active layer changed |
+| `raw` | `u`, `raw`, `v` | raw pedal reading 0–4095 (while `cal` is on) |
+| `wifilist` | `nets[{ssid, rssi, lock}]` | scan result |
+| `fw_ack` | `n`, `ok`, `err`? | firmware chunk received |
+| `fw_done` | `ok`, `err`? | firmware installed (or not) |
+| `err` | `msg` | something went wrong |
 
-`dev` is the board's unique ID (8 hex digits), so assignments follow the board, not the socket it's plugged into.
-Control numbers `c`: footswitch/button boards 0–3; pedal 0 = expression, 1 = switch (pedal-with-switch boards); encoder 0 = rotation, 1 = push.
+`u` / `uid` is the board's unique ID (last 8 hex digits of the slave's 64-bit ID, the same key the old firmware used),
+so settings follow the board, not the socket it is plugged into.
+
+Control numbers `c`: 0–3 switches (a pedal-with-switch board's toe switch is 0), 100 expression pedal, 200 encoder turn, 201 encoder push.
+Unit `kind`: `footswitch`, `button`, `pedal`, `pedal_switch`, `encoder`, `knob`.
 
 ## Config
 
 ```json
 {
-  "name": "Longsleeves",
-  "brightness": 200,                // LED brightness 5–255
-  "offGlow": 10,                    // % brightness of an LED that is "off" (0 = dark)
-  "layers": 1,                      // 1–4
+  "name": "Longsleeves",              // also the USB-MIDI port name (the controller restarts to apply it)
+  "brightness": 200,                  // LED brightness 5-255
+  "offGlow": 10,                      // % brightness of an LED that is "off" (0 = dark)
+  "layers": 1,                        // 1-4
   "layerColors": ["#F44336", "#9C27B0", "#2196F3", "#4CAF50"],
-  "midi": { "usb": true, "din": true },
-  "wifi": { "enabled": true, "ssid": "", "pass": null, "hasPass": false, "hostname": "pequod-fc" },
+  "midi": { "usb": true, "din": true },   // where "Send MIDI to other gear" goes
+  "wifi": { "enabled": true, "ssid": "", "pass": null, "hasPass": false,
+            "ssid2": "", "pass2": null, "hasPass2": false, "hostname": "pequod-fc" },
   "display": { "contrast": 200, "tunerWhenMuted": true },
-  "devices": {
+  "units": {
     "A1B2C3D4": {
-      "slot": 0, "name": "Board 1",
-      "controls": [
-        { "layers": [ { "mode": "pequod", "num": 20, "ch": 1, "toggle": true } ],
-          "color": "#E0A82E", "led": "auto" }
-      ],
-      "pedal": { "min": 0, "max": 4095, "invert": false },
+      "slot": 0, "name": "Switches 1",
+      "controls": {
+        "0": { "color": "#E0A82E", "led": "auto",
+               "layers": [ { "mode": "pequod", "num": 20, "ch": 1, "toggle": true }, … 4 entries ] }
+      },
+      "pedal":   { "min": 0, "max": 4095, "invert": false },
       "encoder": { "invert": false }
     }
   }
 }
 ```
 
-* `wifi.pass` is never sent back to PEQUOD (`null` + `hasPass`); sending `null` keeps the stored password.
-* Control `mode`
-  * switches: `pequod`, `cc`, `note`, `pc`, `layer_next`, `layer_prev`, `layer_set` (`num` = layer 1–4), `layer_hold` (`num` = layer while held), `none`
+* Passwords are never sent to PEQUOD (`null` + `hasPass`); sending `null` keeps the stored one.
+* `mode`
+  * switches: `pequod` (PEQUOD decides), `cc`, `note`, `pc`, `layer_next`, `layer_prev`, `layer_set` (`num` = layer 1–4), `layer_hold` (`num` = layer while held), `none`
   * pedal: `pequod`, `cc`, `none`
-  * encoder: `pequod`, `cc_rel` (64±steps), `cc_abs` (0–127, kept in the controller), `pc` (steps through programs), `layer` (next/previous by direction), `none`
+  * encoder turn: `pequod`, `cc_rel` (64 ± steps), `cc_abs` (0–127, kept by the controller), `pc` (steps through programs), `layer`, `none`
 * `toggle` (cc/note): true = each press flips 127/0 (note on/off); false = 127 while held, 0 on release.
-* `led`: `auto` (PEQUOD state in PEQUOD mode; toggle/held/active state otherwise), `on`, `off`, `midi` (follows incoming MIDI on the same number and channel, value ≥ 64 = on).
-* Unknown fields are kept, so newer PEQUOD versions can add settings without breaking older firmware.
+* `color`: `#rrggbb` or `"layer"` (the colour of the current layer).
+* `led`: `auto` (PEQUOD's state for PEQUOD controls; latched/held/active state otherwise), `on`, `off`, `midi` (follows incoming MIDI with the same number and channel, ≥ 64 = on).
+* What a PEQUOD-mode control does (effect on/off, next preset, tuner, a plugin knob …) is stored in PEQUOD, with the other MIDI/OSC mappings, not on the controller.
+* Fields the controller doesn't know are kept, so newer PEQUOD versions can add settings.

@@ -7,6 +7,8 @@ namespace
     constexpr double discoverEveryMs = 2000.0;
     constexpr double usbScanEveryMs  = 1500.0;
     constexpr double probeWaitMs     = 1500.0;
+    constexpr double probeRetryMs    = 4000.0;
+    constexpr int    probeTries      = 3;
 
     juce::var makeMsg (const char* type)
     {
@@ -130,6 +132,7 @@ ControllerLink::~ControllerLink()
     signalThreadShouldExit();
     if (socket != nullptr) socket->shutdown();
     stopThread (1000);
+    ownInputs.clear();
     deviceManager.removeMidiInputDeviceCallback ({}, this);
 }
 
@@ -202,7 +205,12 @@ void ControllerLink::timerCallback()
     // Probes that never answered are not controllers.
     for (auto& p : probes)
         if (! p.failed && p.sentAt > 0 && now - p.sentAt > probeWaitMs)
+        {
             p.failed = true;
+            // Not a controller: let go of the port so other software (and AUDIO > MIDI inputs) can use it.
+            if (p.tries >= probeTries)
+                ownInputs.erase (p.inputId);
+        }
 
     if (via == Via::none && now - lastDiscover > discoverEveryMs)
     {
@@ -215,6 +223,7 @@ void ControllerLink::scanUsb()
 {
     auto ins = juce::MidiInput::getAvailableDevices();
     auto outs = juce::MidiOutput::getAvailableDevices();
+    const double now = juce::Time::getMillisecondCounterHiRes();
 
     juce::StringArray signature;
     for (auto& d : ins)  signature.add ("i:" + d.identifier);
@@ -223,33 +232,59 @@ void ControllerLink::scanUsb()
     {
         lastDeviceSignature = signature;
         probes.clear();   // something was plugged in or out: look again
+
+        for (auto it = ownInputs.begin(); it != ownInputs.end();)
+        {
+            const bool present = std::any_of (ins.begin(), ins.end(), [&] (auto& d) { return d.identifier == it->first; });
+            if (present && it->first == usbInputId) { ++it; continue; }
+            it = ownInputs.erase (it);
+        }
     }
 
     for (auto& in : ins)
     {
-        if (! deviceManager.isMidiInputDeviceEnabled (in.identifier)) continue;
-
         for (auto& out : outs)
         {
             if (out.name != in.name) continue;   // a device's input and output share its name
 
             auto known = std::find_if (probes.begin(), probes.end(), [&] (const Probe& p) { return p.inputId == in.identifier; });
-            if (known != probes.end()) continue;
-
-            Probe p { in.identifier, out.identifier, juce::Time::getMillisecondCounterHiRes(), false };
-            if (auto o = juce::MidiOutput::openDevice (out.identifier))
+            if (known != probes.end())
             {
-                auto hello = makeMsg ("hello");
-                hello.getDynamicObject()->setProperty ("app", "PEQUOD Host");
-                hello.getDynamicObject()->setProperty ("proto", 1);
-                sendUsbRaw (*o, LinkFraming::toAsciiJson (hello));
+                // No answer yet (the controller may still have been starting up): ask again a few times.
+                if (known->failed && known->tries < probeTries && now - known->sentAt > probeRetryMs)
+                {
+                    known->failed = false;
+                    known->tries++;
+                    known->sentAt = now;
+                    sendHello (known->outputId);
+                }
+                break;
             }
-            else
-                p.failed = true;
 
+            // Listen to the port even if it isn't switched on under AUDIO > MIDI inputs.
+            if (! deviceManager.isMidiInputDeviceEnabled (in.identifier) && ownInputs.count (in.identifier) == 0)
+                if (auto mi = juce::MidiInput::openDevice (in.identifier, this))
+                {
+                    mi->start();
+                    ownInputs[in.identifier] = std::move (mi);
+                }
+
+            Probe p { in.identifier, out.identifier, now, false, 1 };
             probes.push_back (p);
+            sendHello (out.identifier);
             break;
         }
+    }
+}
+
+void ControllerLink::sendHello (const juce::String& outputId)
+{
+    if (auto o = juce::MidiOutput::openDevice (outputId))
+    {
+        auto hello = makeMsg ("hello");
+        hello.getDynamicObject()->setProperty ("app", "PEQUOD Host");
+        hello.getDynamicObject()->setProperty ("proto", 2);
+        sendUsbRaw (*o, LinkFraming::toAsciiJson (hello));
     }
 }
 
@@ -258,7 +293,7 @@ void ControllerLink::discoverWifi()
     if (socket == nullptr) return;
     auto hello = makeMsg ("hello");
     hello.getDynamicObject()->setProperty ("app", "PEQUOD Host");
-    hello.getDynamicObject()->setProperty ("proto", 1);
+    hello.getDynamicObject()->setProperty ("proto", 2);
     auto json = LinkFraming::toAsciiJson (hello);
     sendUdpRaw ("255.255.255.255", json);
     if (manualIp.isNotEmpty())

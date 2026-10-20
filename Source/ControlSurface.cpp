@@ -4,7 +4,7 @@
 
 namespace
 {
-    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner" };
+    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner", "stompSlot", "presetSelect" };
     const char* sourceNames[] = { "cc", "note", "osc", "ctrl" };
 
     template <typename Enum>
@@ -504,6 +504,20 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
             if (m.toggle) { if (risingEdge) setTunerMode (! tunerMode); }
             else          setTunerMode (isPress);
             break;
+        case Mapping::Target::stompSlot:
+        {
+            auto slots = engine.getFlatSlots();
+            if (juce::isPositiveAndNotGreaterThan (m.paramIndex, (int) slots.size()) && m.paramIndex > 0)
+            {
+                auto& s = slots[(size_t) m.paramIndex - 1];
+                if (m.toggle) { if (risingEdge) engine.setBypassed (s->uid, ! s->bypassed); }
+                else          engine.setBypassed (s->uid, ! isPress);
+            }
+            break;
+        }
+        case Mapping::Target::presetSelect:
+            if (risingEdge && onPresetIndex && m.paramIndex > 0) onPresetIndex (m.paramIndex - 1);
+            break;
         case Mapping::Target::inputGain:  engine.getInputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::outputGain: engine.getOutputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::presetNext: if (risingEdge && onPresetNext) onPresetNext(); break;
@@ -756,6 +770,14 @@ juce::String ControlSurface::describeTarget (const Mapping& m) const
         case Mapping::Target::tuner:      return "TUNER";
         case Mapping::Target::bankNext:   return "Bank NEXT";
         case Mapping::Target::bankPrev:   return "Bank PREV";
+        case Mapping::Target::stompSlot:
+        {
+            auto slots = engine.getFlatSlots();
+            juce::String now = juce::isPositiveAndNotGreaterThan (m.paramIndex, (int) slots.size()) && m.paramIndex > 0
+                                 ? " (" + slots[(size_t) m.paramIndex - 1]->description.name + ")" : juce::String();
+            return "Effect " + juce::String (m.paramIndex) + " ON-OFF" + now;
+        }
+        case Mapping::Target::presetSelect: return "Preset " + juce::String (m.paramIndex);
     }
     return {};
 }
@@ -800,7 +822,7 @@ static juce::XmlElement* mappingToXml (const Mapping& m, int targetRef)
 static Mapping mappingFromXml (const juce::XmlElement& x)
 {
     Mapping m;
-    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 11, Mapping::Target::param);
+    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 13, Mapping::Target::param);
     m.paramIndex = x.getIntAttribute ("param", -1);
     m.source = enumFromName (x.getStringAttribute ("source"), sourceNames, 4, Mapping::Source::midiCC);
     m.midiChannel = x.getIntAttribute ("ch");

@@ -83,8 +83,8 @@ void TunerDisplay::paint (juce::Graphics& g)
 HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
     : engine (e), control (c), tunerDisplay (t)
 {
-    for (auto* b : { &prevButton, &nextButton, &presetButton, &saveButton, &saveAsButton, &initButton,
-                     &learnButton, &audioButton, &pluginsButton })
+    for (auto* b : std::initializer_list<juce::Button*> { &prevButton, &nextButton, &presetButton, &saveButton, &saveAsButton, &initButton,
+                     &learnButton, &audioButton, &pluginsButton, &controllerButton })
         addAndMakeVisible (b);
 
     addAndMakeVisible (tunerDisplay);
@@ -110,6 +110,8 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
     learnButton.onClick   = [this] { if (onToggleLearn) onToggleLearn(); };
     audioButton.onClick   = [this] { if (onAudioSettings) onAudioSettings(); };
     pluginsButton.onClick = [this] { if (onPluginManager) onPluginManager(); };
+    controllerButton.onClick = [this] { if (onController) onController(); };
+    controllerButton.setTooltip ("PEQUOD FC foot controller: what every switch does, and all its settings");
 
     setupKnob (inKnob, inLabel, "IN", engine.getInputStage(), Mapping::Target::inputGain);
     setupKnob (outKnob, outLabel, "OUT", engine.getOutputStage(), Mapping::Target::outputGain);
@@ -125,6 +127,22 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
 }
 
 HeaderBar::~HeaderBar() { stopTimer(); }
+
+void HeaderBar::ControllerButton::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    TextButton::paintButton (g, over, down);
+    auto r = getLocalBounds().toFloat();
+    auto dot = juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ r.getX() + 11.0f, r.getCentreY() });
+    const auto c = state == 0 ? Pequod::Colours::textDim.withAlpha (0.4f)
+                 : state == 2 ? Pequod::Colours::mustard : juce::Colour (0xff4caf50);
+    if (state == 1)
+    {
+        g.setColour (c.withAlpha (0.3f));
+        g.fillEllipse (dot.expanded (3.0f));
+    }
+    g.setColour (c);
+    g.fillEllipse (dot);
+}
 
 void HeaderBar::setupKnob (LearnableSlider& knob, juce::Label& label, const juce::String& name,
                            GainMeterProcessor* stage, Mapping::Target target)
@@ -159,6 +177,9 @@ void HeaderBar::timerCallback()
     auto* out = engine.getOutputStage();
     inMeter.setLevels (in->peakL, in->peakR);
     outMeter.setLevels (out->peakL, out->peakR);
+
+    const int cs = controllerState ? controllerState() : 0;
+    if (cs != controllerButton.state) { controllerButton.state = cs; controllerButton.repaint(); }
 
     if (! inKnob.isMouseButtonDown())  inKnob.setValue (in->gainDb.load(), juce::dontSendNotification);
     if (! outKnob.isMouseButtonDown()) outKnob.setValue (out->gainDb.load(), juce::dontSendNotification);
@@ -260,6 +281,8 @@ void HeaderBar::resized()
     cpuButton.setBounds (row (r.removeFromRight (104), 40));
     r.removeFromRight (8);
     pluginsButton.setBounds (row (r.removeFromRight (78)));
+    r.removeFromRight (4);
+    controllerButton.setBounds (row (r.removeFromRight (126)));
     r.removeFromRight (4);
     audioButton.setBounds (row (r.removeFromRight (62)));
     r.removeFromRight (10);

@@ -109,7 +109,8 @@ private:
     std::atomic<uint8_t> msgId { 0 };
 
     // USB
-    struct Probe { juce::String inputId, outputId; double sentAt = 0; bool failed = false; };
+    struct Probe { juce::String inputId, outputId; double sentAt = 0; bool failed = false; int tries = 1; };
+    std::map<juce::String, std::unique_ptr<juce::MidiInput>> ownInputs;   // ports not enabled in AUDIO settings
     std::vector<Probe> probes;
     juce::StringArray lastDeviceSignature;
     std::unique_ptr<juce::MidiOutput> usbOut;
@@ -128,6 +129,7 @@ private:
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
 
     void scanUsb();
+    void sendHello (const juce::String& outputId);
     void discoverWifi();
     void handleMessage (const juce::String& json, Via from, const juce::String& source);
     void connectVia (Via, const juce::String& source, const ControllerInfo&);

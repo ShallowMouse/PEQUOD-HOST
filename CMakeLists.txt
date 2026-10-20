@@ -54,7 +54,10 @@ target_sources(PequodHost PRIVATE
     Source/RackProcessor.cpp
     Source/PresetLibrary.cpp
     Source/SettingsPanel.cpp
-    Source/PluginManagerPanel.cpp)
+    Source/PluginManagerPanel.cpp
+    Source/ControllerLink.cpp
+    Source/ControllerManager.cpp
+    Source/ControllerPanel.cpp)
 
 target_compile_definitions(PequodHost PRIVATE
     JUCE_PLUGINHOST_VST3=1

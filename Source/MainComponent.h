@@ -7,6 +7,9 @@
 #include "RackView.h"
 #include "ControlPanel.h"
 #include "PresetLibrary.h"
+#include "ControllerManager.h"
+
+class ControllerWindow;
 
 class PluginWindow;
 
@@ -34,6 +37,8 @@ private:
     HostEngine engine;
     ControlSurface control { engine };
     Tuner tuner { engine };
+    std::unique_ptr<ControllerManager> controller;
+    std::unique_ptr<ControllerWindow> controllerWindow;
 
     HeaderBar header { engine, control, tuner };
     BrowserPanel browser { engine, library };
@@ -83,6 +88,7 @@ private:
     void closePluginWindow (int slotUid);
     void showAudioSettings();
     void showPluginManager (bool autoScan);
+    void showController();
     void addPluginAtEnd (const juce::PluginDescription&);
 
     void setStatus (const juce::String&);

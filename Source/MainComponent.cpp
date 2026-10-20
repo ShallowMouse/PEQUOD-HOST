@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "SettingsPanel.h"
 #include "PluginManagerPanel.h"
+#include "ControllerPanel.h"
 
 //==============================================================================
 class PluginWindow : public juce::DocumentWindow
@@ -80,6 +81,18 @@ MainComponent::MainComponent()
     control.getBankIndex   = [this] { return library.getCurrentBankIndex(); };
     control.addChangeListener (this);
     control.setTuner (&tuner);
+
+    // Foot controller (PEQUOD FC)
+    controller = std::make_unique<ControllerManager> (engine, control, tuner, *settings);
+    controller->onStatus = [this] (const juce::String& s) { setStatus (s); };
+    controller->getPresetNames = [this]
+    {
+        juce::StringArray names;
+        for (auto& f : getPresetFiles()) names.add (f.getFileNameWithoutExtension());
+        return names;
+    };
+    header.onController = [this] { showController(); };
+    header.controllerState = [this] { return controller->isUpdating() ? 2 : controller->isConnected() ? 1 : 0; };
 
     engine.onSlotAboutToBeRemoved = [this] (int uid)
     {
@@ -166,6 +179,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    controllerWindow.reset();
     saveSettings();
 
     windows.clear();
@@ -175,6 +189,7 @@ MainComponent::~MainComponent()
     engine.onSlotAboutToBeRemoved = nullptr;
 
     library.removeChangeListener (this);
+    controller.reset();
     control.setTuner (nullptr);
     control.removeChangeListener (this);
     engine.knownPlugins.removeChangeListener (this);
@@ -629,6 +644,14 @@ void MainComponent::showAudioSettings()
     o.resizable = true;
     o.componentToCentreAround = this;
     o.launchAsync();
+}
+
+void MainComponent::showController()
+{
+    if (controllerWindow == nullptr)
+        controllerWindow = std::make_unique<ControllerWindow> (*controller, engine, control);
+    controllerWindow->setVisible (true);
+    controllerWindow->toFront (true);
 }
 
 void MainComponent::showPluginManager (bool autoScan)

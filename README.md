@@ -61,6 +61,20 @@ Any other address can be mapped with **LEARN**: touch a plugin control, then sen
 
 **Feedback sent out** (so TouchOSC, an ESP32 controller etc. stay in sync): every parameter change as `/pequod/slot/{n}/param/{p} f`, plus `/pequod/rack/count`, `/pequod/slot/{n}/name`, `/pequod/slot/{n}/on`, `/pequod/slot/{n}/params` (count), `/pequod/split/{k}/mix`, `/pequod/master/in|out`, `/pequod/mute`, `/pequod/tuner/note` (s, `-` when silent), `/pequod/tuner/cents` (f), `/pequod/tuner/hz` (f), `/pequod/bank/name`, `/pequod/bank/index`, `/pequod/preset/name`, `/pequod/preset/index`. `/pequod/sync` also sends `/pequod/slot/{n}/param/{p}/name`. Learned OSC addresses get feedback on their own address too.
 
+## Foot controller (PEQUOD FC)
+
+PEQUOD has native support for the ESP32-S3 modular foot controller (new master firmware in `Controller/PEQUOD_FC`,
+the slave boards are unchanged). Plug it in with USB or put it on Wi-Fi and the **CONTROLLER** button's dot turns green.
+
+* Press a switch with your foot and the CONTROLLER window jumps to it; pick what it does in plain words —
+  effect on/off (the same slot in every preset, or one effect in this preset), a plugin knob, next/previous/specific preset,
+  banks, tuner, mute, split A/B — or let it send its own MIDI to other gear, or change layers.
+* LEDs show what's on, the screen shows the bank and preset, flashes what you switched, and becomes a tuner while muted.
+* Everything the controller stores is edited there too: colours, layers, pedal calibration, MIDI out (USB / 5-pin), Wi-Fi,
+  brightness, name, firmware updates.
+
+Setup and flashing: [Controller/README.md](Controller/README.md). Protocol: [docs/controller-protocol.md](docs/controller-protocol.md).
+
 ## Building
 
 **GitHub (no local tools needed)**: push this folder to a GitHub repo. The *Build Windows* workflow builds on every push; download `PEQUOD-Host-Windows` from the run's *Artifacts*. Pushing a tag like `v1.0.0` also attaches the .exe to a release.

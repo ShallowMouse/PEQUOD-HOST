@@ -1,180 +1,57 @@
 #include "ControllerManager.h"
-
-#if PEQUOD_HAS_FIRMWARE
- #include <FirmwareData.h>
-#endif
+#include "PequodLookAndFeel.h"
 
 namespace
 {
-    juce::var obj() { return juce::var (new juce::DynamicObject()); }
+    juce::var makeObj() { return juce::var (new juce::DynamicObject()); }
 
-    juce::var msg (const char* type)
+    juce::String key (const juce::String& uid, int code) { return uid + ":" + juce::String (code); }
+
+    juce::AudioProcessorParameter* findParam (HostEngine& engine, int slotUid, int index)
     {
-        auto v = obj();
-        v.getDynamicObject()->setProperty ("t", type);
-        return v;
+        if (auto s = engine.findSlot (slotUid))
+            if (auto* inst = s->instance())
+            {
+                auto& params = inst->getParameters();
+                if (juce::isPositiveAndBelow (index, params.size()))
+                    return params[index];
+            }
+        return nullptr;
     }
 
-    void set (juce::var& v, const juce::Identifier& k, const juce::var& value) { v.getDynamicObject()->setProperty (k, value); }
-
-    juce::String key (const juce::String& uid, int control) { return uid + ":" + juce::String (control); }
-
-    juce::String hex (juce::Colour c) { return "#" + c.toDisplayString (false); }
-
-    /** The controller's screen font is plain ASCII. */
-    juce::String asciiFold (const juce::String& s)
+    juce::String upper (const juce::String& s, int maxLen)
     {
-        static const char* from = "\xC3\xA0\xC3\xA1\xC3\xA2\xC3\xA3\xC3\xA4\xC3\xA5\xC3\xA8\xC3\xA9\xC3\xAA\xC3\xAB\xC3\xAC\xC3\xAD\xC3\xAE\xC3\xAF\xC3\xB2\xC3\xB3\xC3\xB4\xC3\xB5\xC3\xB6\xC3\xB9\xC3\xBA\xC3\xBB\xC3\xBC\xC3\xB1\xC3\xA7";
-        static const char* to   = "aaaaaaeeeeiiiiooooouuuunc";
-        auto src = juce::String::fromUTF8 (from);
-        juce::String out;
-        for (auto p = s.getCharPointer(); ! p.isEmpty(); ++p)
-        {
-            auto c = juce::CharacterFunctions::toLowerCase (*p);
-            const bool upper = c != *p;
-            if (*p < 0x80) { out += *p; continue; }
-            const int i = src.indexOfChar (c);
-            if (i >= 0) { juce::juce_wchar r = (juce::juce_wchar) to[i]; out += upper ? juce::CharacterFunctions::toUpperCase (r) : r; }
-            else if (*p == 0x2013 || *p == 0x2014) out += "-";
-            else if (*p == 0x2019 || *p == 0x2018) out += "'";
-            else out += "?";
-        }
-        return out;
+        auto t = s.toUpperCase().trim();
+        return t.length() > maxLen ? t.substring (0, maxLen) : t;
     }
 
-    bool isMomentaryTarget (Mapping::Target t)
+    juce::String shortName (const juce::String& s, int maxLen)
     {
-        return t == Mapping::Target::presetNext || t == Mapping::Target::presetPrev
-            || t == Mapping::Target::bankNext   || t == Mapping::Target::bankPrev;
+        auto t = s.trim();
+        if (t.length() <= maxLen) return t;
+        auto firstWord = t.upToFirstOccurrenceOf (" ", false, false);
+        return firstWord.length() <= maxLen ? firstWord : t.substring (0, maxLen);
     }
 }
 
 //==============================================================================
-/** Sends firmware in 768-byte pieces, waiting for the controller to confirm each one. */
-class FirmwareUpdater : public juce::Thread
-{
-public:
-    FirmwareUpdater (ControllerManager& m, juce::MemoryBlock data)
-        : Thread ("PEQUOD firmware update"), manager (m), bin (std::move (data)) {}
-
-    ~FirmwareUpdater() override { signalThreadShouldExit(); ackEvent.signal(); stopThread (4000); }
-
-    void onAck (int n, bool ok, const juce::String& err)
-    {
-        const juce::ScopedLock sl (lock);
-        ackN = n; ackOk = ok; ackErr = err; ackFresh = true;
-        ackEvent.signal();
-    }
-
-    void onDone (bool ok, const juce::String& err)
-    {
-        const juce::ScopedLock sl (lock);
-        doneOk = ok; doneErr = err; doneFresh = true;
-        ackEvent.signal();
-    }
-
-    std::atomic<float> progress { 0.0f };
-    std::atomic<bool> finished { false }, succeeded { false };
-
-    juce::String getStatus() const { const juce::ScopedLock sl (lock); return status; }
-
-private:
-    ControllerManager& manager;
-    juce::MemoryBlock bin;
-    juce::CriticalSection lock;
-    juce::WaitableEvent ackEvent;
-    int ackN = -99; bool ackOk = false, ackFresh = false; juce::String ackErr;
-    bool doneOk = false, doneFresh = false; juce::String doneErr;
-    juce::String status;
-
-    void setStatus (const juce::String& s) { const juce::ScopedLock sl (lock); status = s; }
-
-    bool waitAck (int n, int timeoutMs, juce::String& err)
-    {
-        const auto until = juce::Time::getMillisecondCounter() + (juce::uint32) timeoutMs;
-        while (! threadShouldExit())
-        {
-            {
-                const juce::ScopedLock sl (lock);
-                if (ackFresh && ackN == n) { ackFresh = false; err = ackErr; return ackOk; }
-                ackFresh = false;
-            }
-            const auto now = juce::Time::getMillisecondCounter();
-            if (now >= until) { err = "no answer"; return false; }
-            ackEvent.wait ((int) (until - now));
-        }
-        err = "cancelled";
-        return false;
-    }
-
-    bool sendWithRetry (const juce::var& m, int n, int timeoutMs, juce::String& err)
-    {
-        for (int attempt = 0; attempt < 5 && ! threadShouldExit(); ++attempt)
-        {
-            manager.link.send (m);
-            if (waitAck (n, timeoutMs, err)) return true;
-            if (err != "no answer") return false;      // the controller refused: don't retry
-        }
-        return false;
-    }
-
-    void run() override
-    {
-        auto fail = [this] (const juce::String& why) { setStatus ("Update failed: " + why); finished = true; };
-
-        setStatus ("Starting update...");
-        auto begin = msg ("fw_begin");
-        set (begin, "size", (int) bin.getSize());
-        set (begin, "md5", juce::MD5 (bin).toHexString());
-        juce::String err;
-        if (! sendWithRetry (begin, -1, 5000, err)) return fail (err);
-
-        constexpr int chunk = 768;
-        const int total = (int) ((bin.getSize() + chunk - 1) / chunk);
-        for (int n = 0; n < total && ! threadShouldExit(); ++n)
-        {
-            const auto offset = (size_t) n * chunk;
-            const auto len = juce::jmin ((size_t) chunk, bin.getSize() - offset);
-            auto data = msg ("fw_data");
-            set (data, "n", n);
-            set (data, "d", juce::Base64::toBase64 (static_cast<const char*> (bin.getData()) + offset, len));
-            if (! sendWithRetry (data, n, 4000, err)) return fail (err);
-            progress = (float) (n + 1) / (float) total;
-            setStatus ("Sending firmware... " + juce::String (juce::roundToInt (progress * 100.0f)) + "%");
-        }
-        if (threadShouldExit()) { manager.link.send (msg ("fw_abort")); return fail ("cancelled"); }
-
-        setStatus ("Checking and installing...");
-        { const juce::ScopedLock sl (lock); doneFresh = false; }
-        manager.link.send (msg ("fw_end"));
-        const auto until = juce::Time::getMillisecondCounter() + 20000;
-        while (! threadShouldExit() && juce::Time::getMillisecondCounter() < until)
-        {
-            {
-                const juce::ScopedLock sl (lock);
-                if (doneFresh)
-                {
-                    if (! doneOk) { status = "Update failed: " + doneErr; finished = true; return; }
-                    status = "Updated. The controller is restarting...";
-                    succeeded = true; finished = true;
-                    return;
-                }
-            }
-            ackEvent.wait (200);
-        }
-        fail ("the controller didn't confirm the update");
-    }
-};
-
-//==============================================================================
-ControllerManager::ControllerManager (HostEngine& e, ControlSurface& c, juce::PropertiesFile& p)
-    : engine (e), control (c), props (p), link (e.deviceManager)
+ControllerManager::ControllerManager (HostEngine& e, ControlSurface& c, Tuner& t, juce::PropertiesFile& p)
+    : engine (e), control (c), tuner (t), props (p), link (e.deviceManager)
 {
     link.setManualAddress (props.getValue ("controllerIp"));
     link.addListener (this);
+    control.addChangeListener (this);
 
-    control.controllerSourceName = [this] (const Mapping& m) { return describeSource (m); };
-    control.onControllerMappingAdded = [this] (const Mapping& m) { claim (m.ctrlUnit, m.ctrlControl, m.ctrlLayer); };
+    control.controllerSourceName = [this] (const Mapping& m)
+    {
+        // short, so it fits the MAPPINGS list: "Switches 1 S2 L1"
+        const int c = m.ctrlControl;
+        juce::String ctrl = c < 4 ? "S" + juce::String (c + 1)
+                          : c == Mapping::ctrlPedal ? juce::String ("Pedal")
+                          : c == Mapping::ctrlEncoderTurn ? juce::String ("Turn") : juce::String ("Push");
+        if (auto* u = getInfo().findUnit (m.ctrlUnit)) if (u->kind == "pedal_switch" && c == 0) ctrl = "Toe";
+        return unitName (m.ctrlUnit) + " " + ctrl + (getNumLayers() > 1 ? " L" + juce::String (m.ctrlLayer + 1) : juce::String());
+    };
 
     startTimerHz (30);
 }
@@ -182,121 +59,265 @@ ControllerManager::ControllerManager (HostEngine& e, ControlSurface& c, juce::Pr
 ControllerManager::~ControllerManager()
 {
     stopTimer();
-    updater.reset();
+    if (configDirty) sendConfigNow();
     control.controllerSourceName = nullptr;
-    control.onControllerMappingAdded = nullptr;
+    control.removeChangeListener (this);
     link.removeListener (this);
 }
 
-//==============================================================================
-juce::String ControllerManager::controlName (const ControllerUnit& u, int c)
+void ControllerManager::setManualAddress (const juce::String& ip)
 {
-    auto unit = u.name + " " + juce::String (u.slot + 1);
-    if (c == Mapping::ctrlPedal)        return unit;
-    if (c == Mapping::ctrlEncoderTurn)  return unit + " turn";
-    if (c == Mapping::ctrlEncoderPress) return unit + " press";
-    if (u.kind == "pedal_switch")       return unit + " switch";
-    return unit + " / " + juce::String (c + 1);
+    link.setManualAddress (ip);
+    props.setValue ("controllerIp", ip.trim());
 }
 
-juce::String ControllerManager::describeSource (const Mapping& m) const
+void ControllerManager::status (const juce::String& s)
 {
-    if (auto* u = getInfo().findUnit (m.ctrlUnit))
-    {
-        auto s = controlName (*u, m.ctrlControl);
-        if (getInfo().layers > 1) s << "  L" << (m.ctrlLayer + 1);
-        return s;
-    }
-    return "Controller (not connected)";
+    if (onStatus) onStatus (s);
 }
 
-juce::String ControllerManager::shortLabel (const Mapping& m) const
+void ControllerManager::sendCmd (const juce::String& type, std::initializer_list<std::pair<const char*, juce::var>> fields)
 {
-    switch (m.target)
-    {
-        case Mapping::Target::bypass:
-            if (auto s = engine.findSlot (m.slotUid)) return s->description.name.toUpperCase();
-            return "MODULE";
-        case Mapping::Target::param:
-            if (auto s = engine.findSlot (m.slotUid))
-                if (auto* inst = s->instance())
-                    if (juce::isPositiveAndBelow (m.paramIndex, inst->getParameters().size()))
-                        return inst->getParameters()[m.paramIndex]->getName (14).toUpperCase();
-            return "PARAMETER";
-        case Mapping::Target::splitMix:   return "SPLIT " + juce::String (engine.getSplitNumber (m.slotUid)) + " A/B";
-        case Mapping::Target::inputGain:  return "INPUT";
-        case Mapping::Target::outputGain: return "VOLUME";
-        case Mapping::Target::presetNext: return "PRESET +";
-        case Mapping::Target::presetPrev: return "PRESET -";
-        case Mapping::Target::bankNext:   return "BANK +";
-        case Mapping::Target::bankPrev:   return "BANK -";
-        case Mapping::Target::mute:       return "MUTE";
-        case Mapping::Target::tuner:      return "TUNER";
-    }
-    return {};
-}
-
-juce::Colour ControllerManager::defaultColour (Mapping::Target t)
-{
-    switch (t)
-    {
-        case Mapping::Target::splitMix:   return juce::Colour (0xff3d9be9);
-        case Mapping::Target::presetNext: case Mapping::Target::presetPrev:
-        case Mapping::Target::bankNext:   case Mapping::Target::bankPrev: return juce::Colour (0xffeae4d6);
-        case Mapping::Target::mute:       return juce::Colour (0xffe8402e);
-        case Mapping::Target::tuner:      return juce::Colour (0xff35c96a);
-        default:                          return juce::Colour (0xffe0a82e);   // PEQUOD mustard
-    }
-}
-
-juce::Colour ControllerManager::colourFor (const Mapping& m) const
-{
-    return m.ledColour != 0 ? juce::Colour (m.ledColour).withAlpha (1.0f) : defaultColour (m.target);
-}
-
-bool ControllerManager::mappingIsOn (const Mapping& m) const
-{
-    switch (m.target)
-    {
-        case Mapping::Target::bypass:   if (auto s = engine.findSlot (m.slotUid)) return ! s->bypassed.load(); return false;
-        case Mapping::Target::param:
-            if (auto s = engine.findSlot (m.slotUid))
-                if (auto* inst = s->instance())
-                    if (juce::isPositiveAndBelow (m.paramIndex, inst->getParameters().size()))
-                        return inst->getParameters()[m.paramIndex]->getValue() >= 0.5f;
-            return false;
-        case Mapping::Target::splitMix:
-            for (auto& item : engine.getItems()) if (item.uid == m.slotUid) return item.mix >= 0.5f;
-            return false;
-        case Mapping::Target::mute:     return control.isMuted();
-        case Mapping::Target::tuner:    return control.isTunerMode();
-        default:                        return false;
-    }
-}
-
-juce::String ControllerManager::flashFor (const Mapping& m) const
-{
-    switch (m.target)
-    {
-        case Mapping::Target::bypass:   return shortLabel (m) + (mappingIsOn (m) ? " ON" : " OFF");
-        case Mapping::Target::param:    return shortLabel (m) + (mappingIsOn (m) ? " ON" : " OFF");
-        case Mapping::Target::splitMix: return shortLabel (m).upToLastOccurrenceOf (" ", false, false) + (mappingIsOn (m) ? " > B" : " > A");
-        case Mapping::Target::mute:     return control.isMuted() ? "MUTED" : "UNMUTED";
-        default:                        return {};
-    }
+    auto m = makeObj();
+    m.getDynamicObject()->setProperty ("t", type);
+    for (auto& f : fields) m.getDynamicObject()->setProperty (f.first, f.second);
+    link.send (m);
 }
 
 //==============================================================================
-juce::String ControllerManager::uidForSlot (int slot) const
+// Settings
+//==============================================================================
+juce::var ControllerManager::get (const juce::String& path) const
 {
-    if (auto* u = getInfo().findSlot (slot)) return u->uid;
+    juce::var v = config;
+    for (auto& part : juce::StringArray::fromTokens (path, ".", {}))
+    {
+        if (auto* arr = v.getArray())
+        {
+            const int i = part.getIntValue();
+            if (! juce::isPositiveAndBelow (i, arr->size())) return {};
+            v = arr->getReference (i);
+        }
+        else if (auto* o = v.getDynamicObject())
+            v = o->getProperty (part);
+        else
+            return {};
+    }
+    return v;
+}
+
+void ControllerManager::set (const juce::String& path, const juce::var& value)
+{
+    if (! config.isObject()) return;
+    auto parts = juce::StringArray::fromTokens (path, ".", {});
+    if (parts.isEmpty()) return;
+
+    juce::var v = config;
+    for (int i = 0; i < parts.size() - 1; ++i)
+    {
+        juce::var next;
+        if (auto* arr = v.getArray())
+        {
+            const int idx = parts[i].getIntValue();
+            while (arr->size() <= idx) arr->add (makeObj());
+            next = arr->getReference (idx);
+        }
+        else if (auto* o = v.getDynamicObject())
+        {
+            next = o->getProperty (parts[i]);
+            if (! next.isObject() && ! next.isArray())
+            {
+                // "layers" and "layerColors" are lists; everything else is an object
+                next = (parts[i] == "layers" && i > 0) || parts[i] == "layerColors" ? juce::var (juce::Array<juce::var>()) : makeObj();
+                o->setProperty (parts[i], next);
+                next = o->getProperty (parts[i]);
+            }
+        }
+        else return;
+        v = next;
+    }
+
+    if (auto* arr = v.getArray())
+    {
+        const int idx = parts[parts.size() - 1].getIntValue();
+        while (arr->size() <= idx) arr->add ({});
+        arr->set (idx, value);
+    }
+    else if (auto* o = v.getDynamicObject())
+        o->setProperty (parts[parts.size() - 1], value);
+
+    configDirty = true;
+    configDirtySince = juce::Time::getMillisecondCounterHiRes();
+    sendChangeMessage();
+}
+
+void ControllerManager::sendConfigNow()
+{
+    configDirty = false;
+    if (! config.isObject()) return;
+    sendCmd ("set_cfg", { { "cfg", config } });
+
+    // Passwords travel once; after that the controller just says it has one.
+    for (auto* k : { "pass", "pass2" })
+        if (get (juce::String ("wifi.") + k).isString())
+        {
+            const bool has = get (juce::String ("wifi.") + k).toString().isNotEmpty();
+            if (auto* w = get ("wifi").getDynamicObject())
+            {
+                w->setProperty (k, juce::var());
+                w->setProperty (juce::String (k) == "pass" ? "hasPass" : "hasPass2", has);
+            }
+        }
+}
+
+void ControllerManager::setName (const juce::String& newName)
+{
+    auto n = newName.trim().substring (0, 24);
+    if (n.isEmpty() || n == get ("name").toString()) return;
+    set ("name", n);
+    sendConfigNow();
+    status ("Renaming the controller to \"" + n + "\" - it restarts so the computer sees the new name");
+    rebootAt = juce::Time::getMillisecondCounterHiRes() + 700;
+}
+
+int ControllerManager::getNumLayers() const
+{
+    return juce::jlimit (1, 4, hasConfig() ? (int) get ("layers") : getInfo().layers);
+}
+
+void ControllerManager::selectLayer (int l)
+{
+    layer = juce::jlimit (0, getNumLayers() - 1, l);
+    sendCmd ("layer", { { "l", layer } });
+    updateLeds (true);
+    sendChangeMessage();
+}
+
+juce::Colour ControllerManager::layerColour (int l) const
+{
+    static const juce::uint32 defaults[4] = { 0xF44336, 0x9C27B0, 0x2196F3, 0x4CAF50 };
+    auto s = get ("layerColors." + juce::String (l)).toString().trimCharactersAtStart ("#");
+    return juce::Colour (0xff000000 | (s.isNotEmpty() ? (juce::uint32) s.getHexValue32() : defaults[juce::jlimit (0, 3, l)]));
+}
+
+//==============================================================================
+// Controls
+//==============================================================================
+juce::Array<int> ControllerManager::controlCodes (const ControllerUnit& u)
+{
+    if (u.kind == "footswitch" || u.kind == "button") return { 0, 1, 2, 3 };
+    if (u.kind == "pedal")        return { Mapping::ctrlPedal };
+    if (u.kind == "pedal_switch") return { Mapping::ctrlPedal, 0 };
+    if (u.kind == "encoder")      return { Mapping::ctrlEncoderTurn, Mapping::ctrlEncoderPress };
     return {};
 }
 
-bool ControllerManager::isPressed (const juce::String& uid, int c) const
+juce::String ControllerManager::controlName (const ControllerUnit& u, int code)
 {
-    auto it = pressedNow.find (key (uid, c));
-    return it != pressedNow.end() && it->second;
+    if (code == Mapping::ctrlPedal)        return "Pedal";
+    if (code == Mapping::ctrlEncoderTurn)  return "Turn";
+    if (code == Mapping::ctrlEncoderPress) return "Push";
+    if (u.kind == "pedal_switch")          return "Toe switch";
+    return "Switch " + juce::String (code + 1);
+}
+
+bool ControllerManager::hasLed (const ControllerUnit& u, int code)
+{
+    return (u.hasButtons() && code >= 0 && code < 4) || (u.kind == "pedal_switch" && code == 0);
+}
+
+juce::String ControllerManager::unitName (const juce::String& uid) const
+{
+    auto n = get ("units." + uid + ".name").toString();
+    if (n.isNotEmpty()) return n;
+    if (auto* u = getInfo().findUnit (uid)) return u->name;
+    return uid;
+}
+
+juce::String ControllerManager::describeControl (const juce::String& uid, int code, int lay) const
+{
+    juce::String ctrl = "Switch " + juce::String (code + 1);
+    if (auto* u = getInfo().findUnit (uid)) ctrl = controlName (*u, code);
+    else if (code == Mapping::ctrlPedal) ctrl = "Pedal";
+    else if (code == Mapping::ctrlEncoderTurn) ctrl = "Turn";
+    else if (code == Mapping::ctrlEncoderPress) ctrl = "Push";
+
+    auto s = unitName (uid) + " " + ctrl;
+    if (getNumLayers() > 1) s << " L" << (lay + 1);
+    return s;
+}
+
+juce::String ControllerManager::modeOf (const juce::String& uid, int code, int lay) const
+{
+    auto m = get (actionPath (uid, code, lay) + ".mode").toString();
+    return m.isEmpty() ? juce::String ("pequod") : m;
+}
+
+const Mapping* ControllerManager::mappingFor (const juce::String& uid, int code, int lay) const
+{
+    return control.findControllerMapping (uid, code, lay);
+}
+
+juce::String ControllerManager::shortLabel (const juce::String& uid, int code, int lay) const
+{
+    auto mode = modeOf (uid, code, lay);
+    auto num = (int) get (actionPath (uid, code, lay) + ".num");
+
+    if (mode == "pequod")
+    {
+        auto* m = mappingFor (uid, code, lay);
+        if (m == nullptr) return "-";
+        switch (m->target)
+        {
+            case Mapping::Target::bypass:
+                if (auto s = engine.findSlot (m->slotUid)) return shortName (s->description.name, 11);
+                return "?";
+            case Mapping::Target::stompSlot:
+            {
+                auto slots = engine.getFlatSlots();
+                if (m->paramIndex > 0 && m->paramIndex <= (int) slots.size())
+                    return shortName (slots[(size_t) m->paramIndex - 1]->description.name, 11);
+                return "FX " + juce::String (m->paramIndex);
+            }
+            case Mapping::Target::param:
+                if (auto* p = findParam (engine, m->slotUid, m->paramIndex)) return shortName (p->getName (24), 9);
+                return "?";
+            case Mapping::Target::presetNext:   return code == Mapping::ctrlEncoderTurn ? "PRESETS" : "NEXT";
+            case Mapping::Target::presetPrev:   return "PREV";
+            case Mapping::Target::presetSelect: return "P" + juce::String (m->paramIndex);
+            case Mapping::Target::bankNext:     return code == Mapping::ctrlEncoderTurn ? "BANKS" : "BANK +";
+            case Mapping::Target::bankPrev:     return "BANK -";
+            case Mapping::Target::mute:         return "MUTE";
+            case Mapping::Target::tuner:        return "TUNER";
+            case Mapping::Target::splitMix:     return "SPLIT " + juce::String (engine.getSplitNumber (m->slotUid));
+            case Mapping::Target::inputGain:    return "IN";
+            case Mapping::Target::outputGain:   return "VOLUME";
+        }
+        return "?";
+    }
+    if (mode == "cc" || mode == "cc_rel" || mode == "cc_abs") return "CC " + juce::String (num);
+    if (mode == "note")       return juce::MidiMessage::getMidiNoteName (num, true, true, 3);
+    if (mode == "pc")         return code == Mapping::ctrlEncoderTurn ? juce::String ("PROGRAM") : "PC " + juce::String (num);
+    if (mode == "layer_next") return "LAYER +";
+    if (mode == "layer_prev") return "LAYER -";
+    if (mode == "layer_set")  return "LAYER " + juce::String (num);
+    if (mode == "layer_hold") return "HOLD L" + juce::String (num);
+    if (mode == "layer")      return "LAYERS";
+    return "-";
+}
+
+juce::Colour ControllerManager::colourOf (const juce::String& uid, int code) const
+{
+    auto s = get (controlPath (uid, code) + ".color").toString();
+    if (s == "layer") return layerColour (layer);
+    s = s.trimCharactersAtStart ("#");
+    return s.isEmpty() ? Pequod::Colours::mustard : juce::Colour (0xff000000 | (juce::uint32) s.getHexValue32());
+}
+
+bool ControllerManager::isPressed (const juce::String& uid, int code) const
+{
+    auto it = pressed.find (key (uid, code));
+    return it != pressed.end() && it->second;
 }
 
 float ControllerManager::pedalValue (const juce::String& uid) const
@@ -305,533 +326,496 @@ float ControllerManager::pedalValue (const juce::String& uid) const
     return it != pedals.end() ? it->second : 0.0f;
 }
 
-juce::Colour ControllerManager::ledColourShown (const juce::String& uid, int c) const
+int ControllerManager::pedalRaw (const juce::String& uid) const
 {
-    auto it = ledShown.find (key (uid, c));
-    return it != ledShown.end() ? it->second : juce::Colours::transparentBlack;
+    auto it = raws.find (uid);
+    return it != raws.end() ? it->second : -1;
 }
 
-int ControllerManager::pedalRaw (int slot) const
+void ControllerManager::watchPedal (const juce::String& uid, bool on)
 {
-    auto it = rawPedals.find (slot);
-    return it != rawPedals.end() ? it->second : -1;
+    if (on) watched.insert (uid); else watched.erase (uid);
+    sendCmd ("cal", { { "u", uid }, { "on", on } });
 }
 
-juce::var ControllerManager::getUnitConfig (int slot) const
+bool ControllerManager::mappingIsOn (const Mapping& m) const
 {
-    auto it = cfgCache.find (slot);
-    return it != cfgCache.end() ? it->second : juce::var();
-}
-
-//== Ownership ===================================================================
-juce::String ControllerManager::controlType (int slot, const ControllerUnit& u, int c, int layer) const
-{
-    auto cfg = getUnitConfig (slot);
-    if (! cfg.isObject()) return {};
-    if (c == Mapping::ctrlEncoderTurn)  return cfg["encoder"]["rotationMode"].toString();
-    if (c == Mapping::ctrlEncoderPress) return cfg["encoder"]["buttonMode"].toString();
-    const int L = (c == Mapping::ctrlPedal) ? 0 : juce::jlimit (0, 3, layer);
-    const int b = (c == Mapping::ctrlPedal) ? 0 : c;
-    juce::ignoreUnused (u);
-    return cfg["layers"][L]["buttons"][b]["type"].toString();
-}
-
-juce::var ControllerManager::typePatch (const ControllerUnit& u, int c, int layer, const juce::String& type) const
-{
-    juce::ignoreUnused (u);
-    auto patch = obj();
-    if (c == Mapping::ctrlEncoderTurn || c == Mapping::ctrlEncoderPress)
+    switch (m.target)
     {
-        auto e = obj();
-        set (e, c == Mapping::ctrlEncoderTurn ? "rotationMode" : "buttonMode", type);
-        set (patch, "encoder", e);
-        return patch;
+        case Mapping::Target::bypass:
+            if (auto s = engine.findSlot (m.slotUid)) return ! s->bypassed;
+            return false;
+        case Mapping::Target::stompSlot:
+        {
+            auto slots = engine.getFlatSlots();
+            return m.paramIndex > 0 && m.paramIndex <= (int) slots.size() && ! slots[(size_t) m.paramIndex - 1]->bypassed;
+        }
+        case Mapping::Target::param:
+            if (auto* p = findParam (engine, m.slotUid, m.paramIndex)) return p->getValue() >= 0.5f;
+            return false;
+        case Mapping::Target::splitMix:
+            if (auto* item = engine.findItem (m.slotUid)) return item->mix >= 0.5f;
+            return false;
+        case Mapping::Target::mute:         return control.isMuted() && ! control.isTunerMode();
+        case Mapping::Target::tuner:        return control.isTunerMode();
+        case Mapping::Target::presetSelect: return control.getPresetIndex && control.getPresetIndex() == m.paramIndex - 1;
+        case Mapping::Target::presetNext: case Mapping::Target::presetPrev:
+        case Mapping::Target::bankNext:   case Mapping::Target::bankPrev:
+        case Mapping::Target::inputGain:  case Mapping::Target::outputGain:
+            return false;
     }
-    const int L = (c == Mapping::ctrlPedal) ? 0 : juce::jlimit (0, 3, layer);
-    const int b = (c == Mapping::ctrlPedal) ? 0 : c;
-    juce::Array<juce::var> buttons;
-    for (int i = 0; i < b; ++i) buttons.add (juce::var());
-    auto btn = obj(); set (btn, "type", type);
-    buttons.add (btn);
-    auto layerObj = obj(); set (layerObj, "buttons", buttons);
-    juce::Array<juce::var> layers;
-    for (int i = 0; i < L; ++i) layers.add (juce::var());
-    layers.add (layerObj);
-    set (patch, "layers", layers);
-    return patch;
+    return false;
 }
 
-bool ControllerManager::isClaimed (const ControllerUnit& u, int c, int layer) const
+bool ControllerManager::isLit (const juce::String& uid, int code) const
 {
-    return controlType (u.slot, u, c, layer) == "pequod";
+    if (isPressed (uid, code)) return true;
+    auto mode = modeOf (uid, code, layer);
+    if (mode == "pequod")
+        if (auto* m = mappingFor (uid, code, layer)) return mappingIsOn (*m);
+    auto led = get (controlPath (uid, code) + ".led").toString();
+    return led == "on";
 }
 
-juce::var ControllerManager::prevTypes() const
+//==============================================================================
+// PEQUOD functions
+//==============================================================================
+void ControllerManager::assign (const juce::String& uid, int code, int lay, Mapping::Target target, int uidOrIndex, bool latching)
 {
-    auto v = juce::JSON::parse (props.getValue ("controllerPrevTypes"));
-    return v.isObject() ? v : obj();
+    Mapping m;
+    m.source = Mapping::Source::controller;
+    m.ctrlUnit = uid;
+    m.ctrlControl = code;
+    m.ctrlLayer = lay;
+    m.target = target;
+    m.toggle = latching;
+    if (target == Mapping::Target::stompSlot || target == Mapping::Target::presetSelect) m.paramIndex = uidOrIndex;
+    else m.slotUid = uidOrIndex;
+
+    if (modeOf (uid, code, lay) != "pequod") set (actionPath (uid, code, lay) + ".mode", "pequod");
+    control.setControllerMapping (m);
+    updateLeds (true);
 }
 
-void ControllerManager::setPrevType (const juce::String& k, const juce::String& type)
+void ControllerManager::unassign (const juce::String& uid, int code, int lay)
 {
-    auto v = prevTypes();
-    if (type.isEmpty()) v.getDynamicObject()->removeProperty (k);
-    else set (v, k, type);
-    props.setValue ("controllerPrevTypes", juce::JSON::toString (v, true));
+    control.clearControllerMapping (uid, code, lay);
+    updateLeds (true);
 }
 
-void ControllerManager::claim (const juce::String& uid, int c, int layer)
+void ControllerManager::learnPluginControl (const juce::String& uid, int code, int lay)
 {
-    auto* u = getInfo().findUnit (uid);
-    if (u == nullptr) return;
-    if (! getUnitConfig (u->slot).isObject())
+    if (modeOf (uid, code, lay) != "pequod") set (actionPath (uid, code, lay) + ".mode", "pequod");
+    control.armLearnForController (uid, code, lay, describeControl (uid, code, lay));
+}
+
+bool ControllerManager::quickSetup()
+{
+    if (! isConnected()) return false;
+    int switchBoards = 0, nextStomp = 1;
+    bool any = false;
+
+    auto free = [this] (const juce::String& uid, int code)
     {
-        pendingClaims.emplace_back (uid, c, layer);   // once its settings arrive
-        return;
-    }
-    const auto current = controlType (u->slot, *u, c, layer);
-    if (current == "pequod") return;
+        return modeOf (uid, code, 0) == "pequod" && mappingFor (uid, code, 0) == nullptr;
+    };
 
-    setPrevType (getInfo().id + ":" + uid + ":" + juce::String (c) + ":" + juce::String (layer), current);
-    setUnitConfig (u->slot, typePatch (*u, c, layer, "pequod"));
-}
-
-void ControllerManager::release (const ControllerUnit& u, int c, int layer)
-{
-    const auto k = getInfo().id + ":" + u.uid + ":" + juce::String (c) + ":" + juce::String (layer);
-    auto prev = prevTypes()[juce::Identifier (k)].toString();
-    if (prev.isEmpty() || prev == "pequod")
-        prev = (c == Mapping::ctrlPedal) ? "cc" : (c == Mapping::ctrlEncoderTurn) ? "layer_global"
-             : (c == Mapping::ctrlEncoderPress) ? "layer_toggle" : "note";
-    control.clearControllerMapping (u.uid, c, layer);
-    setUnitConfig (u.slot, typePatch (u, c, layer, prev));
-    setPrevType (k, {});
-    if (onStatus) onStatus (controlName (u, c) + " uses its own MIDI settings again");
-}
-
-void ControllerManager::setLedColour (const juce::String& uid, int c, int layer, juce::Colour col)
-{
-    if (auto* m = control.findControllerMapping (uid, c, layer))
-    {
-        Mapping copy = *m;
-        copy.ledColour = col.getARGB();
-        control.setControllerMapping (copy);
-    }
-}
-
-void ControllerManager::identify (const ControllerUnit& u, int c)
-{
-    auto m = msg ("identify");
-    set (m, "s", u.slot);
-    set (m, "b", u.kind == "pedal_switch" ? 1 : c);
-    link.send (m);
-}
-
-void ControllerManager::selectLayer (int layer)
-{
-    auto m = msg ("layer");
-    set (m, "l", layer);
-    link.send (m);
-}
-
-//== Device settings ============================================================
-void ControllerManager::setSettings (const juce::var& patch)
-{
-    auto m = patch.isObject() ? juce::JSON::parse (juce::JSON::toString (patch)) : obj();
-    set (m, "t", "set_settings");
-    link.send (m);
-}
-
-void ControllerManager::setUnitConfig (int slot, const juce::var& patch)
-{
-    auto m = msg ("set_cfg");
-    set (m, "slot", slot);
-    set (m, "cfg", patch);
-    link.send (m);
-}
-
-void ControllerManager::rescanUnits() { link.send (msg ("rescan")); }
-
-void ControllerManager::watchPedal (int slot, bool on)
-{
-    auto m = msg ("cal");
-    set (m, "s", slot);
-    set (m, "on", on);
-    link.send (m);
-}
-
-void ControllerManager::requestConfigs()
-{
     for (auto& u : getInfo().units)
     {
-        auto m = msg ("get_cfg");
-        set (m, "slot", u.slot);
-        link.send (m);
+        if (u.hasButtons())
+        {
+            ++switchBoards;
+            for (int c = 0; c < 4; ++c)
+            {
+                if (! free (u.uid, c)) { if (switchBoards == 1 && c < 3) ++nextStomp; continue; }
+                any = true;
+                if (switchBoards == 1)
+                {
+                    if (c < 3) assign (u.uid, c, 0, Mapping::Target::stompSlot, nextStomp++);
+                    else       assign (u.uid, c, 0, Mapping::Target::presetNext);
+                }
+                else if (switchBoards == 2) assign (u.uid, c, 0, Mapping::Target::presetSelect, c + 1);
+                else                        assign (u.uid, c, 0, Mapping::Target::stompSlot, nextStomp++);
+            }
+        }
+        else if (u.kind == "pedal_switch" && free (u.uid, 0))  { assign (u.uid, 0, 0, Mapping::Target::tuner); any = true; }
+        else if (u.isEncoder())
+        {
+            if (free (u.uid, Mapping::ctrlEncoderTurn))  { assign (u.uid, Mapping::ctrlEncoderTurn, 0, Mapping::Target::presetNext); any = true; }
+            if (free (u.uid, Mapping::ctrlEncoderPress)) { assign (u.uid, Mapping::ctrlEncoderPress, 0, Mapping::Target::tuner); any = true; }
+        }
     }
-    link.send (msg ("get_settings"));
+    return any;
 }
 
-//== Link events =================================================================
+//==============================================================================
+// Maintenance
+//==============================================================================
+void ControllerManager::identify (const juce::String& uid, int code) { sendCmd ("identify", { { "u", uid }, { "c", code } }); }
+void ControllerManager::rescan()       { sendCmd ("rescan"); status ("Looking for boards on the controller..."); }
+void ControllerManager::reboot()       { if (configDirty) sendConfigNow(); sendCmd ("reboot"); }
+void ControllerManager::factoryReset() { sendCmd ("factory"); status ("Controller reset to factory settings - it restarts now"); }
+
+void ControllerManager::scanWifi()
+{
+    wifiScanning = true;
+    sendCmd ("wifiscan");
+    sendChangeMessage();
+}
+
+bool ControllerManager::startFirmwareUpdate (const juce::File& file, juce::String& whyNot)
+{
+    if (! isConnected()) { whyNot = "The controller isn't connected."; return false; }
+    if (fw.active)       { whyNot = "An update is already running."; return false; }
+
+    juce::MemoryBlock image;
+    if (! file.loadFileAsData (image) || image.getSize() < 1024) { whyNot = "That file couldn't be read."; return false; }
+    if (((const uint8_t*) image.getData())[0] != 0xE9)
+    {
+        whyNot = "That isn't an ESP32 firmware file. Use PEQUOD_FC.bin (not the -full.bin).";
+        return false;
+    }
+    if (! getInfo().otaOk)
+    {
+        whyNot = "This controller was flashed with a partition scheme that has no room for updates. Flash it once with USB from the Arduino IDE.";
+        return false;
+    }
+    if (getInfo().otaMax > 0 && (int64_t) image.getSize() > getInfo().otaMax)
+    {
+        whyNot = "That firmware is too big for this controller.";
+        return false;
+    }
+
+    fw = {};
+    fw.active = true;
+    fw.image = std::move (image);
+    fw.total = (int) ((fw.image.getSize() + fwChunk - 1) / fwChunk);
+    fw.waitingBegin = true;
+    fw.sentAt = juce::Time::getMillisecondCounterHiRes();
+    fw.status = "Starting update...";
+    sendCmd ("fw_begin", { { "size", (int) fw.image.getSize() } });
+    sendChangeMessage();
+    return true;
+}
+
+void ControllerManager::sendFirmwareChunk()
+{
+    const size_t off = (size_t) fw.next * fwChunk;
+    const size_t n = juce::jmin ((size_t) fwChunk, fw.image.getSize() - off);
+    sendCmd ("fw_data", { { "n", fw.next },
+                          { "d", juce::Base64::toBase64 ((const char*) fw.image.getData() + off, n) } });
+    fw.sentAt = juce::Time::getMillisecondCounterHiRes();
+}
+
+void ControllerManager::finishFirmware (const juce::String& s)
+{
+    fw.active = false;
+    fw.image.reset();
+    fw.status = s;
+    status (s);
+    sendChangeMessage();
+}
+
+//==============================================================================
+// Link events
+//==============================================================================
 void ControllerManager::controllerConnected()
 {
-    cfgCache.clear();
-    lastLedSent.clear();
+    layer = getInfo().layer;
+    config = juce::var();
+    pressed.clear();
+    networks.clear();
+    lastLeds.clear();
     lastScreen.clear();
-    backupPending = true;
-    requestConfigs();
-    if (onStatus) onStatus ("Controller connected over " + link.describeConnection());
+    sendCmd ("get_cfg");
+    for (auto& uid : watched) sendCmd ("cal", { { "u", uid }, { "on", true } });
+    status ("Foot controller \"" + getInfo().name + "\" connected (" + describeConnection() + ")");
     sendChangeMessage();
 }
 
 void ControllerManager::controllerDisconnected()
 {
-    cfgCache.clear();
-    pressedNow.clear();
-    ledShown.clear();
-    if (onStatus && ! isUpdating()) onStatus ("Controller disconnected");
+    if (fw.active && fw.next < fw.total) finishFirmware ("Firmware update interrupted - the controller kept its old firmware");
+    config = juce::var();
+    configDirty = false;
+    pressed.clear();
+    wifiScanning = false;
+    status ("Foot controller disconnected");
     sendChangeMessage();
 }
 
 void ControllerManager::controllerInfoChanged()
 {
-    requestConfigs();
+    layer = getInfo().layer;
     sendChangeMessage();
 }
 
-void ControllerManager::onPress (const ControllerUnit& u, int c, int layer, float value, int delta)
+void ControllerManager::controllerMessage (const juce::String& type, const juce::var& msg)
 {
-    const bool hit = control.handleControllerEvent (u.uid, c, layer, value, delta);
-    if (! hit || delta != 0 || value < 0.5f || c == Mapping::ctrlPedal) return;
-    if (auto* m = control.findControllerMapping (u.uid, c, layer))
-    {
-        auto f = flashFor (*m);
-        if (f.isNotEmpty()) flash (f);
-    }
-}
-
-void ControllerManager::flash (const juce::String& text)
-{
-    flashText = text;
-    flashUntil = juce::Time::getMillisecondCounterHiRes() + 1200.0;
-    updateScreen (true);
-}
-
-void ControllerManager::controllerMessage (const juce::String& type, const juce::var& m)
-{
-    if (type == "ev")
-    {
-        const int slot = (int) m["s"];
-        auto* u = getInfo().findSlot (slot);
-        if (u == nullptr) return;
-        const auto k = m["k"].toString();
-        const int layer = (int) m["l"];
-
-        if (k == "btn")
-        {
-            const int c = u->kind == "pedal_switch" ? 1 : (int) m["b"];
-            const bool v = (int) m["v"] != 0;
-            pressedNow[key (u->uid, c)] = v;
-            if (v) pressedUntil[key (u->uid, c)] = juce::Time::getMillisecondCounterHiRes() + 160.0;
-            onPress (*u, c, layer, v ? 1.0f : 0.0f, 0);
-        }
-        else if (k == "pedal")
-        {
-            const float v = (float) (int) m["v"] / 127.0f;
-            pedals[u->uid] = v;
-            onPress (*u, Mapping::ctrlPedal, layer, v, 0);
-        }
-        else if (k == "enc")
-        {
-            onPress (*u, Mapping::ctrlEncoderTurn, layer, 0.5f, (int) m["d"]);
-        }
-        else if (k == "encbtn")
-        {
-            const bool v = (int) m["v"] != 0;
-            pressedNow[key (u->uid, Mapping::ctrlEncoderPress)] = v;
-            onPress (*u, Mapping::ctrlEncoderPress, layer, v ? 1.0f : 0.0f, 0);
-        }
-        sendChangeMessage();
-        return;
-    }
-
-    if (type == "layer")
-    {
-        // Keep the shown page in step with the hardware (shift, encoder, web page).
-        auto info = getInfo();
-        juce::ignoreUnused (info);
-        link.send (msg ("hello"));     // refreshes units + layers via "info"
-        return;
-    }
-
     if (type == "cfg")
     {
-        const int slot = (int) m["slot"];
-        cfgCache[slot] = m["cfg"];
-
-        // Claims that were waiting for this unit's settings.
-        auto waiting = pendingClaims;
-        pendingClaims.clear();
-        for (auto& [uid, c, layer] : waiting) claim (uid, c, layer);
-
-        if (backupPending && cfgCache.size() >= getInfo().units.size())
+        config = msg["cfg"];
+        configDirty = false;
+        updateLeds (true);
+        updateScreen (true);
+        sendChangeMessage();
+    }
+    else if (type == "ev")
+    {
+        handleEvent (msg);
+    }
+    else if (type == "press")
+    {
+        const auto uid = msg["u"].toString();
+        const int code = (int) msg["c"];
+        const bool down = (int) msg["v"] != 0;
+        pressed[key (uid, code)] = down;
+        if (down && onControlPressed) onControlPressed (uid, code);
+    }
+    else if (type == "layer")
+    {
+        layer = juce::jlimit (0, 3, (int) msg["l"]);
+        updateLeds (true);
+        updateScreen (true);
+        sendChangeMessage();
+    }
+    else if (type == "raw")
+    {
+        raws[msg["u"].toString()] = (int) msg["raw"];
+    }
+    else if (type == "wifilist")
+    {
+        networks.clear();
+        if (auto* arr = msg["nets"].getArray())
+            for (auto& n : *arr)
+            {
+                Network net { n["ssid"].toString(), (int) n["rssi"], (bool) n["lock"] };
+                if (net.ssid.isEmpty()) continue;
+                auto dup = std::find_if (networks.begin(), networks.end(), [&] (auto& x) { return x.ssid == net.ssid; });
+                if (dup == networks.end()) networks.push_back (net);
+            }
+        std::sort (networks.begin(), networks.end(), [] (auto& a, auto& b) { return a.rssi > b.rssi; });
+        wifiScanning = false;
+        sendChangeMessage();
+    }
+    else if (type == "fw_ack" && fw.active)
+    {
+        const int n = (int) msg["n"];
+        if (! (bool) msg["ok"])
         {
-            backupPending = false;
-            saveBackup();
+            finishFirmware ("Firmware update failed: " + msg["err"].toString());
+            sendCmd ("fw_abort");
+            return;
+        }
+        if (fw.waitingBegin && n == -1) { fw.waitingBegin = false; fw.next = 0; }
+        else if (n == fw.next)          { fw.next++; fw.retries = 0; }
+        else return;
+
+        if (fw.next < fw.total)
+        {
+            sendFirmwareChunk();
+            const int pct = fw.next * 100 / fw.total;
+            fw.status = "Updating firmware... " + juce::String (pct) + "%";
+        }
+        else
+        {
+            fw.status = "Checking the new firmware...";
+            sendCmd ("fw_end");
+            fw.sentAt = juce::Time::getMillisecondCounterHiRes();
         }
         sendChangeMessage();
-        return;
+    }
+    else if (type == "fw_done")
+    {
+        if ((bool) msg["ok"]) finishFirmware ("Firmware updated - the controller is restarting");
+        else                  finishFirmware ("Firmware update failed: " + msg["err"].toString());
+    }
+    else if (type == "err")
+    {
+        status ("Controller: " + msg["msg"].toString());
+    }
+}
+
+void ControllerManager::handleEvent (const juce::var& msg)
+{
+    const auto uid = msg["u"].toString();
+    const int code = (int) msg["c"];
+    const int lay = (int) msg["l"];
+    float value = (float) (double) msg["v"];
+    int delta = 0;
+
+    if (code == Mapping::ctrlPedal)
+    {
+        value = msg.hasProperty ("f") ? (float) (double) msg["f"] : value / 127.0f;
+        pedals[uid] = value;
+    }
+    else if (code == Mapping::ctrlEncoderTurn)
+    {
+        delta = (int) value;
+        value = 0.0f;
+        if (delta == 0) return;
     }
 
-    if (type == "settings") { settingsCache = m; sendChangeMessage(); return; }
-    if (type == "raw")      { rawPedals[(int) m["s"]] = (int) m["raw"]; sendChangeMessage(); return; }
-    if (type == "fw_ack")   { if (updater) updater->onAck ((int) m["n"], (bool) m["ok"], m["err"].toString()); return; }
-    if (type == "fw_done")  { if (updater) updater->onDone ((bool) m["ok"], m["err"].toString()); return; }
-    if (type == "err")      { if (onStatus) onStatus ("Controller: " + m["msg"].toString()); return; }
-}
+    const bool hit = control.handleControllerEvent (uid, code, lay, value, delta);
+    if (! hit) return;
 
-//== Feedback ====================================================================
-void ControllerManager::timerCallback()
-{
-    if (! isConnected() || isUpdating()) return;
-    updateLeds (false);
-    updateScreen (false);
-}
-
-void ControllerManager::updateLeds (bool force)
-{
-    const double now = juce::Time::getMillisecondCounterHiRes();
-    juce::Array<juce::var> changes;
-    bool uiChanged = false;
-
-    for (auto& u : getInfo().units)
+    if (auto* m = mappingFor (uid, code, lay))
     {
-        juce::Array<int> controls;
-        if (u.hasButtons()) controls = { 0, 1, 2, 3 };
-        else if (u.kind == "pedal_switch") controls = { 1 };
-
-        for (int c : controls)
+        const bool isPressEvent = isSwitch (code) && value >= 0.5f;
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        if (isPressEvent)
+            pendingFlash = flashFor (*m, true);
+        else if (! isSwitch (code) && m->target == Mapping::Target::param && now - lastParamFlash > 60)
         {
-            const int ledIndex = c;
-            const bool claimed = isClaimed (u, c, u.layer);
-            juce::String want;
-            juce::Colour shown = juce::Colours::transparentBlack;
-
-            if (claimed)
-            {
-                if (auto* m = control.findControllerMapping (u.uid, c, u.layer))
-                {
-                    const auto col = colourFor (*m);
-                    bool on = mappingIsOn (*m);
-                    if (isMomentaryTarget (m->target))
-                    {
-                        auto it = pressedUntil.find (key (u.uid, c));
-                        on = it != pressedUntil.end() && it->second > now;
-                    }
-                    shown = on ? col : col.withMultipliedBrightness (0.14f);
-                    want = hex (shown);
-                }
-                else
-                {
-                    want = "#000000";     // PEQUOD's switch, nothing on it in this preset
-                    shown = juce::Colours::black;
-                }
-            }
-
-            const auto k = juce::String (u.slot) + ":" + juce::String (ledIndex);
-            auto prev = lastLedSent.find (k);
-            const bool hadOverride = prev != lastLedSent.end() && prev->second.isNotEmpty();
-            if (force || (prev == lastLedSent.end() ? want.isNotEmpty() : prev->second != want))
-            {
-                if (want.isNotEmpty() || hadOverride || force)
-                    changes.add (juce::Array<juce::var> { u.slot, ledIndex, want });
-                lastLedSent[k] = want;
-            }
-
-            auto& ui = ledShown[key (u.uid, c)];
-            if (ui != shown) { ui = shown; uiChanged = true; }
+            lastParamFlash = now;
+            pendingFlash = flashFor (*m, false);
         }
     }
+    updateLeds (false);
+}
 
-    if (! changes.isEmpty())
+juce::String ControllerManager::flashFor (const Mapping& m, bool afterPress) const
+{
+    juce::ignoreUnused (afterPress);
+    switch (m.target)
     {
-        auto m = msg ("leds");
-        set (m, "l", changes);
-        link.send (m);
+        case Mapping::Target::bypass:
+            if (auto s = engine.findSlot (m.slotUid)) return upper (s->description.name, 14) + (s->bypassed ? " OFF" : " ON");
+            return {};
+        case Mapping::Target::stompSlot:
+        {
+            auto slots = engine.getFlatSlots();
+            if (m.paramIndex > 0 && m.paramIndex <= (int) slots.size())
+            {
+                auto& s = slots[(size_t) m.paramIndex - 1];
+                return upper (s->description.name, 14) + (s->bypassed ? " OFF" : " ON");
+            }
+            return "NO EFFECT " + juce::String (m.paramIndex);
+        }
+        case Mapping::Target::param:
+            if (auto* p = findParam (engine, m.slotUid, m.paramIndex))
+                return upper (p->getName (12), 12) + " " + p->getCurrentValueAsText().substring (0, 8);
+            return {};
+        case Mapping::Target::splitMix:
+            if (auto* item = engine.findItem (m.slotUid)) return item->mix >= 0.5f ? "SPLIT B" : "SPLIT A";
+            return {};
+        case Mapping::Target::mute:
+            return control.isMuted() ? "MUTED" : "UNMUTED";
+        default:
+            return {};
     }
-    if (uiChanged) sendChangeMessage();
+}
+
+void ControllerManager::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    // mappings changed (learn finished, preset loaded...)
+    updateLeds (true);
+    sendChangeMessage();
+}
+
+//==============================================================================
+// Feedback to the controller
+//==============================================================================
+void ControllerManager::updateLeds (bool force)
+{
+    if (! isConnected() || ! hasConfig()) return;
+
+    auto list = juce::Array<juce::var>();
+    juce::String sig;
+    for (auto& u : getInfo().units)
+        for (int code : controlCodes (u))
+        {
+            if (! hasLed (u, code) || modeOf (u.uid, code, layer) != "pequod") continue;
+            auto* m = mappingFor (u.uid, code, layer);
+            if (m == nullptr || ! mappingIsOn (*m)) continue;
+            list.add (juce::Array<juce::var> { u.uid, code, 1 });
+            sig << u.uid << code << ";";
+        }
+
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (! force && sig == lastLeds && now - lastLedsSent < 2500) return;   // resend now and then (Wi-Fi can drop a packet)
+    lastLeds = sig;
+    lastLedsSent = now;
+    sendCmd ("leds", { { "l", list } });
 }
 
 void ControllerManager::updateScreen (bool force)
 {
-    const double now = juce::Time::getMillisecondCounterHiRes();
-    auto m = msg ("screen");
+    if (! isConnected() || fw.active) return;
 
-    const bool tuning = control.isTunerMode() || control.isMuted();
-    if (tuning && tuner != nullptr)
+    const bool tunerWhenMuted = get ("display.tunerWhenMuted").isVoid() || (bool) get ("display.tunerWhenMuted");
+    const bool showTuner = control.isTunerMode() || (control.isMuted() && tunerWhenMuted);
+
+    auto m = makeObj();
+    auto* o = m.getDynamicObject();
+    o->setProperty ("t", "screen");
+    if (showTuner)
     {
-        auto& r = tuner->getReading();
-        set (m, "mode", "tuner");
-        set (m, "note", r.valid ? r.noteName : juce::String());
-        set (m, "cents", r.valid ? std::round (r.cents * 2.0f) / 2.0f : 0.0f);
-        set (m, "inTune", r.valid && std::abs (r.cents) < 3.0f);
+        auto& r = tuner.getReading();
+        o->setProperty ("mode", "tuner");
+        o->setProperty ("top", control.isTunerMode() ? "TUNER" : "MUTED");
+        o->setProperty ("note", r.valid ? r.noteName : juce::String());
+        o->setProperty ("cents", r.valid ? juce::roundToInt (r.cents * 10.0f) / 10.0 : 0.0);
+        o->setProperty ("inTune", r.valid && std::abs (r.cents) < 3.0f);
     }
     else
     {
-        set (m, "mode", "preset");
-        set (m, "top", asciiFold (control.getBankName ? control.getBankName().toUpperCase() : juce::String()));
-        set (m, "main", asciiFold (control.getPresetName ? control.getPresetName() : juce::String()));
-        set (m, "sub", getInfo().layers > 1 ? "LAYER " + juce::String (getInfo().layer + 1) : juce::String());
+        auto bank = control.getBankName ? control.getBankName() : juce::String();
+        auto preset = control.getPresetName ? control.getPresetName() : juce::String();
+        const int idx = control.getPresetIndex ? control.getPresetIndex() : -1;
+        juce::String sub;
+        if (idx >= 0) sub << "PRESET " << (idx + 1);
+        if (getNumLayers() > 1) sub << (sub.isEmpty() ? "" : "   ") << "LAYER " << (layer + 1);
+        o->setProperty ("mode", "preset");
+        o->setProperty ("top", upper (bank, 21));
+        o->setProperty ("main", upper (preset, 20));
+        o->setProperty ("sub", sub);
     }
 
-    const auto body = juce::JSON::toString (m, true);
-    const bool flashing = flashText.isNotEmpty() && now < flashUntil;
-    if (! force && body == lastScreen) return;
-    if (! force && tuning && now - lastScreenSent < 125.0) return;
+    const auto sig = juce::JSON::toString (m, true);
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    const bool changed = sig != lastScreen;
 
-    if (flashing && force) set (m, "flash", asciiFold (flashText));
-    if (! flashing) flashText.clear();
-    lastScreen = body;
+    if (pendingFlash.isNotEmpty())
+    {
+        o->setProperty ("flash", pendingFlash);
+        pendingFlash.clear();
+    }
+    else
+    {
+        if (! force && ! changed && now - lastScreenSent < 3000) return;
+        if (! force && showTuner && now - lastScreenSent < 66) return;     // tuner: ~15 updates a second
+    }
+
+    lastScreen = sig;
     lastScreenSent = now;
     link.send (m);
 }
 
-//== Backups =====================================================================
-juce::File ControllerManager::getBackupFolder() const
+void ControllerManager::timerCallback()
 {
-    auto name = juce::File::createLegalFileName (getInfo().name + " " + getInfo().id);
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("PEQUOD Host").getChildFile ("Controller Backups").getChildFile (name);
-}
+    const double now = juce::Time::getMillisecondCounterHiRes();
 
-bool ControllerManager::saveBackup (juce::File target)
-{
-    if (! isConnected()) return false;
-    auto root = obj();
-    set (root, "pequodControllerBackup", 1);
-    set (root, "id", getInfo().id);
-    set (root, "name", getInfo().name);
-    set (root, "fw", getInfo().fw);
-    set (root, "saved", juce::Time::getCurrentTime().toISO8601 (true));
-    set (root, "settings", settingsCache);
-    juce::Array<juce::var> units;
-    for (auto& u : getInfo().units)
+    if (configDirty && now - configDirtySince > 120)
+        sendConfigNow();
+
+    if (! isConnected()) return;
+
+    if (rebootAt > 0 && now > rebootAt) { rebootAt = 0; reboot(); }
+
+    if (fw.active)
     {
-        auto e = obj();
-        set (e, "uid", u.uid);
-        set (e, "slot", u.slot);
-        set (e, "kind", u.kind);
-        set (e, "cfg", getUnitConfig (u.slot));
-        units.add (e);
-    }
-    set (root, "units", units);
-
-    if (target == juce::File())
-    {
-        auto folder = getBackupFolder();
-        folder.createDirectory();
-        target = folder.getChildFile (juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S") + ".json");
-
-        // Keep the 20 newest automatic backups.
-        auto files = folder.findChildFiles (juce::File::findFiles, false, "*.json");
-        files.sort();
-        for (int i = 0; i < files.size() - 19; ++i) files[i].deleteFile();
-    }
-    return target.replaceWithText (juce::JSON::toString (root));
-}
-
-bool ControllerManager::restoreBackup (const juce::File& f, juce::String& report)
-{
-    auto root = juce::JSON::parse (f);
-    if (! root.isObject() || ! root.hasProperty ("pequodControllerBackup")) { report = "That isn't a controller backup."; return false; }
-    if (! isConnected()) { report = "Connect the controller first."; return false; }
-
-    int restored = 0, missing = 0;
-    if (auto* arr = root["units"].getArray())
-        for (auto& e : *arr)
+        if (now - fw.sentAt > 3000)
         {
-            if (auto* u = getInfo().findUnit (e["uid"].toString()))
-            {
-                setUnitConfig (u->slot, e["cfg"]);
-                ++restored;
-            }
-            else ++missing;
+            if (++fw.retries > 5) { finishFirmware ("Firmware update failed: the controller stopped answering"); return; }
+            if (fw.waitingBegin)            sendCmd ("fw_begin", { { "size", (int) fw.image.getSize() } });
+            else if (fw.next < fw.total)    sendFirmwareChunk();
+            else                            sendCmd ("fw_end");
+            fw.sentAt = now;
         }
-
-    auto s = root["settings"];
-    if (s.isObject())
-    {
-        auto patch = obj();
-        if (s.hasProperty ("layers")) set (patch, "layers", s["layers"]);
-        if (s.hasProperty ("brightness")) set (patch, "brightness", s["brightness"]);
-        setSettings (patch);
+        return;
     }
-    report = "Restored " + juce::String (restored) + " unit(s)" + (missing > 0 ? ", " + juce::String (missing) + " not connected" : juce::String()) + ".";
-    return true;
-}
 
-//== Firmware ====================================================================
-bool ControllerManager::hasBundledFirmware()
-{
-   #if PEQUOD_HAS_FIRMWARE
-    return FirmwareData::controller_binSize > 0;
-   #else
-    return false;
-   #endif
-}
-
-juce::String ControllerManager::bundledFirmwareVersion()
-{
-   #if PEQUOD_HAS_FIRMWARE
-    return juce::String::fromUTF8 (FirmwareData::version_txt, FirmwareData::version_txtSize).trim();
-   #else
-    return {};
-   #endif
-}
-
-int ControllerManager::compareVersions (const juce::String& a, const juce::String& b)
-{
-    auto pa = juce::StringArray::fromTokens (a.upToFirstOccurrenceOf ("-", false, false), ".", "");
-    auto pb = juce::StringArray::fromTokens (b.upToFirstOccurrenceOf ("-", false, false), ".", "");
-    for (int i = 0; i < juce::jmax (pa.size(), pb.size()); ++i)
-    {
-        const int x = pa[i].getIntValue(), y = pb[i].getIntValue();
-        if (x != y) return x < y ? -1 : 1;
-    }
-    return 0;
-}
-
-bool ControllerManager::updateAvailable() const
-{
-    return isConnected() && hasBundledFirmware() && compareVersions (getInfo().fw, bundledFirmwareVersion()) < 0;
-}
-
-bool ControllerManager::isUpdating() const   { return updater != nullptr && ! updater->finished; }
-float ControllerManager::updateProgress() const { return updater ? updater->progress.load() : 0.0f; }
-juce::String ControllerManager::updateStatus() const { return updater ? updater->getStatus() : juce::String(); }
-
-bool ControllerManager::startFirmwareUpdate (juce::String& whyNot)
-{
-   #if PEQUOD_HAS_FIRMWARE
-    if (! isConnected()) { whyNot = "Connect the controller first."; return false; }
-    if (isUpdating()) { whyNot = "An update is already running."; return false; }
-    if (! getInfo().otaOk)
-    {
-        whyNot = "This controller was flashed with a partition scheme that has no room for updates. "
-                 "Flash it once from the Arduino IDE with Tools > Partition Scheme > \"Minimal SPIFFS (1.9MB APP with OTA)\". "
-                 "PEQUOD keeps a backup of its settings so you can restore them afterwards.";
-        return false;
-    }
-    if ((int64_t) FirmwareData::controller_binSize > getInfo().otaMax)
-    {
-        whyNot = "The new firmware is larger than this controller's update space.";
-        return false;
-    }
-    saveBackup();
-    updater = std::make_unique<FirmwareUpdater> (*this, juce::MemoryBlock (FirmwareData::controller_bin, (size_t) FirmwareData::controller_binSize));
-    updater->startThread();
-    return true;
-   #else
-    whyNot = "This build of PEQUOD Host doesn't include controller firmware.";
-    return false;
-   #endif
+    updateLeds (false);
+    updateScreen (false);
 }

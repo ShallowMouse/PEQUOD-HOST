@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     tags: [ 'v*' ]
-    paths-ignore: [ 'Controller/**', 'docs/**', '.github/workflows/build-firmware.yml' ]
+    paths-ignore: [ 'docs/**' ]
   pull_request:
   workflow_dispatch:
 
@@ -14,34 +14,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install arduino-cli
-        uses: arduino/setup-arduino-cli@v2
+      - uses: arduino/setup-arduino-cli@v2
 
       - name: Install ESP32 core and libraries
         run: |
-          arduino-cli config init
+          arduino-cli config init --overwrite
           arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          arduino-cli config set library.enable_unsafe_install true
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32${{ vars.ESP32_CORE && format('@{0}', vars.ESP32_CORE) || '' }}
-          arduino-cli lib install "FastLED" "Adafruit GFX Library" "Adafruit SSD1306" "Adafruit BusIO" "ArduinoJson@6.21.5"
-          arduino-cli lib install --git-url https://github.com/tttapa/Control-Surface.git
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install "ArduinoJson" "Adafruit SSD1306" "Adafruit GFX Library"
 
-      - name: Compile controller firmware
+      - name: Compile controller firmware (PEQUOD FC)
+        shell: bash
         run: |
           set -o pipefail
-          arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:USBMode=default,CDCOnBoot=default,PartitionScheme=min_spiffs" \
-            --output-dir out Firmware/Master22 2>&1 | tee fw.log || {
-              msg=$(grep -E "error|Error" fw.log | head -40 | sed ':a;N;$!ba;s/\n/%0A/g'); echo "::error title=firmware::$msg"; exit 1; }
+          FQBN="esp32:esp32:esp32s3:USBMode=default,CDCOnBoot=default,PartitionScheme=default"
+          if ! arduino-cli compile --fqbn "$FQBN" --warnings default --output-dir out Controller/PEQUOD_FC 2>&1 | tee fw.log; then
+            msg=$(grep -E "error|Error" fw.log | head -50 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=firmware::$msg"
+            exit 1
+          fi
+          size=$(grep -E "Sketch uses" fw.log | head -1)
+          echo "::notice title=firmware size::$size"
           mkdir -p fw
-          cp out/Master22.ino.bin fw/controller.bin
-          grep -oP '#define PQ_FW_VERSION\s+"\K[^"]+' Firmware/Master22/PequodLink.h > fw/version.txt
-          ls -la fw; cat fw/version.txt
+          cp out/PEQUOD_FC.ino.bin fw/PEQUOD_FC.bin
+          cp out/PEQUOD_FC.ino.merged.bin fw/PEQUOD_FC-full.bin 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
-          name: controller-firmware
+          name: PEQUOD-FC-Firmware
           path: fw/
 
   build:
@@ -54,8 +55,8 @@ jobs:
       - name: Get controller firmware
         uses: actions/download-artifact@v4
         with:
-          name: controller-firmware
-          path: Resources/Firmware
+          name: PEQUOD-FC-Firmware
+          path: fw
 
       - name: Configure
         shell: pwsh
@@ -84,8 +85,10 @@ jobs:
           Copy-Item README.md dist/
           Copy-Item Resources/Fonts/*.txt dist/
           New-Item -ItemType Directory -Force "dist/Controller firmware" | Out-Null
-          Copy-Item -Recurse Firmware/Master22 "dist/Controller firmware/"
-          Copy-Item Resources/Firmware/controller.bin "dist/Controller firmware/"
+          Copy-Item fw/*.bin "dist/Controller firmware/"
+          Copy-Item Controller/README.md "dist/Controller firmware/"
+          Copy-Item -Recurse Controller/PEQUOD_FC "dist/Controller firmware/source"
+          Copy-Item docs/controller-protocol.md "dist/Controller firmware/"
 
       - name: Upload build
         uses: actions/upload-artifact@v4
