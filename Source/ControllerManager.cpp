@@ -1,5 +1,6 @@
 #include "ControllerManager.h"
 #include "PequodLookAndFeel.h"
+#include "PluginColours.h"
 
 namespace
 {
@@ -306,8 +307,44 @@ juce::String ControllerManager::shortLabel (const juce::String& uid, int code, i
     return "-";
 }
 
+juce::Colour ControllerManager::effectColour (const Mapping& m) const
+{
+    switch (m.target)
+    {
+        case Mapping::Target::bypass:
+        case Mapping::Target::param:
+            if (auto s = engine.findSlot (m.slotUid)) return PluginColours::forPlugin (s->description);
+            return {};
+        case Mapping::Target::stompSlot:
+        {
+            auto slots = engine.getFlatSlots();
+            if (m.paramIndex > 0 && m.paramIndex <= (int) slots.size())
+                return PluginColours::forPlugin (slots[(size_t) m.paramIndex - 1]->description);
+            return {};
+        }
+        default:
+            return {};
+    }
+}
+
+bool ControllerManager::usesEffectColour (const juce::String& uid, int code, int lay) const
+{
+    auto* m = mappingFor (uid, code, lay);
+    return m != nullptr && modeOf (uid, code, lay) == "pequod" && m->ledColour == Mapping::ledEffectColour;
+}
+
+void ControllerManager::setUseEffectColour (const juce::String& uid, int code, int lay, bool on)
+{
+    control.setControllerLedColour (uid, code, lay, on ? Mapping::ledEffectColour : 0);
+    updateLeds (true);
+}
+
 juce::Colour ControllerManager::colourOf (const juce::String& uid, int code) const
 {
+    if (usesEffectColour (uid, code, layer))
+        if (auto c = effectColour (*mappingFor (uid, code, layer)); ! c.isTransparent())
+            return PluginColours::forLed (c);
+
     auto s = get (controlPath (uid, code) + ".color").toString();
     if (s == "layer") return layerColour (layer);
     s = s.trimCharactersAtStart ("#");
@@ -380,9 +417,18 @@ bool ControllerManager::isLit (const juce::String& uid, int code) const
 //==============================================================================
 // PEQUOD functions
 //==============================================================================
-void ControllerManager::assign (const juce::String& uid, int code, int lay, Mapping::Target target, int uidOrIndex, bool latching)
+void ControllerManager::assign (const juce::String& uid, int code, int lay, Mapping::Target target, int uidOrIndex, bool latching, int scope)
 {
+    auto* existing = mappingFor (uid, code, lay);
     Mapping m;
+    m.perPreset = scope == 1 ? true : scope == 0 ? false
+                : existing != nullptr ? existing->perPreset
+                : (target == Mapping::Target::param || target == Mapping::Target::bypass || target == Mapping::Target::splitMix);
+    // effects light up in their own colour unless this switch was set to another one
+    auto isEffect = [] (Mapping::Target t) { return t == Mapping::Target::bypass || t == Mapping::Target::stompSlot || t == Mapping::Target::param; };
+    m.ledColour = ! isEffect (target) ? 0
+                : existing != nullptr && isEffect (existing->target) ? existing->ledColour
+                : Mapping::ledEffectColour;
     m.source = Mapping::Source::controller;
     m.ctrlUnit = uid;
     m.ctrlControl = code;
@@ -727,9 +773,23 @@ void ControllerManager::updateLeds (bool force)
         {
             if (! hasLed (u, code) || modeOf (u.uid, code, layer) != "pequod") continue;
             auto* m = mappingFor (u.uid, code, layer);
-            if (m == nullptr || ! mappingIsOn (*m)) continue;
-            list.add (juce::Array<juce::var> { u.uid, code, 1 });
-            sig << u.uid << code << ";";
+            if (m == nullptr) continue;
+            const bool on = mappingIsOn (*m);
+            juce::Colour fx;
+            if (m->ledColour == Mapping::ledEffectColour) fx = effectColour (*m);
+            if (fx.isTransparent())
+            {
+                if (! on) continue;
+                list.add (juce::Array<juce::var> { u.uid, code, 1 });
+                sig << u.uid << code << ";";
+            }
+            else
+            {
+                // effect colour: sent even when off, so the dim glow is the effect's colour too
+                auto hex = "#" + PluginColours::forLed (fx).toDisplayString (false);
+                list.add (juce::Array<juce::var> { u.uid, code, on ? 1 : 0, hex });
+                sig << u.uid << code << (on ? "+" : "-") << hex << ";";
+            }
         }
 
     const double now = juce::Time::getMillisecondCounterHiRes();

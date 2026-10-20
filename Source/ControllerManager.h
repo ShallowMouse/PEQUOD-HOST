@@ -60,7 +60,12 @@ public:
     std::function<void (const juce::String& uid, int code)> onControlPressed;
 
     //== PEQUOD functions
-    void assign (const juce::String& uid, int code, int lay, Mapping::Target, int uidOrIndex = 0, bool latching = true);
+    /** scope: -1 = keep the scope of what's there now (or the usual one for that function), 0 = every preset, 1 = this preset */
+    void assign (const juce::String& uid, int code, int lay, Mapping::Target, int uidOrIndex = 0, bool latching = true, int scope = -1);
+    /** The colour of the plugin a mapping controls (PEQUOD category colours), or transparent. */
+    juce::Colour effectColour (const Mapping&) const;
+    bool usesEffectColour (const juce::String& uid, int code, int lay) const;
+    void setUseEffectColour (const juce::String& uid, int code, int lay, bool);
     void unassign (const juce::String& uid, int code, int lay);
     void learnPluginControl (const juce::String& uid, int code, int lay);
     const Mapping* mappingFor (const juce::String& uid, int code, int lay) const;

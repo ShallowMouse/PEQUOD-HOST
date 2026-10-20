@@ -80,6 +80,8 @@ public:
     Via getVia() const noexcept                 { return via; }
     const ControllerInfo& getInfo() const       { return info; }
     juce::String describeConnection() const;
+    /** For the "not connected" screen: each USB MIDI device and what happened ("Longsleeves - no answer"). */
+    juce::StringArray describeUsbPorts() const;
 
     /** Sends a JSON object to the controller. Thread-safe. */
     bool send (const juce::var& message);
@@ -109,7 +111,7 @@ private:
     std::atomic<uint8_t> msgId { 0 };
 
     // USB
-    struct Probe { juce::String inputId, outputId; double sentAt = 0; bool failed = false; int tries = 1; };
+    struct Probe { juce::String inputId, outputId; double sentAt = 0; bool failed = false; int tries = 1; juce::String name; };
     std::map<juce::String, std::unique_ptr<juce::MidiInput>> ownInputs;   // ports not enabled in AUDIO settings
     std::vector<Probe> probes;
     juce::StringArray lastDeviceSignature;

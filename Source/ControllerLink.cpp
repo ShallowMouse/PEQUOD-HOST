@@ -146,6 +146,21 @@ juce::String ControllerLink::describeConnection() const
     }
 }
 
+juce::StringArray ControllerLink::describeUsbPorts() const
+{
+    juce::StringArray out;
+    for (auto& d : juce::MidiInput::getAvailableDevices())
+    {
+        auto p = std::find_if (probes.begin(), probes.end(), [&] (const Probe& x) { return x.inputId == d.identifier; });
+        juce::String state = p == probes.end() ? "input only (no matching output)"
+                           : ! p->failed ? "asking..."
+                           : p->tries < probeTries ? "no answer yet"
+                           : "no answer - not a PEQUOD FC, or in use by another program";
+        out.add (d.name + " - " + state);
+    }
+    return out;
+}
+
 //==============================================================================
 bool ControllerLink::send (const juce::var& message)
 {
@@ -269,7 +284,7 @@ void ControllerLink::scanUsb()
                     ownInputs[in.identifier] = std::move (mi);
                 }
 
-            Probe p { in.identifier, out.identifier, now, false, 1 };
+            Probe p { in.identifier, out.identifier, now, false, 1, in.name };
             probes.push_back (p);
             sendHello (out.identifier);
             break;

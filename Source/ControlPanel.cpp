@@ -50,7 +50,7 @@ ControlPanel::ControlPanel (HostEngine& e, ControlSurface& c) : engine (e), cont
         m.addItem ("MUTE",         [this] { control.armLearnFor (Mapping::Target::mute); });
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&hostLearnButton));
     };
-    clearButton.setTooltip ("Remove all mappings for this rack");
+    clearButton.setTooltip ("Remove this preset's own mappings (the ones for every preset stay)");
     clearButton.onClick = [this] { control.clearRackMappings(); };
 
     for (auto* b : { &learnButton, &hostLearnButton, &clearButton })
@@ -99,25 +99,33 @@ void ControlPanel::paintListBoxItem (int row, juce::Graphics& g, int w, int h, b
     auto r = juce::Rectangle<int> (0, 0, w, h).reduced (2, 2);
     g.setColour (selected ? Pequod::Colours::panelHi : Pequod::Colours::panel);
     g.fillRect (r);
-    g.setColour (m.isRackMapping() ? Pequod::Colours::mustardLo : Pequod::Colours::line);
+    g.setColour (m.perPreset ? Pequod::Colours::mustardLo : Pequod::Colours::line);
     g.fillRect (r.removeFromLeft (3));
     r.reduce (6, 2);
 
+    const bool overridden = control.isOverridden (m);
     auto top = r.removeFromTop (r.getHeight() / 2);
-    g.setColour (Pequod::Colours::mustard);
-    g.setFont (Pequod::heading (12.0f));
-    g.drawText (control.describeSource (m), top, juce::Justification::centredLeft, true);
+    auto tags = top.removeFromRight (m.isSwitchTarget() && m.source != Mapping::Source::osc ? 104 : 52);
 
+    g.setFont (Pequod::heading (10.0f, false));
+    g.setColour (m.perPreset ? Pequod::Colours::mustard : Pequod::Colours::textDim);
+    g.drawText (m.perPreset ? "PRESET" : "ALL", tags.removeFromRight (48), juce::Justification::centredRight);
     if (m.isSwitchTarget() && m.source != Mapping::Source::osc)
     {
         g.setColour (Pequod::Colours::textDim);
-        g.setFont (Pequod::heading (10.0f, false));
-        g.drawText (m.toggle ? "TOGGLE" : "DIRECT", top, juce::Justification::centredRight);
+        g.drawText (m.toggle ? "TOGGLE" : "DIRECT", tags, juce::Justification::centredRight);
     }
 
-    g.setColour (Pequod::Colours::text);
+    g.setColour (overridden ? Pequod::Colours::textDim : Pequod::Colours::mustard);
+    g.setFont (Pequod::heading (12.0f));
+    g.drawText (control.describeSource (m), top, juce::Justification::centredLeft, true);
+
+    g.setColour (overridden ? Pequod::Colours::textDim : Pequod::Colours::text);
     g.setFont (Pequod::body (12.0f));
-    g.drawText ("-> " + control.describeTarget (m), r, juce::Justification::centredLeft, true);
+    juce::String target = "-> " + control.describeTarget (m);
+    if (overridden) target << "   (this preset uses its own)";
+    else if (! m.perPreset && m.isRackMapping() && m.slotUid == 0) target << "   (not in this preset)";
+    g.drawText (target, r, juce::Justification::centredLeft, true);
 }
 
 void ControlPanel::listBoxItemClicked (int row, const juce::MouseEvent&)
@@ -126,6 +134,11 @@ void ControlPanel::listBoxItemClicked (int row, const juce::MouseEvent&)
     if (! juce::isPositiveAndBelow (row, (int) maps.size())) return;
 
     juce::PopupMenu m;
+    const bool perPreset = maps[(size_t) row].perPreset;
+    m.addItem ("Only in this preset", true, perPreset, [this, row] { control.setMappingScope (row, true); });
+    m.addItem ("In every preset", ! maps[(size_t) row].isRackMapping() || maps[(size_t) row].slotUid != 0, ! perPreset,
+               [this, row] { control.setMappingScope (row, false); });
+    m.addSeparator();
     if (maps[(size_t) row].isSwitchTarget())
     {
         m.addItem ("Toggle on each press", true, maps[(size_t) row].toggle, [this, row] { if (! control.getMappings()[(size_t) row].toggle) control.toggleMappingMode (row); });

@@ -69,7 +69,10 @@ the slave boards are unchanged). Plug it in with USB or put it on Wi-Fi and the 
 * Press a switch with your foot and the CONTROLLER window jumps to it; pick what it does in plain words —
   effect on/off (the same slot in every preset, or one effect in this preset), a plugin knob, next/previous/specific preset,
   banks, tuner, mute, split A/B — or let it send its own MIDI to other gear, or change layers.
-* LEDs show what's on, the screen shows the bank and preset, flashes what you switched, and becomes a tuner while muted.
+* Every mapping (footswitch, MIDI or OSC) is for **every preset** or **this preset only**. A this-preset job on a switch
+  overrides its every-preset job while that preset is loaded; every-preset plugin mappings follow the plugin by name.
+* LEDs can glow in the colour of the effect they switch (the PEQUOD category colours: oxblood amps, tangerine drive, ocean delays…;
+  other plugins go by their type). LEDs show what's on, the screen shows the bank and preset, flashes what you switched, and becomes a tuner while muted.
 * Everything the controller stores is edited there too: colours, layers, pedal calibration, MIDI out (USB / 5-pin), Wi-Fi,
   brightness, name, firmware updates.
 

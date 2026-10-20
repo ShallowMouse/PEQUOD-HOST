@@ -136,6 +136,7 @@ void ControlSurface::timerCallback()
                     learnState = LearnState::off;
                     Mapping m = pending;
                     m.toggle = true;
+                    m.perPreset = true;          // plugin knobs: saved with the preset unless changed
                     setControllerMapping (m);
                 }
                 else
@@ -235,6 +236,7 @@ void ControlSurface::setMuted (bool shouldMute)
 
 void ControlSurface::changeListenerCallback (juce::ChangeBroadcaster*)
 {
+    resolveGlobalMappings();
     sendRackSummary();
 }
 
@@ -312,7 +314,7 @@ void ControlSurface::oscMessageReceived (const juce::OSCMessage& msg)
 
     bool handled = false;
     for (auto& m : mappings)
-        if (m.source == Mapping::Source::osc && m.oscAddress == address)
+        if (m.source == Mapping::Source::osc && m.oscAddress == address && ! isOverridden (m))
         {
             apply (m, juce::jlimit (0.0f, 1.0f, value), value >= 0.5f);
             handled = true;
@@ -455,7 +457,7 @@ void ControlSurface::handleMidi (const juce::MidiMessage& m)
     {
         const bool srcMatch = (isCC && map.source == Mapping::Source::midiCC)
                            || (! isCC && map.source == Mapping::Source::midiNote);
-        if (srcMatch && map.number == number && (map.midiChannel == 0 || map.midiChannel == m.getChannel()))
+        if (srcMatch && map.number == number && (map.midiChannel == 0 || map.midiChannel == m.getChannel()) && ! isOverridden (map))
             apply (map, value, value >= 0.5f);
     }
 }
@@ -568,6 +570,7 @@ void ControlSurface::finishLearn (Mapping::Source src, int channel, int number, 
     m.oscAddress = address;
     // Momentary MIDI buttons usually want toggle; continuous controls are irrelevant.
     m.toggle = true;
+    m.perPreset = m.isRackMapping();    // plugin controls go with the preset, host functions everywhere
 
     if (src == Mapping::Source::controller)
     {
@@ -576,45 +579,151 @@ void ControlSurface::finishLearn (Mapping::Source src, int channel, int number, 
         return;
     }
 
+    learnState = LearnState::off;
+    addMapping (m);
+}
+
+void ControlSurface::addMapping (Mapping m)
+{
+    if (! m.perPreset) bindPlugin (m);
+
     // Replace an identical source -> target mapping rather than duplicating.
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [&] (const Mapping& x)
     {
         return x.source == m.source && x.number == m.number && x.oscAddress == m.oscAddress
-            && x.target == m.target && x.slotUid == m.slotUid && x.paramIndex == m.paramIndex;
+            && x.target == m.target && x.slotUid == m.slotUid && x.paramIndex == m.paramIndex
+            && x.perPreset == m.perPreset;
     }), mappings.end());
 
     mappings.push_back (m);
-    learnState = LearnState::off;
     sendChangeMessage();
 }
 
-//==============================================================================
-void ControlSurface::setControllerMapping (const Mapping& m)
+bool ControlSurface::isOverridden (const Mapping& m) const
 {
+    if (m.perPreset) return false;
+    for (auto& x : mappings)
+        if (x.perPreset && x.sameSource (m))
+            return true;
+    return false;
+}
+
+void ControlSurface::setMappingScope (int index, bool perPreset)
+{
+    if (! juce::isPositiveAndBelow (index, (int) mappings.size())) return;
+    Mapping m = mappings[(size_t) index];
+    if (m.perPreset == perPreset) return;
+    if (! perPreset && m.isRackMapping() && m.slotUid == 0) return;    // nothing to follow
+    mappings.erase (mappings.begin() + index);
+    m.perPreset = perPreset;
+    if (m.isController()) setControllerMapping (m);
+    else                  addMapping (m);
+}
+
+void ControlSurface::bindPlugin (Mapping& m) const
+{
+    if (m.target == Mapping::Target::splitMix)
+    {
+        m.pluginName = "split";
+        m.pluginOccurrence = juce::jmax (0, engine.getSplitNumber (m.slotUid) - 1);
+        return;
+    }
+    if (m.target != Mapping::Target::param && m.target != Mapping::Target::bypass) return;
+    auto slot = engine.findSlot (m.slotUid);
+    if (slot == nullptr) return;
+    m.pluginName = slot->description.name;
+    m.pluginOccurrence = 0;
+    for (auto& s : engine.getFlatSlots())
+    {
+        if (s->uid == m.slotUid) break;
+        if (s->description.name == m.pluginName) ++m.pluginOccurrence;
+    }
+}
+
+void ControlSurface::resolveGlobalMappings()
+{
+    auto slots = engine.getFlatSlots();
+    auto splits = engine.getSplits();
+    bool changed = false;
+
+    for (auto& m : mappings)
+    {
+        if (m.perPreset || ! m.isRackMapping() || m.pluginName.isEmpty()) continue;
+        int uid = 0;
+        if (m.target == Mapping::Target::splitMix)
+        {
+            if (juce::isPositiveAndBelow (m.pluginOccurrence, (int) splits.size()))
+                uid = splits[(size_t) m.pluginOccurrence]->uid;
+        }
+        else
+        {
+            int n = 0;
+            for (auto& s : slots)
+                if (s->description.name == m.pluginName && n++ == m.pluginOccurrence) { uid = s->uid; break; }
+        }
+        if (uid != m.slotUid) { m.slotUid = uid; changed = true; }
+    }
+    if (changed) sendChangeMessage();
+}
+
+//==============================================================================
+void ControlSurface::setControllerMapping (const Mapping& mapping)
+{
+    Mapping m = mapping;
+    if (! m.perPreset) bindPlugin (m);
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [&] (const Mapping& x)
     {
-        return x.sameControl (m.ctrlUnit, m.ctrlControl, m.ctrlLayer);
+        return x.sameControl (m.ctrlUnit, m.ctrlControl, m.ctrlLayer) && x.perPreset == m.perPreset;
     }), mappings.end());
     mappings.push_back (m);
     if (onControllerMappingAdded) onControllerMappingAdded (m);
     sendChangeMessage();
 }
 
-void ControlSurface::clearControllerMapping (const juce::String& unit, int control, int layer)
+void ControlSurface::clearControllerMapping (const juce::String& unit, int control, int layer, int scope)
 {
+    if (scope < 0)
+    {
+        auto* shown = findControllerMapping (unit, control, layer);
+        if (shown == nullptr) return;
+        scope = shown->perPreset ? 1 : 0;
+    }
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [&] (const Mapping& x)
     {
-        return x.sameControl (unit, control, layer);
+        return x.sameControl (unit, control, layer) && x.perPreset == (scope == 1);
     }), mappings.end());
     sendChangeMessage();
 }
 
-const Mapping* ControlSurface::findControllerMapping (const juce::String& unit, int control, int layer) const
+const Mapping* ControlSurface::findControllerMapping (const juce::String& unit, int control, int layer, int scope) const
 {
+    const Mapping* global = nullptr;
     for (auto& m : mappings)
         if (m.sameControl (unit, control, layer))
-            return &m;
-    return nullptr;
+        {
+            if (m.perPreset && scope != 0) return &m;
+            if (! m.perPreset && global == nullptr) global = &m;
+        }
+    return scope == 1 ? nullptr : global;
+}
+
+void ControlSurface::setControllerScope (const juce::String& unit, int control, int layer, bool perPreset)
+{
+    auto* shown = findControllerMapping (unit, control, layer);
+    if (shown == nullptr || shown->perPreset == perPreset) return;
+    for (size_t i = 0; i < mappings.size(); ++i)
+        if (&mappings[i] == shown) { setMappingScope ((int) i, perPreset); return; }
+}
+
+void ControlSurface::setControllerLedColour (const juce::String& unit, int control, int layer, juce::uint32 colour)
+{
+    for (auto& m : mappings)
+        if (&m == findControllerMapping (unit, control, layer))
+        {
+            m.ledColour = colour;
+            sendChangeMessage();
+            return;
+        }
 }
 
 void ControlSurface::armLearnForController (const juce::String& unit, int control, int layer, const juce::String& label)
@@ -652,6 +761,7 @@ bool ControlSurface::handleControllerEvent (const juce::String& unit, int contro
         m.ctrlControl = control;
         m.ctrlLayer = layer;
         m.toggle = true;
+        m.perPreset = m.isRackMapping();
         learnState = LearnState::off;
         setControllerMapping (m);
         return true;
@@ -660,7 +770,7 @@ bool ControlSurface::handleControllerEvent (const juce::String& unit, int contro
     bool hit = false;
     for (auto& m : mappings)
     {
-        if (! m.sameControl (unit, control, layer)) continue;
+        if (! m.sameControl (unit, control, layer) || isOverridden (m)) continue;
         hit = true;
 
         if (delta != 0)   // encoder: relative changes
@@ -732,7 +842,7 @@ void ControlSurface::toggleMappingMode (int index)
 void ControlSurface::clearRackMappings()
 {
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(),
-                                    [] (const Mapping& m) { return m.isRackMapping(); }),
+                                    [] (const Mapping& m) { return m.perPreset; }),
                     mappings.end());
     sendChangeMessage();
 }
@@ -741,8 +851,11 @@ void ControlSurface::slotRemoved (int slotUid)
 {
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [slotUid] (const Mapping& m)
     {
-        return (m.target == Mapping::Target::param || m.target == Mapping::Target::bypass) && m.slotUid == slotUid;
+        return m.perPreset && (m.target == Mapping::Target::param || m.target == Mapping::Target::bypass) && m.slotUid == slotUid;
     }), mappings.end());
+    for (auto& m : mappings)      // global ones wait for that plugin to come back
+        if (! m.perPreset && (m.target == Mapping::Target::param || m.target == Mapping::Target::bypass) && m.slotUid == slotUid)
+            m.slotUid = 0;
     sendChangeMessage();
 }
 
@@ -816,6 +929,12 @@ static juce::XmlElement* mappingToXml (const Mapping& m, int targetRef)
     }
     if (m.ledColour != 0)
         x->setAttribute ("led", juce::String::toHexString ((int) m.ledColour));
+    x->setAttribute ("scope", m.perPreset ? "preset" : "global");
+    if (! m.perPreset && m.pluginName.isNotEmpty())
+    {
+        x->setAttribute ("plugin", m.pluginName);
+        x->setAttribute ("nth", m.pluginOccurrence);
+    }
     return x;
 }
 
@@ -833,6 +952,8 @@ static Mapping mappingFromXml (const juce::XmlElement& x)
     m.ctrlControl = x.getIntAttribute ("cc");
     m.ctrlLayer = x.getIntAttribute ("cl");
     m.ledColour = (juce::uint32) x.getStringAttribute ("led").getHexValue32();
+    m.pluginName = x.getStringAttribute ("plugin");
+    m.pluginOccurrence = x.getIntAttribute ("nth");
     return m;
 }
 
@@ -841,7 +962,12 @@ std::unique_ptr<juce::XmlElement> ControlSurface::createRackMappingsXml() const
     auto root = std::make_unique<juce::XmlElement> ("MAPPINGS");
     for (auto& m : mappings)
     {
-        if (! m.isRackMapping()) continue;
+        if (! m.perPreset) continue;
+        if (! m.isRackMapping())                                   // a host function just for this preset
+        {
+            root->addChildElement (mappingToXml (m, 0));
+            continue;
+        }
         const bool isSplit = m.target == Mapping::Target::splitMix;
         int ref = isSplit ? engine.getSplitNumber (m.slotUid) : engine.getFlatIndex (m.slotUid);
         if (ref > 0)
@@ -857,7 +983,7 @@ std::unique_ptr<juce::XmlElement> ControlSurface::createRackMappingsXml() const
 void ControlSurface::loadRackMappingsXml (const juce::XmlElement* rackRoot)
 {
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(),
-                                    [] (const Mapping& m) { return m.isRackMapping(); }),
+                                    [] (const Mapping& m) { return m.perPreset; }),
                     mappings.end());
 
     if (rackRoot != nullptr)
@@ -869,7 +995,9 @@ void ControlSurface::loadRackMappingsXml (const juce::XmlElement* rackRoot)
             for (auto* x : xm->getChildWithTagNameIterator ("MAPPING"))
             {
                 auto m = mappingFromXml (*x);
+                m.perPreset = true;
                 const bool isSplit = m.target == Mapping::Target::splitMix;
+                if (! m.isRackMapping()) { mappings.push_back (m); continue; }
 
                 // Newer presets: follow the module's saved ID wherever it sits in the rack.
                 // If that module didn't load, the mapping is dropped rather than landing elsewhere.
@@ -896,6 +1024,7 @@ void ControlSurface::loadRackMappingsXml (const juce::XmlElement* rackRoot)
             }
         }
 
+    resolveGlobalMappings();
     sendChangeMessage();
 }
 
@@ -906,8 +1035,8 @@ std::unique_ptr<juce::XmlElement> ControlSurface::createGlobalXml() const
     root->setAttribute ("oscOutHost", oscOutHost);
     root->setAttribute ("oscOutPort", oscOutPort);
     for (auto& m : mappings)
-        if (! m.isRackMapping())
-            root->addChildElement (mappingToXml (m, 0));
+        if (! m.perPreset)
+            root->addChildElement (mappingToXml (m, m.target == Mapping::Target::splitMix ? m.pluginOccurrence + 1 : 0));
     return root;
 }
 
@@ -922,11 +1051,13 @@ void ControlSurface::loadGlobalXml (const juce::XmlElement* x)
         for (auto* xm : x->getChildWithTagNameIterator ("MAPPING"))
         {
             auto m = mappingFromXml (*xm);
-            if (! m.isRackMapping())
+            m.perPreset = false;
+            if (! m.isRackMapping() || m.pluginName.isNotEmpty())
                 mappings.push_back (m);
         }
     }
 
+    resolveGlobalMappings();
     setOscInputPort (oscInPort);
     setOscOutput (oscOutHost, oscOutPort);
 }

@@ -1,4 +1,5 @@
 #include "ControllerPanel.h"
+#include "PluginColours.h"
 
 namespace
 {
@@ -104,40 +105,37 @@ namespace
 }
 
 //==============================================================================
-/** Colour picker: a row of LED colours (and "follow the layer colour"). */
+/** Colour picker: a row of LED colours, plus "the layer's colour" and "the effect's colour". */
 class SwatchRow : public juce::Component, public juce::SettableTooltipClient
 {
 public:
+    struct Swatch { juce::String value; juce::Colour colour; juce::String name; juce::String letter; };
+
     std::function<void (const juce::String&)> onPick;
     juce::String current;
-    bool allowLayer = true;
-    juce::Colour layerColour = juce::Colours::red;
-
-    int count() const { return (int) std::size (swatchColours) + (allowLayer ? 1 : 0); }
+    std::vector<Swatch> swatches;
 
     juce::Rectangle<float> cell (int i) const
     {
-        const float d = juce::jmin ((float) getHeight(), (float) getWidth() / (float) count());
-        return juce::Rectangle<float> ((float) i * d, 0.0f, d, d).reduced (3.0f);
+        const float d = juce::jmin ((float) getHeight(), (float) getWidth() / (float) juce::jmax (1, (int) swatches.size()));
+        return juce::Rectangle<float> ((float) i * d, 0.0f, d, d).reduced (2.5f);
     }
 
     void paint (juce::Graphics& g) override
     {
-        for (int i = 0; i < count(); ++i)
+        for (int i = 0; i < (int) swatches.size(); ++i)
         {
+            auto& sw = swatches[(size_t) i];
             auto r = cell (i);
-            const bool isLayer = i == (int) std::size (swatchColours);
-            const juce::String value = isLayer ? juce::String ("layer") : hex (juce::Colour (0xff000000 | swatchColours[i]));
-            const juce::Colour c = isLayer ? layerColour : juce::Colour (0xff000000 | swatchColours[i]);
-            g.setColour (c);
+            g.setColour (sw.colour);
             g.fillEllipse (r.reduced (2.0f));
-            if (isLayer)
+            if (sw.letter.isNotEmpty())
             {
                 g.setColour (Pequod::Colours::rail);
-                g.setFont (Pequod::heading (11.0f));
-                g.drawText ("L", r, juce::Justification::centred);
+                g.setFont (Pequod::heading (sw.letter.length() > 1 ? 9.0f : 11.0f));
+                g.drawText (sw.letter, r, juce::Justification::centred);
             }
-            if (value.equalsIgnoreCase (current))
+            if (sw.value.equalsIgnoreCase (current))
             {
                 g.setColour (Pequod::Colours::text);
                 g.drawEllipse (r, 2.0f);
@@ -145,16 +143,26 @@ public:
         }
     }
 
+    int indexAt (juce::Point<float> p) const
+    {
+        for (int i = 0; i < (int) swatches.size(); ++i)
+            if (cell (i).contains (p)) return i;
+        return -1;
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const int i = indexAt (e.position);
+        setTooltip (i >= 0 ? swatches[(size_t) i].name : juce::String());
+    }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
-        for (int i = 0; i < count(); ++i)
-            if (cell (i).contains (e.position))
-            {
-                const bool isLayer = i == (int) std::size (swatchColours);
-                current = isLayer ? juce::String ("layer") : hex (juce::Colour (0xff000000 | swatchColours[i]));
-                repaint();
-                if (onPick) onPick (current);
-            }
+        const int i = indexAt (e.position);
+        if (i < 0) return;
+        current = swatches[(size_t) i].value;
+        repaint();
+        if (onPick) onPick (current);
     }
 };
 
@@ -373,7 +381,7 @@ public:
     {
         for (auto* comp : std::initializer_list<juce::Component*> { &title, &sub, &identifyButton, &unitName, &modeBox, &functionButton,
                                                                    &latchToggle, &midiTypeBox, &numberSlider, &channelBox, &midiLatchToggle,
-                                                                   &layerActionBox, &layerNumBox, &swatches, &ledModeBox, &meter,
+                                                                   &layerActionBox, &layerNumBox, &swatches, &pequodSwatches, &ledModeBox, &meter, &everyPresetButton, &thisPresetButton, &useGlobalButton,
                                                                    &calibrateButton, &invertToggle, &hint })
             addChildComponent (comp);
 
@@ -424,7 +432,19 @@ public:
         layerNumBox.onChange = [this] { setAction ("num", layerNumBox.getSelectedId()); };
         setWidth (layerNumBox, 100);
 
-        swatches.onPick = [this] (const juce::String& col) { mgr.set (ControllerManager::controlPath (uid, code) + ".color", col); };
+        swatches.onPick = pequodSwatches.onPick = [this] (const juce::String& col) { pickColour (col); };
+
+        for (auto* b : { &everyPresetButton, &thisPresetButton })
+        {
+            b->setColour (juce::TextButton::buttonOnColourId, Pequod::Colours::mustard);
+            b->setColour (juce::TextButton::textColourOnId, Pequod::Colours::rail);
+            setWidth (*b, 118);
+        }
+        everyPresetButton.setTooltip ("This switch does the same in every preset");
+        thisPresetButton.setTooltip ("Give this switch a different job in this preset only. The other presets keep theirs.");
+        everyPresetButton.onClick = [this] { setScope (false); };
+        thisPresetButton.onClick  = [this] { setScope (true); };
+        useGlobalButton.onClick = [this] { mgr.unassign (uid, code, mgr.getLayer()); refresh(); };
         ledModeBox.addItemList ({ "Shows what it controls", "Always on", "Always off", "Follows incoming MIDI" }, 1);
         ledModeBox.onChange = [this]
         {
@@ -500,8 +520,23 @@ public:
         if (modeId == 1)
         {
             auto* m = mgr.mappingFor (uid, code, lay);
+            auto* global = control.findControllerMapping (uid, code, lay, 0);
             functionButton.setButtonText (m != nullptr ? describe (*m) : juce::String ("Choose what it does..."));
             form.row ("Function", { &functionButton }, 32);
+            if (m != nullptr)
+            {
+                everyPresetButton.setToggleState (! m->perPreset, juce::dontSendNotification);
+                thisPresetButton.setToggleState (m->perPreset, juce::dontSendNotification);
+                form.row ("Applies to", { &everyPresetButton, &thisPresetButton });
+                if (m->perPreset && global != nullptr)
+                {
+                    useGlobalButton.setButtonText ("USE THE EVERY-PRESET JOB HERE");
+                    useGlobalButton.setTooltip ("In every other preset this switch does: " + describe (*global));
+                    form.row ({}, { &useGlobalButton });
+                }
+                if (! m->perPreset && m->isRackMapping() && m->slotUid == 0)
+                    showHint (m->pluginName + " isn't in this preset, so this switch does nothing here.");
+            }
             if (m != nullptr && sw && (m->target == Mapping::Target::bypass || m->target == Mapping::Target::stompSlot
                                        || m->target == Mapping::Target::mute || m->target == Mapping::Target::tuner))
             {
@@ -509,10 +544,9 @@ public:
                 latchToggle.setToggleState (m->toggle, juce::dontSendNotification);
                 form.row ({}, { &latchToggle });
             }
-            if (m != nullptr && m->target == Mapping::Target::bypass)
-                showHint ("Saved with this preset. To use the same switch in every preset, pick \"Effect number...\" instead.");
-            else if (m != nullptr && m->target == Mapping::Target::param)
-                showHint ("Saved with this preset.");
+            if (m != nullptr && ! m->perPreset && (m->target == Mapping::Target::bypass || m->target == Mapping::Target::param))
+                showHint ("Follows " + m->pluginName + (m->pluginOccurrence > 0 ? " #" + juce::String (m->pluginOccurrence + 1) : juce::String())
+                          + " in every preset that has it.");
         }
         else if (modeId == 2)
         {
@@ -558,10 +592,9 @@ public:
         if (ControllerManager::hasLed (*u, code))
         {
             form.heading ("LIGHT");
-            swatches.current = mgr.get (ControllerManager::controlPath (uid, code) + ".color").toString();
-            swatches.layerColour = mgr.layerColour (lay);
-            swatches.repaint();
+            buildSwatches (lay);
             form.row ("Colour", { &swatches }, 30);
+            form.row ("PEQUOD", { &pequodSwatches }, 28);
             auto led = mgr.get (ControllerManager::controlPath (uid, code) + ".led").toString();
             static const juce::StringArray ledModes { "auto", "on", "off", "midi" };
             ledModeBox.setSelectedItemIndex (juce::jmax (0, ledModes.indexOf (led)), juce::dontSendNotification);
@@ -639,11 +672,72 @@ private:
     juce::ComboBox modeBox, midiTypeBox, channelBox, layerActionBox, layerNumBox, ledModeBox;
     juce::ToggleButton latchToggle, midiLatchToggle, invertToggle;
     juce::Slider numberSlider;
-    SwatchRow swatches;
+    SwatchRow swatches, pequodSwatches;
+    juce::TextButton everyPresetButton { "EVERY PRESET" }, thisPresetButton { "THIS PRESET" }, useGlobalButton;
     PedalMeter meter;
 
     bool calibrating = false;
     int calMin = -1, calMax = -1;
+
+    void buildSwatches (int lay)
+    {
+        swatches.swatches.clear();
+        for (auto c : swatchColours)
+        {
+            auto col = juce::Colour (0xff000000 | c);
+            swatches.swatches.push_back ({ hex (col), col, {}, {} });
+        }
+        swatches.swatches.push_back ({ "layer", mgr.layerColour (lay), "The colour of the layer you're on", "L" });
+
+        auto* m = mgr.mappingFor (uid, code, lay);
+        const bool canFollowEffect = m != nullptr && mgr.modeOf (uid, code, lay) == "pequod" && ! mgr.effectColour (*m).isTransparent();
+        if (canFollowEffect)
+            swatches.swatches.push_back ({ "fx", PluginColours::forLed (mgr.effectColour (*m)),
+                                           "The colour of the effect it switches (PEQUOD category colours)", "FX" });
+
+        pequodSwatches.swatches.clear();
+        for (auto& cat : PluginColours::categories())
+        {
+            auto led = PluginColours::forLed (juce::Colour (0xff000000 | cat.rgb));
+            pequodSwatches.swatches.push_back ({ hex (led), led, juce::String (cat.name) + "  (as an LED)", {} });
+        }
+
+        auto cur = mgr.usesEffectColour (uid, code, lay) && canFollowEffect ? juce::String ("fx")
+                                                                           : mgr.get (ControllerManager::controlPath (uid, code) + ".color").toString();
+        swatches.current = pequodSwatches.current = cur;
+        swatches.repaint();
+        pequodSwatches.repaint();
+    }
+
+    void pickColour (const juce::String& col)
+    {
+        const int lay = mgr.getLayer();
+        if (col == "fx")
+            mgr.setUseEffectColour (uid, code, lay, true);
+        else
+        {
+            if (mgr.usesEffectColour (uid, code, lay)) mgr.setUseEffectColour (uid, code, lay, false);
+            mgr.set (ControllerManager::controlPath (uid, code) + ".color", col);
+        }
+        refresh();
+    }
+
+    void setScope (bool perPreset)
+    {
+        const int lay = mgr.getLayer();
+        auto* m = mgr.mappingFor (uid, code, lay);
+        if (m == nullptr || m->perPreset == perPreset) { refresh(); return; }
+        if (perPreset)
+        {
+            Mapping copy = *m;            // the other presets keep the every-preset job
+            copy.perPreset = true;
+            control.setControllerMapping (copy);
+            if (mgr.onStatus) mgr.onStatus ("This preset now has its own job for this switch - change it above");
+        }
+        else
+            control.setControllerScope (uid, code, lay, false);
+        refresh();
+    }
 
     void showHint (const juce::String& s)
     {
@@ -777,7 +871,7 @@ private:
 
             menu.addSectionHeader ("EFFECTS");
             menu.addSubMenu ("Effect number...  on/off  (same in every preset)", fxAny);
-            menu.addSubMenu ("An effect in this preset...  on/off", fx);
+            menu.addSubMenu ("A particular effect...  on/off", fx);
             menu.addItem ("A plugin knob or switch...  (touch it on the plugin next)", [&m, u, c, lay, done] { m.learnPluginControl (u, c, lay); done(); });
             if (! splits.empty()) menu.addSubMenu ("Split: switch between A and B", splitMenu);
             menu.addSectionHeader ("PRESETS");
@@ -1208,10 +1302,15 @@ void ControllerPanel::paint (juce::Graphics& g)
         g.drawFittedText ("Plug the PEQUOD FC into this computer with USB - PEQUOD finds it by itself.\n\n"
                           "Or use it over Wi-Fi: once it's plugged in, pick your network under SETTINGS. "
                           "After that, it connects whenever this computer and the controller share that network.\n\n"
-                          "Still on the old controller firmware? Flash PEQUOD_FC.bin onto it first (see Controller/README).",
+                          "Still on the old controller firmware? Flash it with the new firmware first - see README in the \"Controller firmware\" folder next to PEQUOD Host.",
                           r.reduced (40, 0), juce::Justification::centredTop, 10);
+        auto tried = mgr.getLink().describeUsbPorts();
         g.setColour (Pequod::Colours::textDim);
         g.setFont (Pequod::body (13.0f));
+        g.drawFittedText (tried.isEmpty() ? juce::String ("No USB MIDI devices found on this computer.")
+                                          : "USB MIDI devices checked:   " + tried.joinIntoString ("     "),
+                          ipEditor.getBounds().translated (0, -80).withHeight (44).withSizeKeepingCentre (getWidth() - 120, 44),
+                          juce::Justification::centred, 3);
         g.drawText ("Wi-Fi network blocks discovery? Type the controller's IP:", ipEditor.getBounds().translated (0, -26).withWidth (500),
                     juce::Justification::centredLeft);
         return;
@@ -1303,7 +1402,12 @@ void ControllerPanel::timerCallback()
         wasConnected = mgr.isConnected();
         updateVisibility();
     }
-    if (! isShowing() || ! mgr.isConnected()) return;
+    if (! isShowing()) return;
+    if (! mgr.isConnected())
+    {
+        if (++idleTicks % 15 == 0) repaint();     // keep the list of checked ports current
+        return;
+    }
     inspector->tick();
     board->repaint();
 }

@@ -42,6 +42,7 @@ private:
 
     bool showingSettings = false;
     bool wasConnected = false;
+    int idleTicks = 0;
     juce::String lastSignature;
 
     void showSettings (bool);

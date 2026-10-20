@@ -13,6 +13,7 @@ struct Mapping
 
     // Controller sources: unit uid + control (0-3 switch, 100 pedal, 200 encoder turn, 201 encoder press) + layer
     enum { ctrlPedal = 100, ctrlEncoderTurn = 200, ctrlEncoderPress = 201 };
+    static constexpr juce::uint32 ledEffectColour = 1;
 
     Target target = Target::param;
     int slotUid = 0;        // slot uid (param/bypass) or rack item uid (splitMix)
@@ -25,7 +26,13 @@ struct Mapping
 
     juce::String ctrlUnit;
     int ctrlControl = 0, ctrlLayer = 0;
-    juce::uint32 ledColour = 0;   // 0 = default colour for the target
+    juce::uint32 ledColour = 0;   // controller LED: 0 = the switch's own colour, ledEffectColour = the effect's colour
+
+    /** Saved with the preset (and only active in it) or used in every preset.
+        A preset mapping on a source overrides the global ones on that same source. */
+    bool perPreset = false;
+    juce::String pluginName;      // global plugin targets follow the plugin by name...
+    int pluginOccurrence = 0;     // ...the Nth one of that name in the rack (0-based); splits: split number - 1
 
     bool toggle = true;     // switch targets: true = each press toggles, false = value sets state
 
@@ -41,6 +48,18 @@ struct Mapping
     bool sameControl (const juce::String& unit, int control, int layer) const
     {
         return isController() && ctrlUnit == unit && ctrlControl == control && ctrlLayer == layer;
+    }
+    bool sameSource (const Mapping& o) const
+    {
+        if (source != o.source) return false;
+        switch (source)
+        {
+            case Source::midiCC: case Source::midiNote:
+                return number == o.number && (midiChannel == 0 || o.midiChannel == 0 || midiChannel == o.midiChannel);
+            case Source::osc:        return oscAddress == o.oscAddress;
+            case Source::controller: return sameControl (o.ctrlUnit, o.ctrlControl, o.ctrlLayer);
+        }
+        return false;
     }
 };
 
@@ -82,9 +101,12 @@ public:
     /** Touch a plugin control next; it will be assigned to this controller control. */
     void armLearnForController (const juce::String& unit, int control, int layer, const juce::String& label);
     /** One function per control and layer: replaces whatever was assigned. */
-    void setControllerMapping (const Mapping&);
-    void clearControllerMapping (const juce::String& unit, int control, int layer);
-    const Mapping* findControllerMapping (const juce::String& unit, int control, int layer) const;
+    void setControllerMapping (const Mapping&);           // replaces the one with the same scope
+    /** scope: -1 = the one in effect (this preset's if there is one), 0 = all presets, 1 = this preset */
+    void clearControllerMapping (const juce::String& unit, int control, int layer, int scope = -1);
+    const Mapping* findControllerMapping (const juce::String& unit, int control, int layer, int scope = -1) const;
+    void setControllerScope (const juce::String& unit, int control, int layer, bool perPreset);
+    void setControllerLedColour (const juce::String& unit, int control, int layer, juce::uint32 colour);
     std::function<juce::String (const Mapping&)> controllerSourceName;
     std::function<void (const Mapping&)> onControllerMappingAdded;
     double lastControllerActivity = 0;
@@ -96,6 +118,9 @@ public:
     const std::vector<Mapping>& getMappings() const { return mappings; }
     void removeMapping (int index);
     void toggleMappingMode (int index);
+    void setMappingScope (int index, bool perPreset);
+    /** True when a this-preset mapping on the same source takes over from this global one. */
+    bool isOverridden (const Mapping&) const;
     void clearRackMappings();
     void slotRemoved (int slotUid);
     juce::String describeTarget (const Mapping&) const;
@@ -175,6 +200,9 @@ private:
     void send (const juce::String& address, const juce::String& s);
 
     juce::AudioProcessorParameter* getParam (int slotUid, int index) const;
+    void bindPlugin (Mapping&) const;       // remember which plugin a global mapping follows
+    void resolveGlobalMappings();           // point global plugin mappings at the plugins in this preset
+    void addMapping (Mapping);              // replaces one with the same source, target and scope
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (ControlSurface)
 };
