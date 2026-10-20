@@ -6,8 +6,11 @@
 //==============================================================================
 struct Mapping
 {
-    enum class Target { param, bypass, splitMix, inputGain, outputGain, presetNext, presetPrev, mute, bankNext, bankPrev };
-    enum class Source { midiCC, midiNote, osc };
+    enum class Target { param, bypass, splitMix, inputGain, outputGain, presetNext, presetPrev, mute, bankNext, bankPrev, tuner };
+    enum class Source { midiCC, midiNote, osc, controller };
+
+    // Controller sources: unit uid + control (0-3 switch, 100 pedal, 200 encoder turn, 201 encoder press) + layer
+    enum { ctrlPedal = 100, ctrlEncoderTurn = 200, ctrlEncoderPress = 201 };
 
     Target target = Target::param;
     int slotUid = 0;        // slot uid (param/bypass) or rack item uid (splitMix)
@@ -18,13 +21,24 @@ struct Mapping
     int number = 0;         // CC or note number
     juce::String oscAddress;
 
+    juce::String ctrlUnit;
+    int ctrlControl = 0, ctrlLayer = 0;
+    juce::uint32 ledColour = 0;   // 0 = default colour for the target
+
     bool toggle = true;     // switch targets: true = each press toggles, false = value sets state
 
     bool lastPressed = false;
 
     bool isRackMapping() const { return target == Target::param || target == Target::bypass || target == Target::splitMix; }
     bool isSwitchTarget() const { return target == Target::bypass || target == Target::presetNext || target == Target::presetPrev || target == Target::mute
-                                         || target == Target::bankNext || target == Target::bankPrev; }
+                                         || target == Target::bankNext || target == Target::bankPrev || target == Target::tuner; }
+
+    bool isController() const { return source == Source::controller; }
+    bool isControllerButton() const { return isController() && (ctrlControl < ctrlPedal || ctrlControl == ctrlEncoderPress); }
+    bool sameControl (const juce::String& unit, int control, int layer) const
+    {
+        return isController() && ctrlUnit == unit && ctrlControl == control && ctrlLayer == layer;
+    }
 };
 
 //==============================================================================
@@ -58,6 +72,22 @@ public:
     void armLearnFor (Mapping::Target, int uid = 0);   // learn a source for a fixed target
     void cancelLearn();
     juce::String getLearnStatusText() const;
+
+    //== Foot controller (PEQUOD Link)
+    /** A switch / pedal / encoder on the controller. Returns true if something was mapped to it. */
+    bool handleControllerEvent (const juce::String& unit, int control, int layer, float value, int delta);
+    /** Touch a plugin control next; it will be assigned to this controller control. */
+    void armLearnForController (const juce::String& unit, int control, int layer, const juce::String& label);
+    /** One function per control and layer: replaces whatever was assigned. */
+    void setControllerMapping (const Mapping&);
+    void clearControllerMapping (const juce::String& unit, int control, int layer);
+    const Mapping* findControllerMapping (const juce::String& unit, int control, int layer) const;
+    std::function<juce::String (const Mapping&)> controllerSourceName;
+    std::function<void (const Mapping&)> onControllerMappingAdded;
+    double lastControllerActivity = 0;
+
+    void setTunerMode (bool);
+    bool isTunerMode() const { return tunerMode; }
 
     //== Mappings
     const std::vector<Mapping>& getMappings() const { return mappings; }
@@ -117,6 +147,9 @@ private:
 
     std::atomic<LearnState> learnState { LearnState::off };
     Mapping pending;
+    bool pendingHasControllerSource = false;
+    juce::String pendingControllerLabel;
+    bool tunerMode = false;
     double learnArmedTime = 0;
     std::atomic<juce::int64> learnCandidate { -1 };
 

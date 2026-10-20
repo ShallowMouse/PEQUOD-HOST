@@ -4,8 +4,8 @@
 
 namespace
 {
-    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev" };
-    const char* sourceNames[] = { "cc", "note", "osc" };
+    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner" };
+    const char* sourceNames[] = { "cc", "note", "osc", "ctrl" };
 
     template <typename Enum>
     Enum enumFromName (const juce::String& s, const char* const* names, int count, Enum fallback)
@@ -123,14 +123,26 @@ void ControlSurface::timerCallback()
         auto c = learnCandidate.exchange (-1);
         if (c >= 0)
         {
-            pending = {};
+            const bool fromController = pendingHasControllerSource;
+            if (! fromController) pending = {};
             pending.target = Mapping::Target::param;
             pending.slotUid = (int) (c >> 32);
             pending.paramIndex = (int) (c & 0xffffffff);
             if (getParam (pending.slotUid, pending.paramIndex) != nullptr)
             {
-                learnState = LearnState::waitingForSource;
-                sendChangeMessage();
+                if (fromController)
+                {
+                    pendingHasControllerSource = false;
+                    learnState = LearnState::off;
+                    Mapping m = pending;
+                    m.toggle = true;
+                    setControllerMapping (m);
+                }
+                else
+                {
+                    learnState = LearnState::waitingForSource;
+                    sendChangeMessage();
+                }
             }
         }
     }
@@ -459,7 +471,7 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
         case Mapping::Target::param:
             if (auto* p = getParam (m.slotUid, m.paramIndex))
             {
-                if (m.source == Mapping::Source::midiNote)
+                if (m.source == Mapping::Source::midiNote || m.isControllerButton())
                 {
                     if (risingEdge) p->setValueNotifyingHost (p->getValue() >= 0.5f ? 0.0f : 1.0f);
                 }
@@ -478,7 +490,20 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
             }
             break;
 
-        case Mapping::Target::splitMix:   engine.setSplitMix (m.slotUid, value); break;
+        case Mapping::Target::splitMix:
+            if (m.isControllerButton())
+            {
+                if (risingEdge)
+                    if (auto* item = engine.findItem (m.slotUid))
+                        engine.setSplitMix (m.slotUid, item->mix >= 0.5f ? 0.0f : 1.0f);   // switch flips A <-> B
+            }
+            else
+                engine.setSplitMix (m.slotUid, value);
+            break;
+        case Mapping::Target::tuner:
+            if (m.toggle) { if (risingEdge) setTunerMode (! tunerMode); }
+            else          setTunerMode (isPress);
+            break;
         case Mapping::Target::inputGain:  engine.getInputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::outputGain: engine.getOutputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::presetNext: if (risingEdge && onPresetNext) onPresetNext(); break;
@@ -496,6 +521,7 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
 void ControlSurface::armLearn()
 {
     pending = {};
+    pendingHasControllerSource = false;
     learnCandidate = -1;
     learnArmedTime = juce::Time::getMillisecondCounterHiRes();
     learnState = LearnState::waitingForTarget;
@@ -505,6 +531,7 @@ void ControlSurface::armLearn()
 void ControlSurface::armLearnFor (Mapping::Target target, int uid)
 {
     pending = {};
+    pendingHasControllerSource = false;
     pending.target = target;
     pending.slotUid = uid;
     learnState = LearnState::waitingForSource;
@@ -513,6 +540,7 @@ void ControlSurface::armLearnFor (Mapping::Target target, int uid)
 
 void ControlSurface::cancelLearn()
 {
+    pendingHasControllerSource = false;
     learnState = LearnState::off;
     sendChangeMessage();
 }
@@ -527,6 +555,13 @@ void ControlSurface::finishLearn (Mapping::Source src, int channel, int number, 
     // Momentary MIDI buttons usually want toggle; continuous controls are irrelevant.
     m.toggle = true;
 
+    if (src == Mapping::Source::controller)
+    {
+        learnState = LearnState::off;
+        setControllerMapping (m);
+        return;
+    }
+
     // Replace an identical source -> target mapping rather than duplicating.
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [&] (const Mapping& x)
     {
@@ -539,12 +574,124 @@ void ControlSurface::finishLearn (Mapping::Source src, int channel, int number, 
     sendChangeMessage();
 }
 
+//==============================================================================
+void ControlSurface::setControllerMapping (const Mapping& m)
+{
+    mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [&] (const Mapping& x)
+    {
+        return x.sameControl (m.ctrlUnit, m.ctrlControl, m.ctrlLayer);
+    }), mappings.end());
+    mappings.push_back (m);
+    if (onControllerMappingAdded) onControllerMappingAdded (m);
+    sendChangeMessage();
+}
+
+void ControlSurface::clearControllerMapping (const juce::String& unit, int control, int layer)
+{
+    mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [&] (const Mapping& x)
+    {
+        return x.sameControl (unit, control, layer);
+    }), mappings.end());
+    sendChangeMessage();
+}
+
+const Mapping* ControlSurface::findControllerMapping (const juce::String& unit, int control, int layer) const
+{
+    for (auto& m : mappings)
+        if (m.sameControl (unit, control, layer))
+            return &m;
+    return nullptr;
+}
+
+void ControlSurface::armLearnForController (const juce::String& unit, int control, int layer, const juce::String& label)
+{
+    pending = {};
+    pending.source = Mapping::Source::controller;
+    pending.ctrlUnit = unit;
+    pending.ctrlControl = control;
+    pending.ctrlLayer = layer;
+    pendingHasControllerSource = true;
+    pendingControllerLabel = label;
+    learnCandidate = -1;
+    learnArmedTime = juce::Time::getMillisecondCounterHiRes();
+    learnState = LearnState::waitingForTarget;
+    sendChangeMessage();
+}
+
+void ControlSurface::setTunerMode (bool on)
+{
+    tunerMode = on;
+    setMuted (on);
+}
+
+bool ControlSurface::handleControllerEvent (const juce::String& unit, int control, int layer, float value, int delta)
+{
+    lastControllerActivity = juce::Time::getMillisecondCounterHiRes();
+    const bool press = value >= 0.5f;
+
+    // Learning with a fixed target (e.g. "+ HOST > Preset NEXT", or after touching a plugin knob): this is the source.
+    if (learnState == LearnState::waitingForSource && ! pendingHasControllerSource && (press || delta != 0 || control == Mapping::ctrlPedal))
+    {
+        Mapping m = pending;
+        m.source = Mapping::Source::controller;
+        m.ctrlUnit = unit;
+        m.ctrlControl = control;
+        m.ctrlLayer = layer;
+        m.toggle = true;
+        learnState = LearnState::off;
+        setControllerMapping (m);
+        return true;
+    }
+
+    bool hit = false;
+    for (auto& m : mappings)
+    {
+        if (! m.sameControl (unit, control, layer)) continue;
+        hit = true;
+
+        if (delta != 0)   // encoder: relative changes
+        {
+            switch (m.target)
+            {
+                case Mapping::Target::param:
+                    if (auto* p = getParam (m.slotUid, m.paramIndex))
+                        p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, p->getValue() + 0.01f * (float) delta));
+                    break;
+                case Mapping::Target::presetNext: case Mapping::Target::presetPrev:
+                    if (delta > 0 ? (bool) onPresetNext : (bool) onPresetPrev) (delta > 0 ? onPresetNext : onPresetPrev)();
+                    break;
+                case Mapping::Target::bankNext: case Mapping::Target::bankPrev:
+                    if (delta > 0 ? (bool) onBankNext : (bool) onBankPrev) (delta > 0 ? onBankNext : onBankPrev)();
+                    break;
+                case Mapping::Target::splitMix:
+                    if (auto* item = engine.findItem (m.slotUid)) engine.setSplitMix (m.slotUid, item->mix + 0.02f * (float) delta);
+                    break;
+                case Mapping::Target::inputGain:
+                    engine.getInputStage()->gainDb = juce::jlimit (-36.0f, 12.0f, engine.getInputStage()->gainDb.load() + 0.5f * (float) delta);
+                    break;
+                case Mapping::Target::outputGain:
+                    engine.getOutputStage()->gainDb = juce::jlimit (-36.0f, 12.0f, engine.getOutputStage()->gainDb.load() + 0.5f * (float) delta);
+                    break;
+                default:
+                    apply (m, 1.0f, true); apply (m, 0.0f, false);
+                    break;
+            }
+            continue;
+        }
+
+        apply (m, value, press);
+    }
+    return hit;
+}
+
 juce::String ControlSurface::getLearnStatusText() const
 {
     switch (learnState.load())
     {
-        case LearnState::waitingForTarget: return "LEARN: move a control on a plugin...";
-        case LearnState::waitingForSource: return "LEARN: " + describeTarget (pending) + "  <-  move a MIDI control or send OSC...";
+        case LearnState::waitingForTarget:
+            return pendingHasControllerSource ? "LEARN: move a control on a plugin for " + pendingControllerLabel + "..."
+                                              : juce::String ("LEARN: move a control on a plugin...");
+        case LearnState::waitingForSource: return "LEARN: " + describeTarget (pending) + "  <-  press a footswitch, move a MIDI control or send OSC...";
         case LearnState::off: default:     return {};
     }
 }
@@ -606,6 +753,7 @@ juce::String ControlSurface::describeTarget (const Mapping& m) const
         case Mapping::Target::presetNext: return "Preset NEXT";
         case Mapping::Target::presetPrev: return "Preset PREV";
         case Mapping::Target::mute:       return "MUTE";
+        case Mapping::Target::tuner:      return "TUNER";
         case Mapping::Target::bankNext:   return "Bank NEXT";
         case Mapping::Target::bankPrev:   return "Bank PREV";
     }
@@ -620,6 +768,8 @@ juce::String ControlSurface::describeSource (const Mapping& m) const
         case Mapping::Source::midiCC:   return "CC " + juce::String (m.number) + ch;
         case Mapping::Source::midiNote: return "Note " + juce::MidiMessage::getMidiNoteName (m.number, true, true, 3) + ch;
         case Mapping::Source::osc:      return m.oscAddress;
+        case Mapping::Source::controller:
+            return controllerSourceName ? controllerSourceName (m) : juce::String ("Controller");
     }
     return {};
 }
@@ -636,19 +786,31 @@ static juce::XmlElement* mappingToXml (const Mapping& m, int targetRef)
     x->setAttribute ("num", m.number);
     x->setAttribute ("osc", m.oscAddress);
     x->setAttribute ("toggle", m.toggle);
+    if (m.isController())
+    {
+        x->setAttribute ("cu", m.ctrlUnit);
+        x->setAttribute ("cc", m.ctrlControl);
+        x->setAttribute ("cl", m.ctrlLayer);
+    }
+    if (m.ledColour != 0)
+        x->setAttribute ("led", juce::String::toHexString ((int) m.ledColour));
     return x;
 }
 
 static Mapping mappingFromXml (const juce::XmlElement& x)
 {
     Mapping m;
-    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 10, Mapping::Target::param);
+    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 11, Mapping::Target::param);
     m.paramIndex = x.getIntAttribute ("param", -1);
-    m.source = enumFromName (x.getStringAttribute ("source"), sourceNames, 3, Mapping::Source::midiCC);
+    m.source = enumFromName (x.getStringAttribute ("source"), sourceNames, 4, Mapping::Source::midiCC);
     m.midiChannel = x.getIntAttribute ("ch");
     m.number = x.getIntAttribute ("num");
     m.oscAddress = x.getStringAttribute ("osc");
     m.toggle = x.getBoolAttribute ("toggle", true);
+    m.ctrlUnit = x.getStringAttribute ("cu");
+    m.ctrlControl = x.getIntAttribute ("cc");
+    m.ctrlLayer = x.getIntAttribute ("cl");
+    m.ledColour = (juce::uint32) x.getStringAttribute ("led").getHexValue32();
     return m;
 }
 
