@@ -115,7 +115,10 @@ public:
     /** scope: -1 = the one in effect (this preset's if there is one), 0 = all presets, 1 = this preset */
     void clearControllerMapping (const juce::String& unit, int control, int layer, int scope = -1);
     const Mapping* findControllerMapping (const juce::String& unit, int control, int layer, int scope = -1) const;
+    /** A controller control is either GLOBAL (the same functions in every preset) or per preset (each preset
+        has its own), never both. Changing it carries the current functions across. */
     void setControllerScope (const juce::String& unit, int control, int layer, bool perPreset);
+    bool isControllerPerPreset (const juce::String& unit, int control, int layer) const;
     void setControllerLedColour (const juce::String& unit, int control, int layer, juce::uint32 colour);
     std::function<juce::String (const Mapping&)> controllerSourceName;
     std::function<void (const Mapping&)> onControllerMappingAdded;
@@ -213,6 +216,8 @@ private:
     void bindPlugin (Mapping&) const;       // remember which plugin a global mapping follows
     void resolveGlobalMappings();           // point global plugin mappings at the plugins in this preset
     void addMapping (Mapping);              // replaces one with the same source, target and scope
+    std::map<juce::String, bool> ctrlScopes;   // "unit:control:layer" -> per preset
+    static juce::String scopeKey (const juce::String& unit, int control, int layer) { return unit + ":" + juce::String (control) + ":" + juce::String (layer); }
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (ControlSurface)
 };

@@ -608,6 +608,8 @@ void ControlSurface::addMapping (Mapping m)
 
 bool ControlSurface::isOverridden (const Mapping& m) const
 {
+    if (m.isController())       // controller controls are one scope or the other: the other scope's leftovers do nothing
+        return m.perPreset != isControllerPerPreset (m.ctrlUnit, m.ctrlControl, m.ctrlLayer);
     if (m.perPreset) return false;
     for (auto& x : mappings)
         if (x.perPreset && x.sameSource (m))
@@ -621,6 +623,7 @@ void ControlSurface::setMappingScope (int index, bool perPreset)
     Mapping m = mappings[(size_t) index];
     if (m.perPreset == perPreset) return;
     if (! perPreset && m.isRackMapping() && m.slotUid == 0) return;    // nothing to follow
+    if (m.isController()) { setControllerScope (m.ctrlUnit, m.ctrlControl, m.ctrlLayer, perPreset); return; }
     mappings.erase (mappings.begin() + index);
     m.perPreset = perPreset;
     if (m.isController()) setControllerMapping (m);
@@ -674,9 +677,25 @@ void ControlSurface::resolveGlobalMappings()
 }
 
 //==============================================================================
+bool ControlSurface::isControllerPerPreset (const juce::String& unit, int control, int layer) const
+{
+    if (auto it = ctrlScopes.find (scopeKey (unit, control, layer)); it != ctrlScopes.end()) return it->second;
+    // not chosen yet (older settings): whatever it already has; new controls are GLOBAL
+    bool anyPreset = false;
+    for (auto& m : mappings)
+        if (m.sameControl (unit, control, layer))
+        {
+            if (! m.perPreset) return false;
+            anyPreset = true;
+        }
+    return anyPreset;
+}
+
 void ControlSurface::setControllerMapping (const Mapping& mapping)
 {
     Mapping m = mapping;
+    m.perPreset = isControllerPerPreset (m.ctrlUnit, m.ctrlControl, m.ctrlLayer);
+    ctrlScopes[scopeKey (m.ctrlUnit, m.ctrlControl, m.ctrlLayer)] = m.perPreset;
     if (! m.perPreset) bindPlugin (m);
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [&] (const Mapping& x)
     {
@@ -699,21 +718,17 @@ void ControlSurface::removeControllerMapping (const Mapping& which)
 
 std::vector<const Mapping*> ControlSurface::findControllerMappings (const juce::String& unit, int control, int layer) const
 {
-    std::vector<const Mapping*> preset, global;
+    const bool perPreset = isControllerPerPreset (unit, control, layer);
+    std::vector<const Mapping*> out;
     for (auto& m : mappings)
-        if (m.sameControl (unit, control, layer))
-            (m.perPreset ? preset : global).push_back (&m);
-    return preset.empty() ? global : preset;
+        if (m.sameControl (unit, control, layer) && m.perPreset == perPreset)
+            out.push_back (&m);
+    return out;
 }
 
 void ControlSurface::clearControllerMapping (const juce::String& unit, int control, int layer, int scope)
 {
-    if (scope < 0)
-    {
-        auto* shown = findControllerMapping (unit, control, layer);
-        if (shown == nullptr) return;
-        scope = shown->perPreset ? 1 : 0;
-    }
+    if (scope < 0) scope = isControllerPerPreset (unit, control, layer) ? 1 : 0;
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [&] (const Mapping& x)
     {
         return x.sameControl (unit, control, layer) && x.perPreset == (scope == 1);
@@ -723,31 +738,31 @@ void ControlSurface::clearControllerMapping (const juce::String& unit, int contr
 
 const Mapping* ControlSurface::findControllerMapping (const juce::String& unit, int control, int layer, int scope) const
 {
-    const Mapping* global = nullptr;
+    const bool perPreset = scope < 0 ? isControllerPerPreset (unit, control, layer) : scope == 1;
     for (auto& m : mappings)
-        if (m.sameControl (unit, control, layer))
-        {
-            if (m.perPreset && scope != 0) return &m;
-            if (! m.perPreset && global == nullptr) global = &m;
-        }
-    return scope == 1 ? nullptr : global;
+        if (m.sameControl (unit, control, layer) && m.perPreset == perPreset)
+            return &m;
+    return nullptr;
 }
 
 void ControlSurface::setControllerScope (const juce::String& unit, int control, int layer, bool perPreset)
 {
+    const bool was = isControllerPerPreset (unit, control, layer);
     std::vector<Mapping> moving;
-    for (auto* m : findControllerMappings (unit, control, layer))
-        if (m->perPreset != perPreset) moving.push_back (*m);
-    if (moving.empty()) return;
+    for (auto* m : findControllerMappings (unit, control, layer)) moving.push_back (*m);
 
-    // The whole set moves; it replaces whatever the other scope had on this control.
-    clearControllerMapping (unit, control, layer, perPreset ? 1 : 0);
-    clearControllerMapping (unit, control, layer, perPreset ? 0 : 1);
+    ctrlScopes[scopeKey (unit, control, layer)] = perPreset;
+    if (was == perPreset) { sendChangeMessage(); return; }
+
+    // The current functions carry across; nothing is left behind in the other scope.
+    clearControllerMapping (unit, control, layer, 0);
+    clearControllerMapping (unit, control, layer, 1);
     for (auto m : moving)
     {
         m.perPreset = perPreset;
         setControllerMapping (m);
     }
+    sendChangeMessage();
 }
 
 void ControlSurface::setControllerLedColour (const juce::String& unit, int control, int layer, juce::uint32 colour)
@@ -1030,6 +1045,7 @@ void ControlSurface::loadRackMappingsXml (const juce::XmlElement* rackRoot)
             {
                 auto m = mappingFromXml (*x);
                 m.perPreset = true;
+                if (m.isController() && ! isControllerPerPreset (m.ctrlUnit, m.ctrlControl, m.ctrlLayer)) continue;
                 const bool isSplit = m.target == Mapping::Target::splitMix;
                 if (! m.isRackMapping()) { mappings.push_back (m); continue; }
 
@@ -1071,6 +1087,12 @@ std::unique_ptr<juce::XmlElement> ControlSurface::createGlobalXml() const
     for (auto& m : mappings)
         if (! m.perPreset)
             root->addChildElement (mappingToXml (m, m.target == Mapping::Target::splitMix ? m.pluginOccurrence + 1 : 0));
+    for (auto& [key, perPreset] : ctrlScopes)
+    {
+        auto* x = root->createNewChildElement ("CTRLSCOPE");
+        x->setAttribute ("key", key);
+        x->setAttribute ("perPreset", perPreset);
+    }
     return root;
 }
 
@@ -1091,6 +1113,9 @@ void ControlSurface::loadGlobalXml (const juce::XmlElement* x)
         }
     }
 
+    if (x != nullptr)
+        for (auto* sc : x->getChildWithTagNameIterator ("CTRLSCOPE"))
+            ctrlScopes[sc->getStringAttribute ("key")] = sc->getBoolAttribute ("perPreset");
     resolveGlobalMappings();
     setOscInputPort (oscInPort);
     setOscOutput (oscOutHost, oscOutPort);

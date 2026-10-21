@@ -600,7 +600,7 @@ public:
     {
         for (auto* comp : std::initializer_list<juce::Component*> { &title, &sub, &identifyButton, &presetCaption, &modeBox, &functionButton,
                                                                    &latchButton, &momentaryButton, &midiTypeBox, &numberSlider, &channelBox,
-                                                                   &layerActionBox, &layerNumBox, &swatches, &ledModeBox, &meter, &everyPresetButton, &thisPresetButton, &useGlobalButton,
+                                                                   &layerActionBox, &layerNumBox, &swatches, &ledModeBox, &meter, &everyPresetButton, &thisPresetButton,
                                                                    &calibrateButton, &invertToggle, &hint })
             addChildComponent (comp);
 
@@ -669,10 +669,10 @@ public:
             setWidth (*b, 118);
         }
         everyPresetButton.setTooltip ("GLOBAL: this switch does the same in every preset, whichever preset is loaded");
-        thisPresetButton.setTooltip ("Give this switch a different job in this preset only. The other presets keep theirs.");
+        thisPresetButton.setTooltip ("Each preset gives this switch its own functions");
         everyPresetButton.onClick = [this] { setScope (false); };
         thisPresetButton.onClick  = [this] { setScope (true); };
-        useGlobalButton.onClick = [this] { mgr.unassign (uid, code, mgr.getLayer()); refresh(); };
+
         ledModeBox.addItemList ({ "Shows what it controls", "Always on", "Always off", "Follows incoming MIDI" }, 1);
         ledModeBox.onChange = [this]
         {
@@ -748,7 +748,6 @@ public:
         {
             auto all = mgr.mappingsFor (uid, code, lay);
             auto* m = all.empty() ? nullptr : all.front();
-            auto* global = control.findControllerMapping (uid, code, lay, 0);
             if (all.empty())
             {
                 functionButton.setButtonText ("Choose what it does...");
@@ -777,21 +776,16 @@ public:
                 }
                 form.row ({}, { &addFunctionButton }, 26);
             }
-            if (m != nullptr)
             {
-                everyPresetButton.setToggleState (! m->perPreset, juce::dontSendNotification);
-                thisPresetButton.setToggleState (m->perPreset, juce::dontSendNotification);
+                const bool perPreset = control.isControllerPerPreset (uid, code, lay);
+                everyPresetButton.setToggleState (! perPreset, juce::dontSendNotification);
+                thisPresetButton.setToggleState (perPreset, juce::dontSendNotification);
                 form.row ("Applies to", { &everyPresetButton, &thisPresetButton });
-                presetCaption.setText (m->perPreset ? "Only in preset " + presetName() : juce::String ("The same in every preset"),
+                presetCaption.setText (perPreset ? "Each preset has its own functions - editing " + presetName()
+                                                 : juce::String ("The same in every preset"),
                                        juce::dontSendNotification);
                 form.row ({}, { &presetCaption }, 16);
-                if (m->perPreset && global != nullptr)
-                {
-                    useGlobalButton.setButtonText ("USE THE GLOBAL FUNCTIONS HERE");
-                    useGlobalButton.setTooltip ("In every other preset this switch does: " + describe (*global));
-                    form.row ({}, { &useGlobalButton });
-                }
-                if (! m->perPreset && m->isRackMapping() && m->slotUid == 0)
+                if (m != nullptr && ! perPreset && m->isRackMapping() && m->slotUid == 0)
                     showHint (m->pluginName + " isn't in this preset, so this switch does nothing here.");
             }
             const bool oneShot = ! all.empty() && std::all_of (all.begin(), all.end(), [] (const Mapping* f)
@@ -946,7 +940,7 @@ private:
     juce::TextButton latchButton { "LATCHING" }, momentaryButton { "MOMENTARY" };
     juce::Slider numberSlider;
     SwatchRow swatches;
-    juce::TextButton everyPresetButton { "GLOBAL" }, thisPresetButton { "THIS PRESET" }, useGlobalButton;
+    juce::TextButton everyPresetButton { "GLOBAL" }, thisPresetButton { "THIS PRESET" };
     PedalMeter meter;
 
     bool calibrating = false;
@@ -993,17 +987,11 @@ private:
     void setScope (bool perPreset)
     {
         const int lay = mgr.getLayer();
-        auto* m = mgr.mappingFor (uid, code, lay);
-        if (m == nullptr || m->perPreset == perPreset) { refresh(); return; }
-        if (perPreset)
-        {
-            std::vector<Mapping> copies;  // the other presets keep the every-preset functions
-            for (auto* f : mgr.mappingsFor (uid, code, lay)) copies.push_back (*f);
-            for (auto& c : copies) { c.perPreset = true; control.setControllerMapping (c); }
-            if (mgr.onStatus) mgr.onStatus ("This preset now has its own job for this switch - change it above");
-        }
-        else
-            control.setControllerScope (uid, code, lay, false);
+        if (control.isControllerPerPreset (uid, code, lay) == perPreset) { refresh(); return; }
+        control.setControllerScope (uid, code, lay, perPreset);
+        if (mgr.onStatus)
+            mgr.onStatus (perPreset ? "This switch now has its own functions in each preset - the current ones stay with " + presetName()
+                                    : juce::String ("This switch now does the same in every preset"));
         refresh();
     }
 

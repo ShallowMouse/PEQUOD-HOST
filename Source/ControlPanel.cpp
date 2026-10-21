@@ -123,7 +123,7 @@ void ControlPanel::paintListBoxItem (int row, juce::Graphics& g, int w, int h, b
     g.setColour (overridden ? Pequod::Colours::textDim : Pequod::Colours::text);
     g.setFont (Pequod::body (12.0f));
     juce::String target = "-> " + control.describeTarget (m);
-    if (overridden) target << "   (this preset uses its own)";
+    if (overridden) target << (m.isController() ? "   (not used: the switch is set the other way)" : "   (this preset uses its own)");
     else if (! m.perPreset && m.isRackMapping() && m.slotUid == 0) target << "   (not in this preset)";
     g.drawText (target, r, juce::Justification::centredLeft, true);
 }
