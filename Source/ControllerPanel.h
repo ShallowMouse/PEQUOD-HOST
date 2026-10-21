@@ -34,7 +34,19 @@ private:
     std::unique_ptr<BoardView> board;
     std::unique_ptr<Inspector> inspector;
     std::unique_ptr<SettingsPage> settings;
-    juce::Viewport settingsViewport, boardViewport;
+    /** Scrolls sideways only; an ordinary mouse wheel scrolls the page around it instead. */
+    struct SideScroller : public juce::Viewport
+    {
+        void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+        {
+            if (w.deltaX != 0.0f || e.mods.isShiftDown()) { Viewport::mouseWheelMove (e, w); return; }
+            if (auto* p = getParentComponent()) p->mouseWheelMove (e.getEventRelativeTo (p), w);
+        }
+    };
+
+    juce::Component controlsPage;      // declared before the viewport that shows it
+    juce::Viewport settingsViewport, controlsViewport;
+    SideScroller boardViewport;
 
     // shown when nothing is connected
     juce::TextEditor ipEditor;
@@ -43,6 +55,7 @@ private:
     bool showingSettings = false;
     bool wasConnected = false;
     int idleTicks = 0;
+    bool inResized = false;
     juce::String lastSignature;
 
     void showSettings (bool);

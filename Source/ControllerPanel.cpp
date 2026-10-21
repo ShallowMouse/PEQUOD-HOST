@@ -59,6 +59,8 @@ namespace
             int columns = 1;
             for (auto& r : rows) if (r.newColumn) ++columns;
             const int colGap = 28;
+            if (columns > 1 && (full.getWidth() - colGap * (columns - 1)) / columns < 340) columns = 1;   // too narrow: one column
+            const bool stack = columns == 1;
             const int colW = (full.getWidth() - colGap * (columns - 1)) / columns;
             auto area = full.withWidth (colW);
             int y = area.getY(), tallest = 0;
@@ -66,6 +68,7 @@ namespace
             {
                 if (r.newColumn)
                 {
+                    if (stack) continue;
                     tallest = juce::jmax (tallest, y - full.getY());
                     area = area.translated (colW + colGap, 0);
                     y = full.getY();
@@ -699,6 +702,7 @@ public:
             form.wide ({ &hint }, 60);
             resized();
             repaint();
+            if (onLayoutChanged) onLayoutChanged();
             return;
         }
 
@@ -864,7 +868,10 @@ public:
         for (auto& r : form.rows) for (auto* c : r.comps) c->setVisible (true);
         resized();
         repaint();
+        if (onLayoutChanged) onLayoutChanged();
     }
+
+    std::function<void()> onLayoutChanged;
 
     void tick()
     {
@@ -894,6 +901,15 @@ public:
     {
         form.labelWidth = 92;
         form.layout (getLocalBounds().reduced (16, 14));
+    }
+
+    /** Height needed to show everything at this width (the window scrolls if it's smaller). */
+    int getIdealHeight (int width)
+    {
+        form.labelWidth = 92;
+        const int h = form.layout (juce::Rectangle<int> (16, 14, juce::jmax (200, width - 32), 100)) + 28;
+        resized();
+        return h;
     }
 
 private:
@@ -1458,8 +1474,11 @@ ControllerPanel::ControllerPanel (ControllerManager& m, HostEngine& e, ControlSu
 
     boardViewport.setViewedComponent (board.get(), false);
     boardViewport.setScrollBarsShown (false, true);
-    addChildComponent (boardViewport);
-    addChildComponent (*inspector);
+    controlsPage.addAndMakeVisible (boardViewport);
+    controlsPage.addAndMakeVisible (*inspector);
+    controlsViewport.setViewedComponent (&controlsPage, false);
+    controlsViewport.setScrollBarsShown (true, false);
+    addChildComponent (controlsViewport);
     settingsViewport.setViewedComponent (settings.get(), false);
     settingsViewport.setScrollBarsShown (true, false);
     addChildComponent (settingsViewport);
@@ -1492,6 +1511,7 @@ ControllerPanel::ControllerPanel (ControllerManager& m, HostEngine& e, ControlSu
     }
 
     board->onSelect = [this] (const juce::String& uid, int code) { select (uid, code); };
+    inspector->onLayoutChanged = [this] { if (! inResized) resized(); };
     mgr.onControlPressed = [this] (const juce::String& uid, int code)
     {
         if (isShowing()) { showSettings (false); select (uid, code); }
@@ -1537,8 +1557,7 @@ void ControllerPanel::showSettings (bool s)
 void ControllerPanel::updateVisibility()
 {
     const bool conn = mgr.isConnected();
-    boardViewport.setVisible (conn && ! showingSettings);
-    inspector->setVisible (conn && ! showingSettings);
+    controlsViewport.setVisible (conn && ! showingSettings);
     quickSetupButton.setVisible (conn && ! showingSettings);
     settingsViewport.setVisible (conn && showingSettings);
     controlsTab.setVisible (conn);
@@ -1617,6 +1636,7 @@ void ControllerPanel::paint (juce::Graphics& g)
 
 void ControllerPanel::resized()
 {
+    const juce::ScopedValueSetter<bool> busy (inResized, true);
     auto r = getLocalBounds().reduced (18, 12);
     auto top = r.removeFromTop (44);
 
@@ -1646,11 +1666,17 @@ void ControllerPanel::resized()
     r.removeFromTop (10);
 
     // boards across the full width (scroll sideways if there are many), settings for the picked control below
-    auto boardArea = r.removeFromTop (BoardView::getRequiredHeight() + boardViewport.getScrollBarThickness());
-    boardViewport.setBounds (boardArea);
-    board->setSize (juce::jmax (boardArea.getWidth(), board->getRequiredWidth()), BoardView::getRequiredHeight());
-    r.removeFromTop (10);
-    inspector->setBounds (r);
+    // Everything below scrolls when the window is smaller than it needs, so nothing is ever cut off.
+    controlsViewport.setBounds (r);
+    const int pageW = r.getWidth() - (controlsViewport.canScrollVertically() ? controlsViewport.getScrollBarThickness() : 0);
+    const int boardH = BoardView::getRequiredHeight() + boardViewport.getScrollBarThickness();
+    const int inspectorH = juce::jmax (r.getHeight() - boardH - 10, inspector->getIdealHeight (pageW));
+    const bool needsScroll = boardH + 10 + inspectorH > r.getHeight();
+    const int w = needsScroll ? r.getWidth() - controlsViewport.getScrollBarThickness() : r.getWidth();
+    controlsPage.setSize (w, boardH + 10 + juce::jmax (r.getHeight() - boardH - 10, inspector->getIdealHeight (w)));
+    boardViewport.setBounds (0, 0, w, boardH);
+    board->setSize (juce::jmax (w, board->getRequiredWidth()), BoardView::getRequiredHeight());
+    inspector->setBounds (0, boardH + 10, w, controlsPage.getHeight() - boardH - 10);
 }
 
 void ControllerPanel::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -1696,6 +1722,6 @@ ControllerWindow::ControllerWindow (ControllerManager& m, HostEngine& e, Control
     panel->setSize (1120, 900);
     setContentOwned (panel, true);
     setResizable (true, false);
-    setResizeLimits (820, 760, 2600, 1800);
+    setResizeLimits (560, 420, 2600, 1800);
     centreWithSize (getWidth(), getHeight());
 }
