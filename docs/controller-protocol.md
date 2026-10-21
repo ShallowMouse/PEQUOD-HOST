@@ -35,7 +35,7 @@ It also announces itself with mDNS as `_pequod._udp`.
 | `ping` | | → `pong` |
 | `bye` | | PEQUOD is closing |
 | `get_cfg` | | → `cfg` |
-| `set_cfg` | `cfg` | replace the whole config, applied at once, saved to flash 1.5 s later → `cfg_ok` |
+| `set_cfg` | `cfg`, `temp`? | replace the whole config, applied at once, saved to flash 1.5 s later → `cfg_ok`. `temp: true` (sent on every preset change for THIS PRESET controls) applies it without saving |
 | `rescan` | | look for boards again → `info` + `cfg` |
 | `leds` | `l`: `[[unit, control, on, "#rrggbb"?], …]` | which PEQUOD-mode controls are lit (everything not listed is off); colour optional |
 | `screen` | `mode` `preset`/`tuner`/`text`, `top`, `main`, `sub`, `note`, `cents`, `inTune`, `flash` | OLED content; `flash` shows for 1.2 s at the bottom |

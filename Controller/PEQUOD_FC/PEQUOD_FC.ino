@@ -1133,7 +1133,8 @@ void handleMessage(Transport tr, JsonDocument& m) {
     incoming["wifi"].remove("hasPass2");
     cfg = incoming;
     applyConfig();
-    markConfigDirty();
+    // "temp": PEQUOD changed preset and sent that preset's switch settings - use them, don't wear the flash
+    if (!(m["temp"] | false)) markConfigDirty();
     applyContrast();
     String newWifi;
     serializeJson(cfg["wifi"], newWifi);

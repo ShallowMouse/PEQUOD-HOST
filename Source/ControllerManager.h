@@ -29,7 +29,7 @@ public:
     //   "brightness", "wifi.ssid", "units.A1B2C3D4.controls.0.layers.1.mode"
     bool hasConfig() const                     { return config.isObject(); }
     juce::var get (const juce::String& path) const;
-    void set (const juce::String& path, const juce::var& value);     // sent to the controller straight away
+    void set (const juce::String& path, const juce::var& value, bool keep = true);   // sent to the controller straight away (keep = saved there)
     void setName (const juce::String&);                               // also renames its USB port (restarts it)
 
     int getLayer() const                       { return layer; }
@@ -57,6 +57,10 @@ public:
     void setLayerAction (const juce::String& uid, int code, int lay, const juce::var&);
     bool hasAnything (const juce::String& uid, int code, int lay) const;
     bool supportsCombos() const;                                                          // firmware 2.1 or newer
+    /** GLOBAL or THIS PRESET for a control: PEQUOD functions, MIDI out and layer change all move together. */
+    void setScope (const juce::String& uid, int code, int lay, bool perPreset);
+    /** Sends the loaded preset's MIDI / layer settings for THIS PRESET controls to the controller. */
+    void pushPresetActions();
     juce::String shortLabel (const juce::String& uid, int code, int lay) const;       // what it does, in a few letters
     juce::String shortLabelOf (const Mapping&, int code) const;
     juce::Colour colourOf (const juce::String& uid, int code) const;

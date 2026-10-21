@@ -748,7 +748,8 @@ public:
         layerRow.onChange = [this] { mgr.setLayerAction (uid, code, mgr.getLayer(), layerRow.get()); };
         layerRow.onRemove = [this]
         {
-            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Inspector> (this)]
+            juce::Component::SafePointer<Inspector> safePtr (this);
+                juce::MessageManager::callAsync ([safe = safePtr]
             {
                 if (safe == nullptr) return;
                 safe->mgr.setLayerAction (safe->uid, safe->code, safe->mgr.getLayer(), {});
@@ -899,7 +900,8 @@ public:
             };
             row->onRemove = [this, i]
             {
-                juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Inspector> (this), i]
+                juce::Component::SafePointer<Inspector> safePtr (this);
+                juce::MessageManager::callAsync ([safe = safePtr, i]
                 {
                     if (safe == nullptr) return;
                     auto list = safe->mgr.midiOf (safe->uid, safe->code, safe->mgr.getLayer());
@@ -925,13 +927,13 @@ public:
         addFunctionButton.setButtonText (total == 0 ? "Choose what it does..." : "+ ADD ANOTHER FUNCTION");
         form.row (total == 0 ? juce::String ("Function") : juce::String(), { &addFunctionButton }, total == 0 ? 32 : 26);
 
-        if (! all.empty())
+        if (total > 0 || control.isControllerPerPreset (uid, code, lay))
         {
             const bool perPreset = control.isControllerPerPreset (uid, code, lay);
             everyPresetButton.setToggleState (! perPreset, juce::dontSendNotification);
             thisPresetButton.setToggleState (perPreset, juce::dontSendNotification);
             form.row ("Applies to", { &everyPresetButton, &thisPresetButton });
-            presetCaption.setText (perPreset ? "Each preset has its own PEQUOD functions - editing " + presetName()
+            presetCaption.setText (perPreset ? "Each preset has its own functions, MIDI and layer change - editing " + presetName()
                                              : juce::String ("The same in every preset"),
                                    juce::dontSendNotification);
             form.row ({}, { &presetCaption }, 16);
@@ -1113,7 +1115,7 @@ private:
     {
         const int lay = mgr.getLayer();
         if (control.isControllerPerPreset (uid, code, lay) == perPreset) { refresh(); return; }
-        control.setControllerScope (uid, code, lay, perPreset);
+        mgr.setScope (uid, code, lay, perPreset);
         if (mgr.onStatus)
             mgr.onStatus (perPreset ? "This switch now has its own functions in each preset - the current ones stay with " + presetName()
                                     : juce::String ("This switch now does the same in every preset"));
@@ -1181,7 +1183,10 @@ private:
                           : midiModes()[0];
         setAction ("mode", mode);
         if (id == 1 && mgr.mappingFor (uid, code, mgr.getLayer()) == nullptr)
-            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Inspector> (this)] { if (safe) safe->showFunctionMenu (-1, &safe->functionButton); });
+        {
+            juce::Component::SafePointer<Inspector> safePtr (this);
+            juce::MessageManager::callAsync ([safe = safePtr] { if (safe) safe->showFunctionMenu (-1, &safe->functionButton); });
+        }
         refresh();
     }
 
@@ -1231,7 +1236,8 @@ private:
 
     void removeFunctionAt (int i)
     {
-        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Inspector> (this), i]
+        juce::Component::SafePointer<Inspector> safePtr (this);
+                juce::MessageManager::callAsync ([safe = safePtr, i]
         {
             if (safe == nullptr) return;
             auto all = safe->mgr.mappingsFor (safe->uid, safe->code, safe->mgr.getLayer());

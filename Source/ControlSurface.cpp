@@ -702,6 +702,7 @@ void ControlSurface::setControllerMapping (const Mapping& mapping)
         return x.sameControl (m.ctrlUnit, m.ctrlControl, m.ctrlLayer) && x.perPreset == m.perPreset && x.sameFunction (m);
     }), mappings.end());
     mappings.push_back (m);
+    if (m.perPreset) engine.markModified();
     if (onControllerMappingAdded) onControllerMappingAdded (m);
     sendChangeMessage();
 }
@@ -713,6 +714,7 @@ void ControlSurface::removeControllerMapping (const Mapping& which)
     {
         return x.sameControl (w.ctrlUnit, w.ctrlControl, w.ctrlLayer) && x.perPreset == w.perPreset && x.sameFunction (w);
     }), mappings.end());
+    if (w.perPreset) engine.markModified();
     sendChangeMessage();
 }
 
@@ -1009,6 +1011,16 @@ static Mapping mappingFromXml (const juce::XmlElement& x)
 std::unique_ptr<juce::XmlElement> ControlSurface::createRackMappingsXml() const
 {
     auto root = std::make_unique<juce::XmlElement> ("MAPPINGS");
+    for (auto& [key, v] : presetControllerActions)
+    {
+        auto parts = juce::StringArray::fromTokens (key, ":", {});
+        if (parts.size() == 3 && isControllerPerPreset (parts[0], parts[1].getIntValue(), parts[2].getIntValue()))
+        {
+            auto* x = root->createNewChildElement ("CTRLACTION");
+            x->setAttribute ("key", key);
+            x->setAttribute ("json", juce::JSON::toString (v, true));
+        }
+    }
     for (auto& m : mappings)
     {
         if (! m.perPreset) continue;
@@ -1034,6 +1046,12 @@ void ControlSurface::loadRackMappingsXml (const juce::XmlElement* rackRoot)
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(),
                                     [] (const Mapping& m) { return m.perPreset; }),
                     mappings.end());
+    presetControllerActions.clear();
+
+    if (rackRoot != nullptr)
+        if (auto* xm = rackRoot->getChildByName ("MAPPINGS"))
+            for (auto* x : xm->getChildWithTagNameIterator ("CTRLACTION"))
+                presetControllerActions[x->getStringAttribute ("key")] = juce::JSON::parse (x->getStringAttribute ("json"));
 
     if (rackRoot != nullptr)
         if (auto* xm = rackRoot->getChildByName ("MAPPINGS"))
@@ -1075,6 +1093,7 @@ void ControlSurface::loadRackMappingsXml (const juce::XmlElement* rackRoot)
         }
 
     resolveGlobalMappings();
+    if (onPresetMappingsLoaded) onPresetMappingsLoaded();
     sendChangeMessage();
 }
 

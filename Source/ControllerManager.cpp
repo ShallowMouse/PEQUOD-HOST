@@ -72,6 +72,8 @@ ControllerManager::ControllerManager (HostEngine& e, ControlSurface& c, Tuner& t
         });
     };
 
+    control.onPresetMappingsLoaded = [this] { pushPresetActions(); };
+
     control.controllerSourceName = [this] (const Mapping& m)
     {
         // short, so it fits the MAPPINGS list: "Switches 1 S2 L1"
@@ -92,6 +94,7 @@ ControllerManager::~ControllerManager()
     if (configDirty) sendConfigNow();
     control.controllerSourceName = nullptr;
     control.onControllerMappingAdded = nullptr;
+    control.onPresetMappingsLoaded = nullptr;
     control.removeChangeListener (this);
     link.removeListener (this);
 }
@@ -137,7 +140,7 @@ juce::var ControllerManager::get (const juce::String& path) const
     return v;
 }
 
-void ControllerManager::set (const juce::String& path, const juce::var& value)
+void ControllerManager::set (const juce::String& path, const juce::var& value, bool keep)
 {
     if (! config.isObject()) return;
     auto parts = juce::StringArray::fromTokens (path, ".", {});
@@ -177,8 +180,11 @@ void ControllerManager::set (const juce::String& path, const juce::var& value)
     else if (auto* o = v.getDynamicObject())
         o->setProperty (parts[parts.size() - 1], value);
 
-    configDirty = true;
-    configDirtySince = juce::Time::getMillisecondCounterHiRes();
+    if (keep)
+    {
+        configDirty = true;
+        configDirtySince = juce::Time::getMillisecondCounterHiRes();
+    }
     sendChangeMessage();
 }
 
@@ -298,6 +304,12 @@ juce::Array<juce::var> ControllerManager::midiOf (const juce::String& uid, int c
     juce::Array<juce::var> out;
     auto base = actionPath (uid, code, lay);
     auto list = get (base + ".midi");
+    if (control.isControllerPerPreset (uid, code, lay))                 // this preset's own
+    {
+        auto it = control.presetControllerActions.find (ControlSurface::controllerKey (uid, code, lay));
+        list = it != control.presetControllerActions.end() ? it->second["midi"] : juce::var (juce::Array<juce::var>());
+        if (! list.isArray()) list = juce::var (juce::Array<juce::var>());
+    }
     if (auto* arr = list.getArray())
     {
         for (auto& v : *arr) out.add (makeMidi (v["type"].toString(), (int) v["num"], juce::jlimit (1, 16, (int) v["ch"])));
@@ -313,7 +325,14 @@ juce::var ControllerManager::layerOf (const juce::String& uid, int code, int lay
 {
     auto base = actionPath (uid, code, lay);
     auto l = get (base + ".layer");
-    auto* list = get (base + ".midi").getArray();
+    auto midiVar = get (base + ".midi");
+    if (control.isControllerPerPreset (uid, code, lay))
+    {
+        auto it = control.presetControllerActions.find (ControlSurface::controllerKey (uid, code, lay));
+        l = it != control.presetControllerActions.end() ? it->second["layer"] : juce::var();
+        midiVar = juce::var (juce::Array<juce::var>());
+    }
+    auto* list = midiVar.getArray();
     auto make = [] (const juce::String& type, int num)
     {
         auto v = juce::var (new juce::DynamicObject());
@@ -344,8 +363,73 @@ bool ControllerManager::supportsCombos() const
     return major > 2 || (major == 2 && minor >= 1);
 }
 
+static juce::var& presetEntry (ControlSurface& control, const juce::String& uid, int code, int lay)
+{
+    control.markPresetModified();
+    auto& e = control.presetControllerActions[ControlSurface::controllerKey (uid, code, lay)];
+    if (! e.isObject()) e = juce::var (new juce::DynamicObject());
+    return e;
+}
+
+void ControllerManager::setScope (const juce::String& uid, int code, int lay, bool perPreset)
+{
+    if (control.isControllerPerPreset (uid, code, lay) == perPreset) return;
+    auto midi = midiOf (uid, code, lay);
+    auto l = layerOf (uid, code, lay);
+    const bool latch = isLatching (uid, code, lay);
+    control.setControllerScope (uid, code, lay, perPreset);
+    if (perPreset)
+    {
+        // the current MIDI / layer settings become this preset's
+        auto& e = presetEntry (control, uid, code, lay);
+        e.getDynamicObject()->setProperty ("midi", juce::var (midi));
+        e.getDynamicObject()->setProperty ("layer", l);
+        e.getDynamicObject()->setProperty ("toggle", latch);
+        pushPresetActions();
+    }
+    else
+    {
+        control.presetControllerActions.erase (ControlSurface::controllerKey (uid, code, lay));
+        setMidi (uid, code, lay, midi);
+        setLayerAction (uid, code, lay, l);
+        set (actionPath (uid, code, lay) + ".toggle", latch);
+    }
+    sendChangeMessage();
+}
+
+void ControllerManager::pushPresetActions()
+{
+    if (! hasConfig()) return;
+    bool any = false;
+    for (auto& key : control.perPresetControllerKeys())
+    {
+        auto parts = juce::StringArray::fromTokens (key, ":", {});
+        if (parts.size() != 3) continue;
+        const auto uid = parts[0];
+        const int code = parts[1].getIntValue(), lay = parts[2].getIntValue();
+        if (get ("units." + uid).isVoid()) continue;
+        auto it = control.presetControllerActions.find (key);
+        auto e = it != control.presetControllerActions.end() ? it->second : juce::var();
+        auto base = actionPath (uid, code, lay);
+        set (base + ".midi", e["midi"].isArray() ? e["midi"] : juce::var (juce::Array<juce::var>()), false);
+        set (base + ".layer", e["layer"].isObject() ? e["layer"] : juce::var (new juce::DynamicObject()), false);
+        set (base + ".toggle", e.hasProperty ("toggle") ? (bool) e["toggle"] : true, false);
+        set (base + ".mode", mappingFor (uid, code, lay) != nullptr ? juce::String ("pequod") : juce::String ("none"), false);
+        any = true;
+    }
+    if (any && isConnected())
+        sendCmd ("set_cfg", { { "cfg", config }, { "temp", true } });
+}
+
 void ControllerManager::setMidi (const juce::String& uid, int code, int lay, const juce::Array<juce::var>& list)
 {
+    if (control.isControllerPerPreset (uid, code, lay))
+    {
+        presetEntry (control, uid, code, lay).getDynamicObject()->setProperty ("midi", juce::var (list));
+        pushPresetActions();
+        sendChangeMessage();
+        return;
+    }
     auto base = actionPath (uid, code, lay);
     auto layerNow = layerOf (uid, code, lay);
     set (base + ".midi", juce::var (list));
@@ -356,6 +440,13 @@ void ControllerManager::setMidi (const juce::String& uid, int code, int lay, con
 
 void ControllerManager::setLayerAction (const juce::String& uid, int code, int lay, const juce::var& l)
 {
+    if (control.isControllerPerPreset (uid, code, lay))
+    {
+        presetEntry (control, uid, code, lay).getDynamicObject()->setProperty ("layer", l.isVoid() ? juce::var (new juce::DynamicObject()) : l);
+        pushPresetActions();
+        sendChangeMessage();
+        return;
+    }
     auto base = actionPath (uid, code, lay);
     auto midiNow = midiOf (uid, code, lay);
     set (base + ".midi", juce::var (midiNow));
@@ -367,6 +458,7 @@ void ControllerManager::setLayerAction (const juce::String& uid, int code, int l
 void ControllerManager::syncLegacy (const juce::String& uid, int code, int lay)
 {
     if (! hasConfig()) return;
+    if (control.isControllerPerPreset (uid, code, lay)) { pushPresetActions(); return; }
     auto base = actionPath (uid, code, lay);
     auto midi = midiOf (uid, code, lay);
     auto l = layerOf (uid, code, lay);
@@ -509,14 +601,28 @@ void ControllerManager::setUseEffectColour (const juce::String& uid, int code, i
 bool ControllerManager::isLatching (const juce::String& uid, int code, int lay) const
 {
     if (auto* m = mappingFor (uid, code, lay)) return m->toggle;
-    if (! midiOf (uid, code, lay).isEmpty()) return get (actionPath (uid, code, lay) + ".toggle").isVoid() || (bool) get (actionPath (uid, code, lay) + ".toggle");
+    if (! midiOf (uid, code, lay).isEmpty())
+    {
+        if (control.isControllerPerPreset (uid, code, lay))
+        {
+            auto it = control.presetControllerActions.find (ControlSurface::controllerKey (uid, code, lay));
+            return it == control.presetControllerActions.end() || ! it->second.hasProperty ("toggle") || (bool) it->second["toggle"];
+        }
+        return get (actionPath (uid, code, lay) + ".toggle").isVoid() || (bool) get (actionPath (uid, code, lay) + ".toggle");
+    }
     auto it = pendingLatch.find (pendingKey (uid, code, lay));
     return it == pendingLatch.end() || it->second;
 }
 
 void ControllerManager::setLatching (const juce::String& uid, int code, int lay, bool latching)
 {
-    set (actionPath (uid, code, lay) + ".toggle", latching);      // the MIDI it sends
+    if (control.isControllerPerPreset (uid, code, lay))
+    {
+        presetEntry (control, uid, code, lay).getDynamicObject()->setProperty ("toggle", latching);
+        pushPresetActions();
+    }
+    else
+        set (actionPath (uid, code, lay) + ".toggle", latching);      // the MIDI it sends
     auto all = mappingsFor (uid, code, lay);
     if (! all.empty())
     {
@@ -827,6 +933,7 @@ void ControllerManager::controllerMessage (const juce::String& type, const juce:
     {
         config = msg["cfg"];
         configDirty = false;
+        pushPresetActions();          // the loaded preset's own switch settings
         updateLeds (true);
         updateScreen (true);
         sendChangeMessage();

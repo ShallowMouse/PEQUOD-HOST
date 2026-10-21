@@ -119,6 +119,19 @@ public:
         has its own), never both. Changing it carries the current functions across. */
     void setControllerScope (const juce::String& unit, int control, int layer, bool perPreset);
     bool isControllerPerPreset (const juce::String& unit, int control, int layer) const;
+    juce::StringArray perPresetControllerKeys() const
+    {
+        juce::StringArray keys;
+        for (auto& [k, v] : ctrlScopes) if (v) keys.add (k);
+        return keys;
+    }
+
+    /** What THIS PRESET controller controls send to other gear / do to layers in the loaded preset
+        ("unit:control:layer" -> {midi, layer, toggle}). Saved with the preset. */
+    std::map<juce::String, juce::var> presetControllerActions;
+    std::function<void()> onPresetMappingsLoaded;
+    void markPresetModified() { engine.markModified(); }
+    static juce::String controllerKey (const juce::String& unit, int control, int layer) { return scopeKey (unit, control, layer); }
     void setControllerLedColour (const juce::String& unit, int control, int layer, juce::uint32 colour);
     std::function<juce::String (const Mapping&)> controllerSourceName;
     std::function<void (const Mapping&)> onControllerMappingAdded;

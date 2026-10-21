@@ -228,6 +228,8 @@ public:
     /** Increments on every rack change (used to show the preset as modified). */
     int getChangeCounter() const noexcept { return changeCounter; }
     void changed() { ++changeCounter; sendChangeMessage(); }
+    /** The preset has unsaved edits (that aren't rack changes, e.g. this-preset footswitch settings). */
+    void markModified() noexcept { ++changeCounter; }
 
     /** Call after structural changes: the pipeline is re-balanced once CPU use has been measured. */
     void scheduleRebalance() { rebalanceAt = juce::Time::getMillisecondCounterHiRes() + 3000.0; }
