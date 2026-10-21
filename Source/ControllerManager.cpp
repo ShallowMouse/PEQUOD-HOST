@@ -7,6 +7,7 @@ namespace
     juce::var makeObj() { return juce::var (new juce::DynamicObject()); }
 
     juce::String key (const juce::String& uid, int code) { return uid + ":" + juce::String (code); }
+    juce::String pendingKey (const juce::String& uid, int code, int lay) { return uid + ":" + juce::String (code) + ":" + juce::String (lay); }
 
     juce::AudioProcessorParameter* findParam (HostEngine& engine, int slotUid, int index)
     {
@@ -43,6 +44,27 @@ ControllerManager::ControllerManager (HostEngine& e, ControlSurface& c, Tuner& t
     link.addListener (this);
     control.addChangeListener (this);
 
+    // A plugin control learned for a switch: apply the colour / latching chosen before it had a function.
+    control.onControllerMappingAdded = [this] (const Mapping& m)
+    {
+        const auto key = pendingKey (m.ctrlUnit, m.ctrlControl, m.ctrlLayer);
+        if (pendingFx.count (key) == 0 && pendingLatch.count (key) == 0) return;
+        const bool fx = pendingFx.count (key) == 0 || pendingFx[key];
+        const bool latch = pendingLatch.count (key) == 0 || pendingLatch[key];
+        pendingFx.erase (key);
+        pendingLatch.erase (key);
+        juce::MessageManager::callAsync ([this, m, fx, latch]
+        {
+            if (auto* now = mappingFor (m.ctrlUnit, m.ctrlControl, m.ctrlLayer))
+            {
+                Mapping copy = *now;
+                copy.ledColour = fx ? Mapping::ledEffectColour : 0;
+                copy.toggle = latch;
+                control.setControllerMapping (copy);
+            }
+        });
+    };
+
     control.controllerSourceName = [this] (const Mapping& m)
     {
         // short, so it fits the MAPPINGS list: "Switches 1 S2 L1"
@@ -62,6 +84,7 @@ ControllerManager::~ControllerManager()
     stopTimer();
     if (configDirty) sendConfigNow();
     control.controllerSourceName = nullptr;
+    control.onControllerMappingAdded = nullptr;
     control.removeChangeListener (this);
     link.removeListener (this);
 }
@@ -329,21 +352,50 @@ juce::Colour ControllerManager::effectColour (const Mapping& m) const
 
 bool ControllerManager::usesEffectColour (const juce::String& uid, int code, int lay) const
 {
-    auto* m = mappingFor (uid, code, lay);
-    return m != nullptr && modeOf (uid, code, lay) == "pequod" && m->ledColour == Mapping::ledEffectColour;
+    if (modeOf (uid, code, lay) != "pequod") return false;
+    if (auto* m = mappingFor (uid, code, lay)) return m->ledColour == Mapping::ledEffectColour;
+    auto it = pendingFx.find (pendingKey (uid, code, lay));
+    return it == pendingFx.end() || it->second;
 }
 
 void ControllerManager::setUseEffectColour (const juce::String& uid, int code, int lay, bool on)
 {
-    control.setControllerLedColour (uid, code, lay, on ? Mapping::ledEffectColour : 0);
+    if (mappingFor (uid, code, lay) != nullptr) control.setControllerLedColour (uid, code, lay, on ? Mapping::ledEffectColour : 0);
+    else pendingFx[pendingKey (uid, code, lay)] = on;
     updateLeds (true);
+    sendChangeMessage();
+}
+
+bool ControllerManager::isLatching (const juce::String& uid, int code, int lay) const
+{
+    if (modeOf (uid, code, lay) != "pequod") return (bool) get (actionPath (uid, code, lay) + ".toggle");
+    if (auto* m = mappingFor (uid, code, lay)) return m->toggle;
+    auto it = pendingLatch.find (pendingKey (uid, code, lay));
+    return it == pendingLatch.end() || it->second;
+}
+
+void ControllerManager::setLatching (const juce::String& uid, int code, int lay, bool latching)
+{
+    if (modeOf (uid, code, lay) != "pequod") { set (actionPath (uid, code, lay) + ".toggle", latching); return; }
+    if (auto* m = mappingFor (uid, code, lay))
+    {
+        Mapping copy = *m;
+        copy.toggle = latching;
+        control.setControllerMapping (copy);
+    }
+    else
+    {
+        pendingLatch[pendingKey (uid, code, lay)] = latching;
+        sendChangeMessage();
+    }
 }
 
 juce::Colour ControllerManager::colourOf (const juce::String& uid, int code) const
 {
     if (usesEffectColour (uid, code, layer))
-        if (auto c = effectColour (*mappingFor (uid, code, layer)); ! c.isTransparent())
-            return PluginColours::forLed (c);
+        if (auto* m = mappingFor (uid, code, layer))
+            if (auto c = effectColour (*m); ! c.isTransparent())
+                return PluginColours::forLed (c);
 
     auto s = get (controlPath (uid, code) + ".color").toString();
     if (s == "layer") return layerColour (layer);
@@ -424,11 +476,15 @@ void ControllerManager::assign (const juce::String& uid, int code, int lay, Mapp
     m.perPreset = scope == 1 ? true : scope == 0 ? false
                 : existing != nullptr ? existing->perPreset
                 : (target == Mapping::Target::param || target == Mapping::Target::bypass || target == Mapping::Target::splitMix);
-    // effects light up in their own colour unless this switch was set to another one
-    auto isEffect = [] (Mapping::Target t) { return t == Mapping::Target::bypass || t == Mapping::Target::stompSlot || t == Mapping::Target::param; };
-    m.ledColour = ! isEffect (target) ? 0
-                : existing != nullptr && isEffect (existing->target) ? existing->ledColour
-                : Mapping::ledEffectColour;
+    // follows the effect's colour unless this switch was given its own colour
+    const auto key = pendingKey (uid, code, lay);
+    if (existing != nullptr)
+        m.ledColour = existing->ledColour;
+    else
+        m.ledColour = (pendingFx.count (key) == 0 || pendingFx[key]) ? Mapping::ledEffectColour : 0;
+    if (existing == nullptr && pendingLatch.count (key) > 0) latching = pendingLatch[key];
+    pendingFx.erase (key);
+    pendingLatch.erase (key);
     m.source = Mapping::Source::controller;
     m.ctrlUnit = uid;
     m.ctrlControl = code;

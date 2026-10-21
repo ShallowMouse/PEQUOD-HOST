@@ -137,6 +137,7 @@ void ControlSurface::timerCallback()
                     Mapping m = pending;
                     m.toggle = true;
                     m.perPreset = true;          // plugin knobs: saved with the preset unless changed
+                    m.ledColour = Mapping::ledEffectColour;
                     setControllerMapping (m);
                 }
                 else
@@ -768,6 +769,7 @@ bool ControlSurface::handleControllerEvent (const juce::String& unit, int contro
         m.ctrlLayer = layer;
         m.toggle = true;
         m.perPreset = m.isRackMapping();
+        m.ledColour = Mapping::ledEffectColour;
         learnState = LearnState::off;
         setControllerMapping (m);
         return true;

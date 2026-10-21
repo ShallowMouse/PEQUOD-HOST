@@ -381,7 +381,7 @@ public:
     {
         for (auto* comp : std::initializer_list<juce::Component*> { &title, &sub, &identifyButton, &unitName, &modeBox, &functionButton,
                                                                    &latchButton, &momentaryButton, &midiTypeBox, &numberSlider, &channelBox,
-                                                                   &layerActionBox, &layerNumBox, &swatches, &pequodSwatches, &ledModeBox, &meter, &everyPresetButton, &thisPresetButton, &useGlobalButton,
+                                                                   &layerActionBox, &layerNumBox, &swatches, &ledModeBox, &meter, &everyPresetButton, &thisPresetButton, &useGlobalButton,
                                                                    &calibrateButton, &invertToggle, &hint })
             addChildComponent (comp);
 
@@ -439,7 +439,7 @@ public:
         layerNumBox.onChange = [this] { setAction ("num", layerNumBox.getSelectedId()); };
         setWidth (layerNumBox, 100);
 
-        swatches.onPick = pequodSwatches.onPick = [this] (const juce::String& col) { pickColour (col); };
+        swatches.onPick = [this] (const juce::String& col) { pickColour (col); };
 
         for (auto* b : { &everyPresetButton, &thisPresetButton })
         {
@@ -544,10 +544,11 @@ public:
                 if (! m->perPreset && m->isRackMapping() && m->slotUid == 0)
                     showHint (m->pluginName + " isn't in this preset, so this switch does nothing here.");
             }
-            if (m != nullptr && sw && (m->target == Mapping::Target::bypass || m->target == Mapping::Target::stompSlot
-                                       || m->target == Mapping::Target::mute || m->target == Mapping::Target::tuner
-                                       || m->target == Mapping::Target::param || m->target == Mapping::Target::splitMix))
-                showLatch (m->toggle);
+            const bool oneShot = m != nullptr && (m->target == Mapping::Target::presetNext || m->target == Mapping::Target::presetPrev
+                                                  || m->target == Mapping::Target::presetSelect || m->target == Mapping::Target::bankNext
+                                                  || m->target == Mapping::Target::bankPrev);
+            if (sw && ! oneShot)
+                showLatch (mgr.isLatching (uid, code, lay));
             if (m != nullptr && ! m->perPreset && (m->target == Mapping::Target::bypass || m->target == Mapping::Target::param))
                 showHint ("Follows " + m->pluginName + (m->pluginOccurrence > 0 ? " #" + juce::String (m->pluginOccurrence + 1) : juce::String())
                           + " in every preset that has it.");
@@ -569,7 +570,7 @@ public:
             form.row ("Channel", { &channelBox });
             if (sw && (mode == "cc" || mode == "note"))
             {
-                showLatch ((bool) mgr.get (ControllerManager::actionPath (uid, code, lay) + ".toggle"));
+                showLatch (mgr.isLatching (uid, code, lay));
             }
             showHint (midiOutHint());
         }
@@ -597,7 +598,6 @@ public:
             form.heading ("LIGHT");
             buildSwatches (lay);
             form.row ("Colour", { &swatches }, 30);
-            form.row ("PEQUOD", { &pequodSwatches }, 28);
             auto led = mgr.get (ControllerManager::controlPath (uid, code) + ".led").toString();
             static const juce::StringArray ledModes { "auto", "on", "off", "midi" };
             ledModeBox.setSelectedItemIndex (juce::jmax (0, ledModes.indexOf (led)), juce::dontSendNotification);
@@ -676,7 +676,7 @@ private:
     juce::ToggleButton invertToggle;
     juce::TextButton latchButton { "LATCHING" }, momentaryButton { "MOMENTARY" };
     juce::Slider numberSlider;
-    SwatchRow swatches, pequodSwatches;
+    SwatchRow swatches;
     juce::TextButton everyPresetButton { "EVERY PRESET" }, thisPresetButton { "THIS PRESET" }, useGlobalButton;
     PedalMeter meter;
 
@@ -693,24 +693,19 @@ private:
         }
         swatches.swatches.push_back ({ "layer", mgr.layerColour (lay), "The colour of the layer you're on", "L" });
 
-        auto* m = mgr.mappingFor (uid, code, lay);
-        const bool canFollowEffect = m != nullptr && mgr.modeOf (uid, code, lay) == "pequod" && ! mgr.effectColour (*m).isTransparent();
-        if (canFollowEffect)
-            swatches.swatches.push_back ({ "fx", PluginColours::forLed (mgr.effectColour (*m)),
-                                           "The colour of the effect it switches (PEQUOD category colours)", "FX" });
-
-        pequodSwatches.swatches.clear();
-        for (auto& cat : PluginColours::categories())
+        const bool pequodMode = mgr.modeOf (uid, code, lay) == "pequod";
+        if (pequodMode)
         {
-            auto led = PluginColours::forLed (juce::Colour (0xff000000 | cat.rgb));
-            pequodSwatches.swatches.push_back ({ hex (led), led, juce::String (cat.name) + "  (as an LED)", {} });
+            auto* m = mgr.mappingFor (uid, code, lay);
+            auto fx = m != nullptr ? mgr.effectColour (*m) : juce::Colour();
+            swatches.swatches.push_back ({ "fx", fx.isTransparent() ? juce::Colour (0xff9a9a9a) : PluginColours::forLed (fx),
+                                           "Automatic: the colour of the effect this switch controls (amps oxblood, drive tangerine, "
+                                           "delays ocean...). Switches that don't control an effect use the colour picked here before.", "FX" });
         }
 
-        auto cur = mgr.usesEffectColour (uid, code, lay) && canFollowEffect ? juce::String ("fx")
-                                                                           : mgr.get (ControllerManager::controlPath (uid, code) + ".color").toString();
-        swatches.current = pequodSwatches.current = cur;
+        swatches.current = mgr.usesEffectColour (uid, code, lay) ? juce::String ("fx")
+                                                                : mgr.get (ControllerManager::controlPath (uid, code) + ".color").toString();
         swatches.repaint();
-        pequodSwatches.repaint();
     }
 
     void pickColour (const juce::String& col)
@@ -720,7 +715,7 @@ private:
             mgr.setUseEffectColour (uid, code, lay, true);
         else
         {
-            if (mgr.usesEffectColour (uid, code, lay)) mgr.setUseEffectColour (uid, code, lay, false);
+            if (mgr.modeOf (uid, code, lay) == "pequod") mgr.setUseEffectColour (uid, code, lay, false);
             mgr.set (ControllerManager::controlPath (uid, code) + ".color", col);
         }
         refresh();
@@ -806,18 +801,7 @@ private:
 
     void setLatching (bool latching)
     {
-        const int lay = mgr.getLayer();
-        if (mgr.modeOf (uid, code, lay) == "pequod")
-        {
-            if (auto* m = mgr.mappingFor (uid, code, lay))
-            {
-                Mapping copy = *m;
-                copy.toggle = latching;
-                control.setControllerMapping (copy);
-            }
-        }
-        else
-            setAction ("toggle", latching);
+        mgr.setLatching (uid, code, mgr.getLayer(), latching);
         refresh();
     }
 

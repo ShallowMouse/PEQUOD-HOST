@@ -64,8 +64,12 @@ public:
     void assign (const juce::String& uid, int code, int lay, Mapping::Target, int uidOrIndex = 0, bool latching = true, int scope = -1);
     /** The colour of the plugin a mapping controls (PEQUOD category colours), or transparent. */
     juce::Colour effectColour (const Mapping&) const;
+    /** Follow the colour of the effect it controls (default), or use the switch's own colour.
+        Works before a function is chosen too; the choice is kept for when one is. */
     bool usesEffectColour (const juce::String& uid, int code, int lay) const;
     void setUseEffectColour (const juce::String& uid, int code, int lay, bool);
+    bool isLatching (const juce::String& uid, int code, int lay) const;
+    void setLatching (const juce::String& uid, int code, int lay, bool);
     void unassign (const juce::String& uid, int code, int lay);
     void learnPluginControl (const juce::String& uid, int code, int lay);
     const Mapping* mappingFor (const juce::String& uid, int code, int lay) const;
@@ -101,6 +105,7 @@ private:
     double configDirtySince = 0;
     int layer = 0;
     double rebootAt = 0;
+    std::map<juce::String, bool> pendingFx, pendingLatch;   // "uid:code:layer", for controls without a function yet
 
     std::map<juce::String, bool> pressed;      // "uid:code"
     std::map<juce::String, float> pedals;
