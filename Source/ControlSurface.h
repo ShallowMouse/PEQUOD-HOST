@@ -49,6 +49,11 @@ struct Mapping
     {
         return isController() && ctrlUnit == unit && ctrlControl == control && ctrlLayer == layer;
     }
+    bool sameFunction (const Mapping& o) const
+    {
+        return target == o.target && paramIndex == o.paramIndex
+            && (slotUid == o.slotUid || (pluginName.isNotEmpty() && pluginName == o.pluginName && pluginOccurrence == o.pluginOccurrence));
+    }
     bool sameSource (const Mapping& o) const
     {
         if (source != o.source) return false;
@@ -101,7 +106,12 @@ public:
     /** Touch a plugin control next; it will be assigned to this controller control. */
     void armLearnForController (const juce::String& unit, int control, int layer, const juce::String& label);
     /** One function per control and layer: replaces whatever was assigned. */
-    void setControllerMapping (const Mapping&);           // replaces the one with the same scope
+    /** Adds a function to a controller control, or updates it if that control already has it (same target, same scope).
+        A control can have several functions. */
+    void setControllerMapping (const Mapping&);
+    void removeControllerMapping (const Mapping&);
+    /** The functions in effect on a control: this preset's own if it has any, else the every-preset ones. */
+    std::vector<const Mapping*> findControllerMappings (const juce::String& unit, int control, int layer) const;
     /** scope: -1 = the one in effect (this preset's if there is one), 0 = all presets, 1 = this preset */
     void clearControllerMapping (const juce::String& unit, int control, int layer, int scope = -1);
     const Mapping* findControllerMapping (const juce::String& unit, int control, int layer, int scope = -1) const;

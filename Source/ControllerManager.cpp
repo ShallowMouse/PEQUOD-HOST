@@ -48,20 +48,27 @@ ControllerManager::ControllerManager (HostEngine& e, ControlSurface& c, Tuner& t
     control.onControllerMappingAdded = [this] (const Mapping& m)
     {
         const auto key = pendingKey (m.ctrlUnit, m.ctrlControl, m.ctrlLayer);
-        if (pendingFx.count (key) == 0 && pendingLatch.count (key) == 0) return;
-        const bool fx = pendingFx.count (key) == 0 || pendingFx[key];
-        const bool latch = pendingLatch.count (key) == 0 || pendingLatch[key];
+        LearnFor want { m.perPreset, m.toggle, m.ledColour };
+        if (auto it = pendingLearn.find (key); it != pendingLearn.end())          // joins the control's other functions
+            want = it->second;
+        else if (pendingFx.count (key) > 0 || pendingLatch.count (key) > 0)       // chosen before it had a function
+            want = { m.perPreset, pendingLatch.count (key) == 0 || pendingLatch[key],
+                     (pendingFx.count (key) == 0 || pendingFx[key]) ? Mapping::ledEffectColour : 0u };
+        else
+            return;
+        pendingLearn.erase (key);
         pendingFx.erase (key);
         pendingLatch.erase (key);
-        juce::MessageManager::callAsync ([this, m, fx, latch]
+        if (want.perPreset == m.perPreset && want.toggle == m.toggle && want.led == m.ledColour) return;
+
+        juce::MessageManager::callAsync ([this, m, want]
         {
-            if (auto* now = mappingFor (m.ctrlUnit, m.ctrlControl, m.ctrlLayer))
-            {
-                Mapping copy = *now;
-                copy.ledColour = fx ? Mapping::ledEffectColour : 0;
-                copy.toggle = latch;
-                control.setControllerMapping (copy);
-            }
+            control.removeControllerMapping (m);
+            Mapping copy = m;
+            copy.perPreset = want.perPreset;
+            copy.toggle = want.toggle;
+            copy.ledColour = want.led;
+            control.setControllerMapping (copy);
         });
     };
 
@@ -282,6 +289,25 @@ const Mapping* ControllerManager::mappingFor (const juce::String& uid, int code,
     return control.findControllerMapping (uid, code, lay);
 }
 
+std::vector<const Mapping*> ControllerManager::mappingsFor (const juce::String& uid, int code, int lay) const
+{
+    return control.findControllerMappings (uid, code, lay);
+}
+
+bool ControllerManager::controlIsOn (const juce::String& uid, int code, int lay) const
+{
+    for (auto* m : mappingsFor (uid, code, lay))
+        if (mappingIsOn (*m)) return true;
+    return false;
+}
+
+juce::Colour ControllerManager::controlEffectColour (const juce::String& uid, int code, int lay) const
+{
+    for (auto* m : mappingsFor (uid, code, lay))
+        if (auto c = effectColour (*m); ! c.isTransparent()) return c;
+    return {};
+}
+
 juce::String ControllerManager::shortLabel (const juce::String& uid, int code, int lay) const
 {
     auto mode = modeOf (uid, code, lay);
@@ -289,8 +315,30 @@ juce::String ControllerManager::shortLabel (const juce::String& uid, int code, i
 
     if (mode == "pequod")
     {
-        auto* m = mappingFor (uid, code, lay);
-        if (m == nullptr) return "-";
+        auto all = mappingsFor (uid, code, lay);
+        if (all.empty()) return "-";
+        if (all.size() > 1)
+        {
+            auto first = shortLabelOf (*all.front(), code);
+            return first.substring (0, 8) + " +" + juce::String ((int) all.size() - 1);
+        }
+        return shortLabelOf (*all.front(), code);
+    }
+    if (mode == "cc" || mode == "cc_rel" || mode == "cc_abs") return "CC " + juce::String (num);
+    if (mode == "note")       return juce::MidiMessage::getMidiNoteName (num, true, true, 3);
+    if (mode == "pc")         return code == Mapping::ctrlEncoderTurn ? juce::String ("PROGRAM") : "PC " + juce::String (num);
+    if (mode == "layer_next") return "LAYER +";
+    if (mode == "layer_prev") return "LAYER -";
+    if (mode == "layer_set")  return "LAYER " + juce::String (num);
+    if (mode == "layer_hold") return "HOLD L" + juce::String (num);
+    if (mode == "layer")      return "LAYERS";
+    return "-";
+}
+
+juce::String ControllerManager::shortLabelOf (const Mapping& mapping, int code) const
+{
+    {
+        auto* m = &mapping;
         switch (m->target)
         {
             case Mapping::Target::bypass:
@@ -319,15 +367,6 @@ juce::String ControllerManager::shortLabel (const juce::String& uid, int code, i
         }
         return "?";
     }
-    if (mode == "cc" || mode == "cc_rel" || mode == "cc_abs") return "CC " + juce::String (num);
-    if (mode == "note")       return juce::MidiMessage::getMidiNoteName (num, true, true, 3);
-    if (mode == "pc")         return code == Mapping::ctrlEncoderTurn ? juce::String ("PROGRAM") : "PC " + juce::String (num);
-    if (mode == "layer_next") return "LAYER +";
-    if (mode == "layer_prev") return "LAYER -";
-    if (mode == "layer_set")  return "LAYER " + juce::String (num);
-    if (mode == "layer_hold") return "HOLD L" + juce::String (num);
-    if (mode == "layer")      return "LAYERS";
-    return "-";
 }
 
 juce::Colour ControllerManager::effectColour (const Mapping& m) const
@@ -377,11 +416,12 @@ bool ControllerManager::isLatching (const juce::String& uid, int code, int lay) 
 void ControllerManager::setLatching (const juce::String& uid, int code, int lay, bool latching)
 {
     if (modeOf (uid, code, lay) != "pequod") { set (actionPath (uid, code, lay) + ".toggle", latching); return; }
-    if (auto* m = mappingFor (uid, code, lay))
+    auto all = mappingsFor (uid, code, lay);
+    if (! all.empty())
     {
-        Mapping copy = *m;
-        copy.toggle = latching;
-        control.setControllerMapping (copy);
+        std::vector<Mapping> copies;
+        for (auto* m : all) copies.push_back (*m);
+        for (auto& c : copies) { c.toggle = latching; control.setControllerMapping (c); }
     }
     else
     {
@@ -393,9 +433,8 @@ void ControllerManager::setLatching (const juce::String& uid, int code, int lay,
 juce::Colour ControllerManager::colourOf (const juce::String& uid, int code) const
 {
     if (usesEffectColour (uid, code, layer))
-        if (auto* m = mappingFor (uid, code, layer))
-            if (auto c = effectColour (*m); ! c.isTransparent())
-                return PluginColours::forLed (c);
+        if (auto c = controlEffectColour (uid, code, layer); ! c.isTransparent())
+            return PluginColours::forLed (c);
 
     auto s = get (controlPath (uid, code) + ".color").toString();
     if (s == "layer") return layerColour (layer);
@@ -461,7 +500,7 @@ bool ControllerManager::isLit (const juce::String& uid, int code) const
     if (isPressed (uid, code)) return true;
     auto mode = modeOf (uid, code, layer);
     if (mode == "pequod")
-        if (auto* m = mappingFor (uid, code, layer)) return mappingIsOn (*m);
+        if (mappingFor (uid, code, layer) != nullptr) return controlIsOn (uid, code, layer);
     auto led = get (controlPath (uid, code) + ".led").toString();
     return led == "on";
 }
@@ -469,33 +508,50 @@ bool ControllerManager::isLit (const juce::String& uid, int code) const
 //==============================================================================
 // PEQUOD functions
 //==============================================================================
-void ControllerManager::assign (const juce::String& uid, int code, int lay, Mapping::Target target, int uidOrIndex, bool latching, int scope)
+void ControllerManager::assign (const juce::String& uid, int code, int lay, Mapping::Target target, int uidOrIndex, const Mapping* replace)
 {
-    auto* existing = mappingFor (uid, code, lay);
-    Mapping m;
-    m.perPreset = scope == 1 ? true : scope == 0 ? false
-                : existing != nullptr ? existing->perPreset
-                : (target == Mapping::Target::param || target == Mapping::Target::bypass || target == Mapping::Target::splitMix);
-    // follows the effect's colour unless this switch was given its own colour
+    std::optional<Mapping> old;
+    if (replace != nullptr) old = *replace;
+    auto others = mappingsFor (uid, code, lay);
+    const Mapping* like = nullptr;                 // the control's settings come from its other functions
+    for (auto* o : others)
+        if (! old.has_value() || ! o->sameFunction (*old)) { like = o; break; }
+    if (like == nullptr && old.has_value()) like = &*old;
+
     const auto key = pendingKey (uid, code, lay);
-    if (existing != nullptr)
-        m.ledColour = existing->ledColour;
-    else
-        m.ledColour = (pendingFx.count (key) == 0 || pendingFx[key]) ? Mapping::ledEffectColour : 0;
-    if (existing == nullptr && pendingLatch.count (key) > 0) latching = pendingLatch[key];
-    pendingFx.erase (key);
-    pendingLatch.erase (key);
+    Mapping m;
     m.source = Mapping::Source::controller;
     m.ctrlUnit = uid;
     m.ctrlControl = code;
     m.ctrlLayer = lay;
     m.target = target;
-    m.toggle = latching;
     if (target == Mapping::Target::stompSlot || target == Mapping::Target::presetSelect) m.paramIndex = uidOrIndex;
     else m.slotUid = uidOrIndex;
 
+    if (like != nullptr)
+    {
+        m.perPreset = like->perPreset;
+        m.toggle = like->toggle;
+        m.ledColour = like->ledColour;
+    }
+    else
+    {
+        m.perPreset = target == Mapping::Target::param || target == Mapping::Target::bypass || target == Mapping::Target::splitMix;
+        m.toggle = pendingLatch.count (key) == 0 || pendingLatch[key];
+        m.ledColour = (pendingFx.count (key) == 0 || pendingFx[key]) ? Mapping::ledEffectColour : 0;
+    }
+    pendingFx.erase (key);
+    pendingLatch.erase (key);
+
     if (modeOf (uid, code, lay) != "pequod") set (actionPath (uid, code, lay) + ".mode", "pequod");
+    if (old.has_value()) control.removeControllerMapping (*old);
     control.setControllerMapping (m);
+    updateLeds (true);
+}
+
+void ControllerManager::removeFunction (const Mapping& m)
+{
+    control.removeControllerMapping (m);
     updateLeds (true);
 }
 
@@ -505,9 +561,18 @@ void ControllerManager::unassign (const juce::String& uid, int code, int lay)
     updateLeds (true);
 }
 
-void ControllerManager::learnPluginControl (const juce::String& uid, int code, int lay)
+void ControllerManager::learnPluginControl (const juce::String& uid, int code, int lay, const Mapping* replace)
 {
     if (modeOf (uid, code, lay) != "pequod") set (actionPath (uid, code, lay) + ".mode", "pequod");
+    std::optional<Mapping> old;
+    if (replace != nullptr) old = *replace;
+    if (old.has_value()) control.removeControllerMapping (*old);
+
+    auto others = mappingsFor (uid, code, lay);
+    if (! others.empty())
+        pendingLearn[pendingKey (uid, code, lay)] = { others.front()->perPreset, others.front()->toggle, others.front()->ledColour };
+    else if (old.has_value())
+        pendingLearn[pendingKey (uid, code, lay)] = { old->perPreset, old->toggle, old->ledColour };
     control.armLearnForController (uid, code, lay, describeControl (uid, code, lay));
 }
 
@@ -763,16 +828,22 @@ void ControllerManager::handleEvent (const juce::var& msg)
     const bool hit = control.handleControllerEvent (uid, code, lay, value, delta);
     if (! hit) return;
 
-    if (auto* m = mappingFor (uid, code, lay))
     {
         const bool isPressEvent = isSwitch (code) && value >= 0.5f;
         const double now = juce::Time::getMillisecondCounterHiRes();
-        if (isPressEvent)
-            pendingFlash = flashFor (*m, true);
-        else if (! isSwitch (code) && m->target == Mapping::Target::param && now - lastParamFlash > 60)
+        juce::StringArray parts;
+        for (auto* m : mappingsFor (uid, code, lay))
         {
-            lastParamFlash = now;
-            pendingFlash = flashFor (*m, false);
+            if (isPressEvent || (! isSwitch (code) && m->target == Mapping::Target::param))
+            {
+                auto f = flashFor (*m, isPressEvent);
+                if (f.isNotEmpty()) parts.add (f);
+            }
+        }
+        if (! parts.isEmpty() && (isPressEvent || now - lastParamFlash > 60))
+        {
+            if (! isPressEvent) lastParamFlash = now;
+            pendingFlash = parts.size() == 1 ? parts[0] : parts[0].substring (0, 12) + " +" + juce::String (parts.size() - 1);
         }
     }
     updateLeds (false);
@@ -832,9 +903,9 @@ void ControllerManager::updateLeds (bool force)
             if (! hasLed (u, code) || modeOf (u.uid, code, layer) != "pequod") continue;
             auto* m = mappingFor (u.uid, code, layer);
             if (m == nullptr) continue;
-            const bool on = mappingIsOn (*m);
+            const bool on = controlIsOn (u.uid, code, layer);
             juce::Colour fx;
-            if (m->ledColour == Mapping::ledEffectColour) fx = effectColour (*m);
+            if (m->ledColour == Mapping::ledEffectColour) fx = controlEffectColour (u.uid, code, layer);
             if (fx.isTransparent())
             {
                 if (! on) continue;

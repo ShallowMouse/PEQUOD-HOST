@@ -680,11 +680,30 @@ void ControlSurface::setControllerMapping (const Mapping& mapping)
     if (! m.perPreset) bindPlugin (m);
     mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [&] (const Mapping& x)
     {
-        return x.sameControl (m.ctrlUnit, m.ctrlControl, m.ctrlLayer) && x.perPreset == m.perPreset;
+        return x.sameControl (m.ctrlUnit, m.ctrlControl, m.ctrlLayer) && x.perPreset == m.perPreset && x.sameFunction (m);
     }), mappings.end());
     mappings.push_back (m);
     if (onControllerMappingAdded) onControllerMappingAdded (m);
     sendChangeMessage();
+}
+
+void ControlSurface::removeControllerMapping (const Mapping& which)
+{
+    const Mapping w = which;     // may point into the vector
+    mappings.erase (std::remove_if (mappings.begin(), mappings.end(), [&] (const Mapping& x)
+    {
+        return x.sameControl (w.ctrlUnit, w.ctrlControl, w.ctrlLayer) && x.perPreset == w.perPreset && x.sameFunction (w);
+    }), mappings.end());
+    sendChangeMessage();
+}
+
+std::vector<const Mapping*> ControlSurface::findControllerMappings (const juce::String& unit, int control, int layer) const
+{
+    std::vector<const Mapping*> preset, global;
+    for (auto& m : mappings)
+        if (m.sameControl (unit, control, layer))
+            (m.perPreset ? preset : global).push_back (&m);
+    return preset.empty() ? global : preset;
 }
 
 void ControlSurface::clearControllerMapping (const juce::String& unit, int control, int layer, int scope)
@@ -716,21 +735,28 @@ const Mapping* ControlSurface::findControllerMapping (const juce::String& unit, 
 
 void ControlSurface::setControllerScope (const juce::String& unit, int control, int layer, bool perPreset)
 {
-    auto* shown = findControllerMapping (unit, control, layer);
-    if (shown == nullptr || shown->perPreset == perPreset) return;
-    for (size_t i = 0; i < mappings.size(); ++i)
-        if (&mappings[i] == shown) { setMappingScope ((int) i, perPreset); return; }
+    std::vector<Mapping> moving;
+    for (auto* m : findControllerMappings (unit, control, layer))
+        if (m->perPreset != perPreset) moving.push_back (*m);
+    if (moving.empty()) return;
+
+    // The whole set moves; it replaces whatever the other scope had on this control.
+    clearControllerMapping (unit, control, layer, perPreset ? 1 : 0);
+    clearControllerMapping (unit, control, layer, perPreset ? 0 : 1);
+    for (auto m : moving)
+    {
+        m.perPreset = perPreset;
+        setControllerMapping (m);
+    }
 }
 
 void ControlSurface::setControllerLedColour (const juce::String& unit, int control, int layer, juce::uint32 colour)
 {
+    auto set = findControllerMappings (unit, control, layer);
     for (auto& m : mappings)
-        if (&m == findControllerMapping (unit, control, layer))
-        {
+        if (std::find (set.begin(), set.end(), &m) != set.end())
             m.ledColour = colour;
-            sendChangeMessage();
-            return;
-        }
+    sendChangeMessage();
 }
 
 void ControlSurface::armLearnForController (const juce::String& unit, int control, int layer, const juce::String& label)

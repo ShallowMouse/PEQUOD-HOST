@@ -38,7 +38,8 @@ PEQUOD Host > CONTROLLER > SETTINGS > **UPDATE FIRMWARE**, pick `PEQUOD_FC.bin`.
 ## Using it
 
 * Plug it in with USB, or put it on your Wi-Fi (CONTROLLER > SETTINGS > Wi-Fi). The dot on the CONTROLLER button turns green.
-* Press a switch with your foot: the window jumps to it. Choose what it does, and whether it applies to **every preset** or **this preset** only.
+* Press a switch with your foot: the window jumps to it. Choose what it does — as many functions as you like with **+ ADD ANOTHER FUNCTION** —
+  and whether it applies to **every preset** or **this preset** only, latching or momentary.
 * **QUICK SETUP** gives every unassigned control a useful job (the preset's first effects on/off, next preset, presets 1–4 on a second board, tuner on the toe switch / knob push, knob turns through presets).
 * The screen shows the bank and preset, flashes what you just switched, and turns into a tuner while PEQUOD is muted.
 * Without PEQUOD, controls set to *Send MIDI to other gear* or *Change layer* keep working on their own.

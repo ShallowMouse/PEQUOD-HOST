@@ -49,6 +49,7 @@ public:
     juce::String describeControl (const juce::String& uid, int code, int lay) const;
     juce::String modeOf (const juce::String& uid, int code, int lay) const;           // "pequod", "cc", ...
     juce::String shortLabel (const juce::String& uid, int code, int lay) const;       // what it does, in a few letters
+    juce::String shortLabelOf (const Mapping&, int code) const;
     juce::Colour colourOf (const juce::String& uid, int code) const;
     bool isLit (const juce::String& uid, int code) const;                              // as on the hardware (roughly)
     bool isPressed (const juce::String& uid, int code) const;
@@ -61,7 +62,13 @@ public:
 
     //== PEQUOD functions
     /** scope: -1 = keep the scope of what's there now (or the usual one for that function), 0 = every preset, 1 = this preset */
-    void assign (const juce::String& uid, int code, int lay, Mapping::Target, int uidOrIndex = 0, bool latching = true, int scope = -1);
+    /** Adds a function to a control (or replaces `replace`, one of its functions). New functions take the
+        control's scope, latching and light settings. */
+    void assign (const juce::String& uid, int code, int lay, Mapping::Target, int uidOrIndex = 0, const Mapping* replace = nullptr);
+    void removeFunction (const Mapping&);
+    std::vector<const Mapping*> mappingsFor (const juce::String& uid, int code, int lay) const;
+    bool controlIsOn (const juce::String& uid, int code, int lay) const;
+    juce::Colour controlEffectColour (const juce::String& uid, int code, int lay) const;
     /** The colour of the plugin a mapping controls (PEQUOD category colours), or transparent. */
     juce::Colour effectColour (const Mapping&) const;
     /** Follow the colour of the effect it controls (default), or use the switch's own colour.
@@ -71,7 +78,7 @@ public:
     bool isLatching (const juce::String& uid, int code, int lay) const;
     void setLatching (const juce::String& uid, int code, int lay, bool);
     void unassign (const juce::String& uid, int code, int lay);
-    void learnPluginControl (const juce::String& uid, int code, int lay);
+    void learnPluginControl (const juce::String& uid, int code, int lay, const Mapping* replace = nullptr);
     const Mapping* mappingFor (const juce::String& uid, int code, int lay) const;
     bool quickSetup();      // a sensible layout for every control that isn't set up yet
 
@@ -105,7 +112,9 @@ private:
     double configDirtySince = 0;
     int layer = 0;
     double rebootAt = 0;
-    std::map<juce::String, bool> pendingFx, pendingLatch;   // "uid:code:layer", for controls without a function yet
+    std::map<juce::String, bool> pendingFx, pendingLatch;
+    struct LearnFor { bool perPreset, toggle; juce::uint32 led; };
+    std::map<juce::String, LearnFor> pendingLearn;     // a plugin control being learned as an extra function   // "uid:code:layer", for controls without a function yet
 
     std::map<juce::String, bool> pressed;      // "uid:code"
     std::map<juce::String, float> pedals;

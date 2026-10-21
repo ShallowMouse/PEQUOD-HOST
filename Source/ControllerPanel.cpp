@@ -406,7 +406,11 @@ public:
         modeBox.onChange = [this] { modeChosen(); };
 
         functionButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::well);
-        functionButton.onClick = [this] { showFunctionMenu(); };
+        functionButton.onClick = [this] { showFunctionMenu (-1, &functionButton); };
+        addFunctionButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
+        addFunctionButton.setTooltip ("One press can do several things, e.g. switch two effects, or an effect and a plugin knob");
+        addFunctionButton.onClick = [this] { showFunctionMenu (-1, &addFunctionButton); };
+        addChildComponent (addFunctionButton);
         for (auto* b : { &latchButton, &momentaryButton })
         {
             b->setColour (juce::TextButton::buttonOnColourId, Pequod::Colours::mustard);
@@ -526,10 +530,37 @@ public:
 
         if (modeId == 1)
         {
-            auto* m = mgr.mappingFor (uid, code, lay);
+            auto all = mgr.mappingsFor (uid, code, lay);
+            auto* m = all.empty() ? nullptr : all.front();
             auto* global = control.findControllerMapping (uid, code, lay, 0);
-            functionButton.setButtonText (m != nullptr ? describe (*m) : juce::String ("Choose what it does..."));
-            form.row ("Function", { &functionButton }, 32);
+            if (all.empty())
+            {
+                functionButton.setButtonText ("Choose what it does...");
+                form.row ("Function", { &functionButton }, 32);
+            }
+            else
+            {
+                while (funcButtons.size() < (int) all.size())
+                {
+                    const int i = funcButtons.size();
+                    auto* f = funcButtons.add (new juce::TextButton());
+                    f->setColour (juce::TextButton::buttonColourId, Pequod::Colours::well);
+                    f->onClick = [this, i] { showFunctionMenu (i, funcButtons[i]); };
+                    addChildComponent (f);
+                    auto* x = removeButtons.add (new juce::TextButton ("X"));
+                    x->setTooltip ("Remove this function");
+                    x->onClick = [this, i] { removeFunctionAt (i); };
+                    setWidth (*x, 32);
+                    addChildComponent (x);
+                }
+                for (int i = 0; i < (int) all.size(); ++i)
+                {
+                    funcButtons[i]->setButtonText (describe (*all[(size_t) i]));
+                    form.row (i == 0 ? juce::String (all.size() > 1 ? "Functions" : "Function") : juce::String(),
+                              { funcButtons[i], removeButtons[i] }, 32);
+                }
+                form.row ({}, { &addFunctionButton }, 26);
+            }
             if (m != nullptr)
             {
                 everyPresetButton.setToggleState (! m->perPreset, juce::dontSendNotification);
@@ -544,9 +575,12 @@ public:
                 if (! m->perPreset && m->isRackMapping() && m->slotUid == 0)
                     showHint (m->pluginName + " isn't in this preset, so this switch does nothing here.");
             }
-            const bool oneShot = m != nullptr && (m->target == Mapping::Target::presetNext || m->target == Mapping::Target::presetPrev
-                                                  || m->target == Mapping::Target::presetSelect || m->target == Mapping::Target::bankNext
-                                                  || m->target == Mapping::Target::bankPrev);
+            const bool oneShot = ! all.empty() && std::all_of (all.begin(), all.end(), [] (const Mapping* f)
+            {
+                return f->target == Mapping::Target::presetNext || f->target == Mapping::Target::presetPrev
+                    || f->target == Mapping::Target::presetSelect || f->target == Mapping::Target::bankNext
+                    || f->target == Mapping::Target::bankPrev;
+            });
             if (sw && ! oneShot)
                 showLatch (mgr.isLatching (uid, code, lay));
             if (m != nullptr && ! m->perPreset && (m->target == Mapping::Target::bypass || m->target == Mapping::Target::param))
@@ -670,7 +704,8 @@ private:
     Form form;
 
     juce::Label title, sub, hint;
-    juce::TextButton identifyButton { "FIND IT" }, functionButton, calibrateButton { "CALIBRATE" };
+    juce::TextButton identifyButton { "FIND IT" }, functionButton, calibrateButton { "CALIBRATE" }, addFunctionButton { "+ ADD ANOTHER FUNCTION" };
+    juce::OwnedArray<juce::TextButton> funcButtons, removeButtons;
     juce::TextEditor unitName;
     juce::ComboBox modeBox, midiTypeBox, channelBox, layerActionBox, layerNumBox, ledModeBox;
     juce::ToggleButton invertToggle;
@@ -728,9 +763,9 @@ private:
         if (m == nullptr || m->perPreset == perPreset) { refresh(); return; }
         if (perPreset)
         {
-            Mapping copy = *m;            // the other presets keep the every-preset job
-            copy.perPreset = true;
-            control.setControllerMapping (copy);
+            std::vector<Mapping> copies;  // the other presets keep the every-preset functions
+            for (auto* f : mgr.mappingsFor (uid, code, lay)) copies.push_back (*f);
+            for (auto& c : copies) { c.perPreset = true; control.setControllerMapping (c); }
             if (mgr.onStatus) mgr.onStatus ("This preset now has its own job for this switch - change it above");
         }
         else
@@ -788,7 +823,7 @@ private:
                           : midiModes()[0];
         setAction ("mode", mode);
         if (id == 1 && mgr.mappingFor (uid, code, mgr.getLayer()) == nullptr)
-            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Inspector> (this)] { if (safe) safe->showFunctionMenu(); });
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Inspector> (this)] { if (safe) safe->showFunctionMenu (-1, &safe->functionButton); });
         refresh();
     }
 
@@ -836,9 +871,30 @@ private:
         }
     }
 
-    void showFunctionMenu()
+    void removeFunctionAt (int i)
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Inspector> (this), i]
+        {
+            if (safe == nullptr) return;
+            auto all = safe->mgr.mappingsFor (safe->uid, safe->code, safe->mgr.getLayer());
+            if (juce::isPositiveAndBelow (i, (int) all.size()))
+            {
+                Mapping copy = *all[(size_t) i];
+                safe->mgr.removeFunction (copy);
+            }
+            safe->refresh();
+        });
+    }
+
+    /** index: which of the control's functions to change, -1 = add one */
+    void showFunctionMenu (int index, juce::Component* anchor)
     {
         const int lay = mgr.getLayer();
+        std::shared_ptr<Mapping> rep;
+        {
+            auto all = mgr.mappingsFor (uid, code, lay);
+            if (juce::isPositiveAndBelow (index, (int) all.size())) rep = std::make_shared<Mapping> (*all[(size_t) index]);
+        }
         const bool sw = ControllerManager::isSwitch (code), turn = code == Mapping::ctrlEncoderTurn;
         auto slots = engine.getFlatSlots();
         auto splits = engine.getSplits();
@@ -856,33 +912,33 @@ private:
             {
                 const int slotUid = slots[i]->uid;
                 fx.addItem (juce::String ((int) i + 1) + ".  " + slots[i]->description.name,
-                            [&m, u, c, lay, slotUid, done] { m.assign (u, c, lay, Mapping::Target::bypass, slotUid); done(); });
+                            [&m, rep, u, c, lay, slotUid, done] { m.assign (u, c, lay, Mapping::Target::bypass, slotUid, rep.get()); done(); });
             }
             if (slots.empty()) fx.addItem ("(this preset has no effects)", false, false, nullptr);
             auto names = m.getPresetNames ? m.getPresetNames() : juce::StringArray();
             for (int n = 1; n <= juce::jmax (8, names.size()); ++n)
                 presets.addItem (juce::String (n) + ".  " + (n <= names.size() ? names[n - 1] : juce::String ("(empty)")),
-                                 [&m, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::presetSelect, n); done(); });
+                                 [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::presetSelect, n, rep.get()); done(); });
             for (auto* s : splits)
             {
                 const int itemUid = s->uid;
                 splitMenu.addItem ("Split " + juce::String (engine.getSplitNumber (itemUid)),
-                                   [&m, u, c, lay, itemUid, done] { m.assign (u, c, lay, Mapping::Target::splitMix, itemUid); done(); });
+                                   [&m, rep, u, c, lay, itemUid, done] { m.assign (u, c, lay, Mapping::Target::splitMix, itemUid, rep.get()); done(); });
             }
 
             menu.addSectionHeader ("EFFECTS");
             menu.addSubMenu ("An effect...  on/off", fx);
-            menu.addItem ("A plugin knob or switch...  (touch it on the plugin next)", [&m, u, c, lay, done] { m.learnPluginControl (u, c, lay); done(); });
+            menu.addItem ("A plugin knob or switch...  (touch it on the plugin next)", [&m, rep, u, c, lay, done] { m.learnPluginControl (u, c, lay, rep.get()); done(); });
             if (! splits.empty()) menu.addSubMenu ("Split: switch between A and B", splitMenu);
             menu.addSectionHeader ("PRESETS");
-            menu.addItem ("Next preset",     [&m, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::presetNext); done(); });
-            menu.addItem ("Previous preset", [&m, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::presetPrev); done(); });
+            menu.addItem ("Next preset",     [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::presetNext, 0, rep.get()); done(); });
+            menu.addItem ("Previous preset", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::presetPrev, 0, rep.get()); done(); });
             menu.addSubMenu ("Preset...", presets);
-            menu.addItem ("Next bank",       [&m, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::bankNext); done(); });
-            menu.addItem ("Previous bank",   [&m, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::bankPrev); done(); });
+            menu.addItem ("Next bank",       [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::bankNext, 0, rep.get()); done(); });
+            menu.addItem ("Previous bank",   [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::bankPrev, 0, rep.get()); done(); });
             menu.addSectionHeader ("OUTPUT");
-            menu.addItem ("Tuner  (mutes while tuning)", [&m, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tuner); done(); });
-            menu.addItem ("Mute",                        [&m, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::mute); done(); });
+            menu.addItem ("Tuner  (mutes while tuning)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tuner, 0, rep.get()); done(); });
+            menu.addItem ("Mute",                        [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::mute, 0, rep.get()); done(); });
         }
         else
         {
@@ -891,24 +947,24 @@ private:
             {
                 const int itemUid = s->uid;
                 splitMenu.addItem ("Split " + juce::String (engine.getSplitNumber (itemUid)) + " mix A-B",
-                                   [&m, u, c, lay, itemUid, done] { m.assign (u, c, lay, Mapping::Target::splitMix, itemUid); done(); });
+                                   [&m, rep, u, c, lay, itemUid, done] { m.assign (u, c, lay, Mapping::Target::splitMix, itemUid, rep.get()); done(); });
             }
-            menu.addItem ("A plugin knob...  (touch it on the plugin next)", [&m, u, c, lay, done] { m.learnPluginControl (u, c, lay); done(); });
+            menu.addItem ("A plugin knob...  (touch it on the plugin next)", [&m, rep, u, c, lay, done] { m.learnPluginControl (u, c, lay, rep.get()); done(); });
             if (turn)
             {
-                menu.addItem ("Step through presets", [&m, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::presetNext); done(); });
-                menu.addItem ("Step through banks",   [&m, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::bankNext); done(); });
+                menu.addItem ("Step through presets", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::presetNext, 0, rep.get()); done(); });
+                menu.addItem ("Step through banks",   [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::bankNext, 0, rep.get()); done(); });
             }
-            menu.addItem ("Master volume (OUT)", [&m, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::outputGain); done(); });
-            menu.addItem ("Input level (IN)",    [&m, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::inputGain); done(); });
+            menu.addItem ("Master volume (OUT)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::outputGain, 0, rep.get()); done(); });
+            menu.addItem ("Input level (IN)",    [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::inputGain, 0, rep.get()); done(); });
             if (! splits.empty()) menu.addSubMenu ("Split mix", splitMenu);
         }
-        if (mgr.mappingFor (uid, code, lay) != nullptr)
+        if (rep != nullptr)
         {
             menu.addSeparator();
-            menu.addItem ("Nothing (clear)", [&m, u, c, lay, done] { m.unassign (u, c, lay); done(); });
+            menu.addItem ("Remove this function", [&m, rep, done] { m.removeFunction (*rep); done(); });
         }
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&functionButton).withMinimumWidth (functionButton.getWidth()));
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor).withMinimumWidth (anchor->getWidth()));
     }
 
     void toggleCalibration()
