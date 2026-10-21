@@ -38,7 +38,8 @@ PEQUOD Host > CONTROLLER > SETTINGS > **UPDATE FIRMWARE**, pick `PEQUOD_FC.bin`.
 ## Using it
 
 * Plug it in with USB, or put it on your Wi-Fi (CONTROLLER > SETTINGS > Wi-Fi). The dot on the CONTROLLER button turns green.
-* Press a switch with your foot: the window jumps to it. Choose what it does — as many functions as you like with **+ ADD ANOTHER FUNCTION** —
+* Press a switch with your foot: the window jumps to it. Choose what it does — as many functions as you like with **+ ADD ANOTHER FUNCTION**,
+  mixing PEQUOD functions, MIDI messages to other gear and a layer change (firmware 2.1+) —
   and whether it's **GLOBAL** (every preset) or for **this preset** only, latching or momentary.
 * The boards are drawn as they are built (2x2 footswitch, vertical strip, pedal, knob). Drag a board by its top bar to match the order on your floor.
 * **QUICK SETUP** gives every unassigned control a useful job (the preset's first effects on/off, next preset, presets 1–4 on a second board, tuner on the toe switch / knob push, knob turns through presets).

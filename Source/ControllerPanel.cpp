@@ -486,7 +486,7 @@ private:
         const bool down = mgr.isPressed (u.uid, code);
         const int lay = mgr.getLayer();
         auto* m = mgr.mappingFor (u.uid, code, lay);
-        const bool global = m != nullptr && ! m->perPreset && mgr.modeOf (u.uid, code, lay) == "pequod";
+        const bool global = m != nullptr && ! m->perPreset;
         auto labelArea = a.removeFromBottom (labelH);
         juce::Rectangle<float> hit;
 
@@ -592,6 +592,122 @@ public:
 };
 
 //==============================================================================
+/** One MIDI message a control sends to other gear: type, number, channel. */
+class MidiRow : public juce::Component
+{
+public:
+    std::function<void()> onChange, onRemove;
+
+    MidiRow()
+    {
+        for (auto* c : std::initializer_list<juce::Component*> { &type, &number, &channel, &remove }) addAndMakeVisible (c);
+        styleCombo (type);
+        styleCombo (channel);
+        number.setSliderStyle (juce::Slider::IncDecButtons);
+        number.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 40, 24);
+        number.setRange (0, 127, 1);
+        for (int ch = 1; ch <= 16; ++ch) channel.addItem ("Ch " + juce::String (ch), ch);
+        remove.setTooltip ("Stop sending this");
+        type.onChange = number.onValueChange = channel.onChange = [this] { if (onChange) onChange(); };
+        remove.onClick = [this] { if (onRemove) onRemove(); };
+    }
+
+    void set (const juce::StringArray& ids, const juce::StringArray& names, const juce::var& v, bool encoder)
+    {
+        typeIds = ids;
+        type.clear (juce::dontSendNotification);
+        type.addItemList (names, 1);
+        type.setSelectedItemIndex (juce::jmax (0, ids.indexOf (v["type"].toString())), juce::dontSendNotification);
+        number.setValue ((int) v["num"], juce::dontSendNotification);
+        number.setVisible (! (encoder && v["type"].toString() == "pc"));       // turning steps through programs
+        channel.setSelectedId (juce::jlimit (1, 16, (int) v["ch"]), juce::dontSendNotification);
+        resized();
+    }
+
+    juce::var get() const
+    {
+        auto v = juce::var (new juce::DynamicObject());
+        v.getDynamicObject()->setProperty ("type", typeIds[juce::jmax (0, type.getSelectedItemIndex())]);
+        v.getDynamicObject()->setProperty ("num", (int) number.getValue());
+        v.getDynamicObject()->setProperty ("ch", juce::jmax (1, channel.getSelectedId()));
+        return v;
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds();
+        remove.setBounds (r.removeFromRight (32));
+        r.removeFromRight (6);
+        channel.setBounds (r.removeFromRight (78));
+        r.removeFromRight (6);
+        if (number.isVisible()) { number.setBounds (r.removeFromRight (108)); r.removeFromRight (6); }
+        type.setBounds (r);
+    }
+
+private:
+    juce::ComboBox type, channel;
+    juce::Slider number;
+    juce::TextButton remove { "X" };
+    juce::StringArray typeIds;
+};
+
+/** The layer change a control makes. */
+class LayerRow : public juce::Component
+{
+public:
+    std::function<void()> onChange, onRemove;
+
+    LayerRow()
+    {
+        for (auto* c : std::initializer_list<juce::Component*> { &action, &target, &remove }) addAndMakeVisible (c);
+        styleCombo (action);
+        styleCombo (target);
+        for (int l = 1; l <= 4; ++l) target.addItem ("Layer " + juce::String (l), l);
+        action.onChange = target.onChange = [this] { if (onChange) onChange(); };
+        remove.onClick = [this] { if (onRemove) onRemove(); };
+    }
+
+    void set (const juce::var& v, int numLayers)
+    {
+        juce::ignoreUnused (numLayers);
+        auto t = v["type"].toString();
+        action.clear (juce::dontSendNotification);
+        if (t == "turn") { action.addItem ("Turning changes layer", 1); action.setSelectedId (1, juce::dontSendNotification); ids = { "turn" }; }
+        else
+        {
+            ids = { "next", "prev", "set", "hold" };
+            action.addItemList ({ "Next layer", "Previous layer", "Go to layer", "Hold for layer (back when released)" }, 1);
+            action.setSelectedItemIndex (juce::jmax (0, ids.indexOf (t)), juce::dontSendNotification);
+        }
+        target.setSelectedId (juce::jlimit (1, 4, (int) v["num"]), juce::dontSendNotification);
+        target.setVisible (t == "set" || t == "hold");
+        resized();
+    }
+
+    juce::var get() const
+    {
+        auto v = juce::var (new juce::DynamicObject());
+        v.getDynamicObject()->setProperty ("type", ids[juce::jmax (0, action.getSelectedItemIndex())]);
+        v.getDynamicObject()->setProperty ("num", juce::jmax (1, target.getSelectedId()));
+        return v;
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds();
+        remove.setBounds (r.removeFromRight (32));
+        r.removeFromRight (6);
+        if (target.isVisible()) { target.setBounds (r.removeFromRight (100)); r.removeFromRight (6); }
+        action.setBounds (r);
+    }
+
+private:
+    juce::ComboBox action, target;
+    juce::TextButton remove { "X" };
+    juce::StringArray ids;
+};
+
+//==============================================================================
 /** What the selected control does. */
 class ControllerPanel::Inspector : public juce::Component
 {
@@ -628,6 +744,17 @@ public:
         addFunctionButton.setTooltip ("One press can do several things, e.g. switch two effects, or an effect and a plugin knob");
         addFunctionButton.onClick = [this] { showFunctionMenu (-1, &addFunctionButton); };
         addChildComponent (addFunctionButton);
+        addChildComponent (layerRow);
+        layerRow.onChange = [this] { mgr.setLayerAction (uid, code, mgr.getLayer(), layerRow.get()); };
+        layerRow.onRemove = [this]
+        {
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Inspector> (this)]
+            {
+                if (safe == nullptr) return;
+                safe->mgr.setLayerAction (safe->uid, safe->code, safe->mgr.getLayer(), {});
+                safe->refresh();
+            });
+        };
         for (auto* b : { &latchButton, &momentaryButton })
         {
             b->setColour (juce::TextButton::buttonOnColourId, Pequod::Colours::mustard);
@@ -724,7 +851,6 @@ public:
         }
 
         const int lay = mgr.getLayer();
-        const auto mode = mgr.modeOf (uid, code, lay);
         const bool sw = ControllerManager::isSwitch (code), pedal = code == Mapping::ctrlPedal, turn = code == Mapping::ctrlEncoderTurn;
 
         title.setText (ControllerManager::controlName (*u, code).toUpperCase(), juce::dontSendNotification);
@@ -733,111 +859,109 @@ public:
         form.wide ({ &title, &identifyButton }, 30);
         form.wide ({ &sub }, 16);
 
-        // What it does
+        // What it does: PEQUOD functions, MIDI to other gear and a layer change, in any combination
         form.heading ("WHAT IT DOES");
-        modeBox.clear (juce::dontSendNotification);
-        modeBox.addItem ("Control PEQUOD", 1);
-        modeBox.addItem ("Send MIDI to other gear", 2);
-        if (sw || turn) modeBox.addItem ("Change layer", 3);
-        modeBox.addItem ("Nothing", 4);
-        const int modeId = mode == "pequod" ? 1 : mode == "none" ? 4 : mode.startsWith ("layer") ? 3 : 2;
-        modeBox.setSelectedId (modeId, juce::dontSendNotification);
-        form.wide ({ &modeBox });
+        auto all = mgr.mappingsFor (uid, code, lay);
+        auto* m = all.empty() ? nullptr : all.front();
+        auto midi = mgr.midiOf (uid, code, lay);
+        auto layerAct = mgr.layerOf (uid, code, lay);
+        const int total = (int) all.size() + midi.size() + (layerAct.isVoid() ? 0 : 1);
 
-        if (modeId == 1)
+        while (funcButtons.size() < (int) all.size())
         {
-            auto all = mgr.mappingsFor (uid, code, lay);
-            auto* m = all.empty() ? nullptr : all.front();
-            if (all.empty())
-            {
-                functionButton.setButtonText ("Choose what it does...");
-                form.row ("Function", { &functionButton }, 32);
-            }
-            else
-            {
-                while (funcButtons.size() < (int) all.size())
-                {
-                    const int i = funcButtons.size();
-                    auto* f = funcButtons.add (new juce::TextButton());
-                    f->setColour (juce::TextButton::buttonColourId, Pequod::Colours::well);
-                    f->onClick = [this, i] { showFunctionMenu (i, funcButtons[i]); };
-                    addChildComponent (f);
-                    auto* x = removeButtons.add (new juce::TextButton ("X"));
-                    x->setTooltip ("Remove this function");
-                    x->onClick = [this, i] { removeFunctionAt (i); };
-                    setWidth (*x, 32);
-                    addChildComponent (x);
-                }
-                for (int i = 0; i < (int) all.size(); ++i)
-                {
-                    funcButtons[i]->setButtonText (describe (*all[(size_t) i]));
-                    form.row (i == 0 ? juce::String (all.size() > 1 ? "Functions" : "Function") : juce::String(),
-                              { funcButtons[i], removeButtons[i] }, 32);
-                }
-                form.row ({}, { &addFunctionButton }, 26);
-            }
-            {
-                const bool perPreset = control.isControllerPerPreset (uid, code, lay);
-                everyPresetButton.setToggleState (! perPreset, juce::dontSendNotification);
-                thisPresetButton.setToggleState (perPreset, juce::dontSendNotification);
-                form.row ("Applies to", { &everyPresetButton, &thisPresetButton });
-                presetCaption.setText (perPreset ? "Each preset has its own functions - editing " + presetName()
-                                                 : juce::String ("The same in every preset"),
-                                       juce::dontSendNotification);
-                form.row ({}, { &presetCaption }, 16);
-                if (m != nullptr && ! perPreset && m->isRackMapping() && m->slotUid == 0)
-                    showHint (m->pluginName + " isn't in this preset, so this switch does nothing here.");
-            }
-            const bool oneShot = ! all.empty() && std::all_of (all.begin(), all.end(), [] (const Mapping* f)
-            {
-                return f->target == Mapping::Target::presetNext || f->target == Mapping::Target::presetPrev
-                    || f->target == Mapping::Target::presetSelect || f->target == Mapping::Target::bankNext
-                    || f->target == Mapping::Target::bankPrev;
-            });
-            if (sw && ! oneShot)
-                showLatch (mgr.isLatching (uid, code, lay));
-            if (m != nullptr && ! m->perPreset && (m->target == Mapping::Target::bypass || m->target == Mapping::Target::param))
-                showHint ("Follows " + m->pluginName + (m->pluginOccurrence > 0 ? " #" + juce::String (m->pluginOccurrence + 1) : juce::String())
-                          + " in every preset that has it.");
+            const int i = funcButtons.size();
+            auto* f = funcButtons.add (new juce::TextButton());
+            f->setColour (juce::TextButton::buttonColourId, Pequod::Colours::well);
+            f->onClick = [this, i] { showFunctionMenu (i, funcButtons[i]); };
+            addChildComponent (f);
+            auto* x = removeButtons.add (new juce::TextButton ("X"));
+            x->setTooltip ("Remove this function");
+            x->onClick = [this, i] { removeFunctionAt (i); };
+            setWidth (*x, 32);
+            addChildComponent (x);
         }
-        else if (modeId == 2)
+        for (int i = 0; i < (int) all.size(); ++i)
         {
-            auto modes = midiModes();
-            midiTypeBox.clear (juce::dontSendNotification);
-            midiTypeBox.addItemList (midiModeNames(), 1);
-            midiTypeBox.setSelectedItemIndex (juce::jmax (0, modes.indexOf (mode)), juce::dontSendNotification);
-            form.row ("Message", { &midiTypeBox });
-            const bool needsNumber = ! (turn && mode == "pc");
-            if (needsNumber)
-            {
-                numberSlider.setValue ((int) mgr.get (ControllerManager::actionPath (uid, code, lay) + ".num"), juce::dontSendNotification);
-                form.row (mode == "note" ? "Note" : mode == "pc" ? "Program" : "CC number", { &numberSlider });
-            }
-            channelBox.setSelectedId (juce::jlimit (1, 16, (int) mgr.get (ControllerManager::actionPath (uid, code, lay) + ".ch")), juce::dontSendNotification);
-            form.row ("Channel", { &channelBox });
-            if (sw && (mode == "cc" || mode == "note"))
-            {
-                showLatch (mgr.isLatching (uid, code, lay));
-            }
-            showHint (midiOutHint());
+            funcButtons[i]->setButtonText (describe (*all[(size_t) i]));
+            form.row (i == 0 ? juce::String ("PEQUOD") : juce::String(), { funcButtons[i], removeButtons[i] }, 32);
         }
-        else if (modeId == 3)
+
+        while (midiRows.size() < midi.size())
         {
-            if (turn)
-                showHint ("Turning it steps through the layers.");
-            else
+            const int i = midiRows.size();
+            auto* row = midiRows.add (new MidiRow());
+            row->onChange = [this, i]
             {
-                static const juce::StringArray modes { "layer_next", "layer_prev", "layer_set", "layer_hold" };
-                layerActionBox.setSelectedItemIndex (juce::jmax (0, modes.indexOf (mode)), juce::dontSendNotification);
-                form.row ("Action", { &layerActionBox });
-                if (mode == "layer_set" || mode == "layer_hold")
+                auto list = mgr.midiOf (uid, code, mgr.getLayer());
+                if (! juce::isPositiveAndBelow (i, list.size())) return;
+                list.set (i, midiRows[i]->get());
+                mgr.setMidi (uid, code, mgr.getLayer(), list);
+            };
+            row->onRemove = [this, i]
+            {
+                juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Inspector> (this), i]
                 {
-                    layerNumBox.setSelectedId (juce::jlimit (1, 4, (int) mgr.get (ControllerManager::actionPath (uid, code, lay) + ".num")), juce::dontSendNotification);
-                    form.row ("Layer", { &layerNumBox });
-                }
-                if (mgr.getNumLayers() < 2) showHint ("There is only one layer. Add more under SETTINGS > Layers.");
-            }
+                    if (safe == nullptr) return;
+                    auto list = safe->mgr.midiOf (safe->uid, safe->code, safe->mgr.getLayer());
+                    if (juce::isPositiveAndBelow (i, list.size())) list.remove (i);
+                    safe->mgr.setMidi (safe->uid, safe->code, safe->mgr.getLayer(), list);
+                    safe->refresh();
+                });
+            };
+            addChildComponent (row);
         }
+        for (int i = 0; i < midi.size(); ++i)
+        {
+            midiRows[i]->set (midiModes(), midiModeNames(), midi[i], code == Mapping::ctrlEncoderTurn);
+            form.row (i == 0 ? juce::String ("MIDI out") : juce::String(), { midiRows[i] }, 30);
+        }
+
+        if (! layerAct.isVoid())
+        {
+            layerRow.set (layerAct, mgr.getNumLayers());
+            form.row ("Layer", { &layerRow }, 30);
+        }
+
+        addFunctionButton.setButtonText (total == 0 ? "Choose what it does..." : "+ ADD ANOTHER FUNCTION");
+        form.row (total == 0 ? juce::String ("Function") : juce::String(), { &addFunctionButton }, total == 0 ? 32 : 26);
+
+        if (! all.empty())
+        {
+            const bool perPreset = control.isControllerPerPreset (uid, code, lay);
+            everyPresetButton.setToggleState (! perPreset, juce::dontSendNotification);
+            thisPresetButton.setToggleState (perPreset, juce::dontSendNotification);
+            form.row ("Applies to", { &everyPresetButton, &thisPresetButton });
+            presetCaption.setText (perPreset ? "Each preset has its own PEQUOD functions - editing " + presetName()
+                                             : juce::String ("The same in every preset"),
+                                   juce::dontSendNotification);
+            form.row ({}, { &presetCaption }, 16);
+        }
+
+        const bool pequodLatches = std::any_of (all.begin(), all.end(), [] (const Mapping* f)
+        {
+            return ! (f->target == Mapping::Target::presetNext || f->target == Mapping::Target::presetPrev
+                      || f->target == Mapping::Target::presetSelect || f->target == Mapping::Target::bankNext
+                      || f->target == Mapping::Target::bankPrev);
+        });
+        const bool midiLatches = std::any_of (midi.begin(), midi.end(), [] (const juce::var& v)
+        {
+            return v["type"].toString() == "cc" || v["type"].toString() == "note";
+        });
+        if (sw && (total == 0 || pequodLatches || midiLatches))
+            showLatch (mgr.isLatching (uid, code, lay));
+
+        juce::StringArray hints;
+        if (m != nullptr && ! m->perPreset && m->isRackMapping() && m->slotUid == 0)
+            hints.add (m->pluginName + " isn't in this preset, so its function does nothing here.");
+        else if (m != nullptr && ! m->perPreset && (m->target == Mapping::Target::bypass || m->target == Mapping::Target::param))
+            hints.add ("Follows " + m->pluginName + (m->pluginOccurrence > 0 ? " #" + juce::String (m->pluginOccurrence + 1) : juce::String())
+                       + " in every preset that has it.");
+        if (! midi.isEmpty()) hints.add (midiOutHint());
+        if (! layerAct.isVoid() && mgr.getNumLayers() < 2) hints.add ("There is only one layer. Add more under SETTINGS > Layers.");
+        const int kinds = (all.empty() ? 0 : 1) + (midi.isEmpty() ? 0 : 1) + (layerAct.isVoid() ? 0 : 1);
+        if ((kinds > 1 || midi.size() > 1) && ! mgr.supportsCombos())
+            hints.add ("The controller needs firmware 2.1 to do several of these at once - update it under SETTINGS.");
+        if (! hints.isEmpty()) showHint (hints.joinIntoString ("\n"));
 
         // LED
         if (ControllerManager::hasLed (*u, code))
@@ -934,6 +1058,8 @@ private:
     juce::Label title, sub, hint;
     juce::TextButton identifyButton { "FIND IT" }, functionButton, calibrateButton { "CALIBRATE" }, addFunctionButton { "+ ADD ANOTHER FUNCTION" };
     juce::OwnedArray<juce::TextButton> funcButtons, removeButtons;
+    juce::OwnedArray<MidiRow> midiRows;
+    LayerRow layerRow;
     juce::Label presetCaption;
     juce::ComboBox modeBox, midiTypeBox, channelBox, layerActionBox, layerNumBox, ledModeBox;
     juce::ToggleButton invertToggle;
@@ -956,8 +1082,7 @@ private:
         }
         swatches.swatches.push_back ({ "layer", mgr.layerColour (lay), "The colour of the layer you're on", "L" });
 
-        const bool pequodMode = mgr.modeOf (uid, code, lay) == "pequod";
-        if (pequodMode)
+        if (true)
         {
             auto* m = mgr.mappingFor (uid, code, lay);
             auto fx = m != nullptr ? mgr.effectColour (*m) : juce::Colour();
@@ -978,7 +1103,7 @@ private:
             mgr.setUseEffectColour (uid, code, lay, true);
         else
         {
-            if (mgr.modeOf (uid, code, lay) == "pequod") mgr.setUseEffectColour (uid, code, lay, false);
+            mgr.setUseEffectColour (uid, code, lay, false);
             mgr.set (ControllerManager::controlPath (uid, code) + ".color", col);
         }
         refresh();
@@ -998,7 +1123,7 @@ private:
     void showHint (const juce::String& s)
     {
         hint.setText (s, juce::dontSendNotification);
-        form.wide ({ &hint }, 54);
+        form.wide ({ &hint }, 36 * (juce::StringArray::fromLines (s).size()) + 10);
     }
 
     juce::String midiOutHint() const
@@ -1159,7 +1284,7 @@ private:
                                    [&m, rep, u, c, lay, itemUid, done] { m.assign (u, c, lay, Mapping::Target::splitMix, itemUid, rep.get()); done(); });
             }
 
-            menu.addSectionHeader ("EFFECTS");
+            menu.addSectionHeader ("PEQUOD - EFFECTS");
             menu.addSubMenu ("An effect...  on/off", fx);
             menu.addItem ("A plugin knob or switch...  (touch it on the plugin next)", [&m, rep, u, c, lay, done] { m.learnPluginControl (u, c, lay, rep.get()); done(); });
             if (! splits.empty()) menu.addSubMenu ("Split: switch between A and B", splitMenu);
@@ -1191,6 +1316,56 @@ private:
             menu.addItem ("Master volume (OUT)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::outputGain, 0, rep.get()); done(); });
             menu.addItem ("Input level (IN)",    [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::inputGain, 0, rep.get()); done(); });
             if (! splits.empty()) menu.addSubMenu ("Split mix", splitMenu);
+        }
+        if (rep == nullptr)       // adding: MIDI to other gear and layer changes too, alongside PEQUOD functions
+        {
+            auto midiNow = m.midiOf (u, c, lay);
+            if (midiNow.size() < 4)
+            {
+                menu.addSectionHeader ("MIDI TO OTHER GEAR");
+                auto ids = midiModes();
+                auto names = midiModeNames();
+                const int legacyNum = (int) m.get (ControllerManager::actionPath (u, c, lay) + ".num");
+                const int num = juce::jlimit (0, 127, legacyNum > 0 ? legacyNum : 20);
+                for (int i = 0; i < ids.size(); ++i)
+                {
+                    const auto id = ids[i];
+                    menu.addItem (names[i], [&m, u, c, lay, id, num, done]
+                    {
+                        auto list = m.midiOf (u, c, lay);
+                        auto v = juce::var (new juce::DynamicObject());
+                        v.getDynamicObject()->setProperty ("type", id);
+                        v.getDynamicObject()->setProperty ("num", num);
+                        v.getDynamicObject()->setProperty ("ch", 1);
+                        list.add (v);
+                        m.setMidi (u, c, lay, list);
+                        done();
+                    });
+                }
+            }
+            if (m.layerOf (u, c, lay).isVoid() && (sw || turn))
+            {
+                menu.addSectionHeader ("LAYERS");
+                auto addLayer = [&m, u, c, lay, done] (const char* type, int num)
+                {
+                    return [&m, u, c, lay, done, type, num]
+                    {
+                        auto v = juce::var (new juce::DynamicObject());
+                        v.getDynamicObject()->setProperty ("type", type);
+                        v.getDynamicObject()->setProperty ("num", num);
+                        m.setLayerAction (u, c, lay, v);
+                        done();
+                    };
+                };
+                if (turn) menu.addItem ("Turning changes layer", addLayer ("turn", 1));
+                else
+                {
+                    menu.addItem ("Next layer",     addLayer ("next", 1));
+                    menu.addItem ("Previous layer", addLayer ("prev", 1));
+                    menu.addItem ("Go to layer...", addLayer ("set", 2));
+                    menu.addItem ("Hold for layer...  (back when released)", addLayer ("hold", 2));
+                }
+            }
         }
         if (rep != nullptr)
         {

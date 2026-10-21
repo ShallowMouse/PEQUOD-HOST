@@ -284,6 +284,111 @@ juce::String ControllerManager::modeOf (const juce::String& uid, int code, int l
     return m.isEmpty() ? juce::String ("pequod") : m;
 }
 
+static juce::var makeMidi (const juce::String& type, int num, int ch)
+{
+    auto v = juce::var (new juce::DynamicObject());
+    v.getDynamicObject()->setProperty ("type", type);
+    v.getDynamicObject()->setProperty ("num", num);
+    v.getDynamicObject()->setProperty ("ch", ch);
+    return v;
+}
+
+juce::Array<juce::var> ControllerManager::midiOf (const juce::String& uid, int code, int lay) const
+{
+    juce::Array<juce::var> out;
+    auto base = actionPath (uid, code, lay);
+    auto list = get (base + ".midi");
+    if (auto* arr = list.getArray())
+    {
+        for (auto& v : *arr) out.add (makeMidi (v["type"].toString(), (int) v["num"], juce::jlimit (1, 16, (int) v["ch"])));
+        return out;
+    }
+    auto mode = modeOf (uid, code, lay);           // settings from before 2.1: one MIDI message at most
+    if (mode == "cc" || mode == "note" || mode == "pc" || mode == "cc_rel" || mode == "cc_abs")
+        out.add (makeMidi (mode, (int) get (base + ".num"), juce::jlimit (1, 16, (int) get (base + ".ch"))));
+    return out;
+}
+
+juce::var ControllerManager::layerOf (const juce::String& uid, int code, int lay) const
+{
+    auto base = actionPath (uid, code, lay);
+    auto l = get (base + ".layer");
+    auto* list = get (base + ".midi").getArray();
+    auto make = [] (const juce::String& type, int num)
+    {
+        auto v = juce::var (new juce::DynamicObject());
+        v.getDynamicObject()->setProperty ("type", type);
+        v.getDynamicObject()->setProperty ("num", juce::jlimit (1, 4, num));
+        return v;
+    };
+    if (l.isObject() || list != nullptr)
+        return l.isObject() && l["type"].toString() != "none" && l["type"].toString().isNotEmpty() ? make (l["type"].toString(), (int) l["num"]) : juce::var();
+    auto mode = modeOf (uid, code, lay);
+    if (mode == "layer_next") return make ("next", 1);
+    if (mode == "layer_prev") return make ("prev", 1);
+    if (mode == "layer_set")  return make ("set", (int) get (base + ".num"));
+    if (mode == "layer_hold") return make ("hold", (int) get (base + ".num"));
+    if (mode == "layer")      return make ("turn", 1);
+    return {};
+}
+
+bool ControllerManager::hasAnything (const juce::String& uid, int code, int lay) const
+{
+    return mappingFor (uid, code, lay) != nullptr || ! midiOf (uid, code, lay).isEmpty() || ! layerOf (uid, code, lay).isVoid();
+}
+
+bool ControllerManager::supportsCombos() const
+{
+    auto parts = juce::StringArray::fromTokens (getInfo().fw.upToFirstOccurrenceOf ("-", false, false), ".", {});
+    const int major = parts[0].getIntValue(), minor = parts[1].getIntValue();
+    return major > 2 || (major == 2 && minor >= 1);
+}
+
+void ControllerManager::setMidi (const juce::String& uid, int code, int lay, const juce::Array<juce::var>& list)
+{
+    auto base = actionPath (uid, code, lay);
+    auto layerNow = layerOf (uid, code, lay);
+    set (base + ".midi", juce::var (list));
+    if (get (base + ".layer").isVoid())
+        set (base + ".layer", layerNow.isVoid() ? juce::var (new juce::DynamicObject()) : layerNow);
+    syncLegacy (uid, code, lay);
+}
+
+void ControllerManager::setLayerAction (const juce::String& uid, int code, int lay, const juce::var& l)
+{
+    auto base = actionPath (uid, code, lay);
+    auto midiNow = midiOf (uid, code, lay);
+    set (base + ".midi", juce::var (midiNow));
+    set (base + ".layer", l.isVoid() ? juce::var (new juce::DynamicObject()) : l);
+    syncLegacy (uid, code, lay);
+}
+
+/** Older firmware (before 2.1) only reads "mode": give it the closest single thing. */
+void ControllerManager::syncLegacy (const juce::String& uid, int code, int lay)
+{
+    if (! hasConfig()) return;
+    auto base = actionPath (uid, code, lay);
+    auto midi = midiOf (uid, code, lay);
+    auto l = layerOf (uid, code, lay);
+    juce::String mode = "none";
+    if (mappingFor (uid, code, lay) != nullptr) mode = "pequod";
+    else if (! midi.isEmpty())
+    {
+        mode = midi[0]["type"].toString();
+        set (base + ".num", midi[0]["num"]);
+        set (base + ".ch", midi[0]["ch"]);
+    }
+    else if (! l.isVoid())
+    {
+        auto t = l["type"].toString();
+        mode = t == "turn" ? juce::String ("layer") : "layer_" + t;
+        set (base + ".num", l["num"]);
+    }
+    else if (get (base + ".midi").isVoid())
+        mode = "pequod";                           // nothing at all yet: PEQUOD can still use it
+    if (modeOf (uid, code, lay) != mode) set (base + ".mode", mode);
+}
+
 const Mapping* ControllerManager::mappingFor (const juce::String& uid, int code, int lay) const
 {
     return control.findControllerMapping (uid, code, lay);
@@ -310,29 +415,26 @@ juce::Colour ControllerManager::controlEffectColour (const juce::String& uid, in
 
 juce::String ControllerManager::shortLabel (const juce::String& uid, int code, int lay) const
 {
-    auto mode = modeOf (uid, code, lay);
-    auto num = (int) get (actionPath (uid, code, lay) + ".num");
-
-    if (mode == "pequod")
+    juce::StringArray parts;
+    for (auto* m : mappingsFor (uid, code, lay)) parts.add (shortLabelOf (*m, code));
+    for (auto& mv : midiOf (uid, code, lay))
     {
-        auto all = mappingsFor (uid, code, lay);
-        if (all.empty()) return "-";
-        if (all.size() > 1)
-        {
-            auto first = shortLabelOf (*all.front(), code);
-            return first.substring (0, 8) + " +" + juce::String ((int) all.size() - 1);
-        }
-        return shortLabelOf (*all.front(), code);
+        auto t = mv["type"].toString();
+        const int num = (int) mv["num"];
+        parts.add (t == "note" ? juce::MidiMessage::getMidiNoteName (num, true, true, 3)
+                 : t == "pc" ? (code == Mapping::ctrlEncoderTurn ? juce::String ("PROGRAM") : "PC " + juce::String (num))
+                 : "CC " + juce::String (num));
     }
-    if (mode == "cc" || mode == "cc_rel" || mode == "cc_abs") return "CC " + juce::String (num);
-    if (mode == "note")       return juce::MidiMessage::getMidiNoteName (num, true, true, 3);
-    if (mode == "pc")         return code == Mapping::ctrlEncoderTurn ? juce::String ("PROGRAM") : "PC " + juce::String (num);
-    if (mode == "layer_next") return "LAYER +";
-    if (mode == "layer_prev") return "LAYER -";
-    if (mode == "layer_set")  return "LAYER " + juce::String (num);
-    if (mode == "layer_hold") return "HOLD L" + juce::String (num);
-    if (mode == "layer")      return "LAYERS";
-    return "-";
+    auto l = layerOf (uid, code, lay);
+    if (! l.isVoid())
+    {
+        auto t = l["type"].toString();
+        parts.add (t == "next" ? juce::String ("LAYER +") : t == "prev" ? juce::String ("LAYER -")
+                 : t == "set" ? "LAYER " + l["num"].toString() : t == "hold" ? "HOLD L" + l["num"].toString() : juce::String ("LAYERS"));
+    }
+    if (parts.isEmpty()) return "-";
+    if (parts.size() == 1) return parts[0];
+    return parts[0].substring (0, 8) + " +" + juce::String (parts.size() - 1);
 }
 
 juce::String ControllerManager::shortLabelOf (const Mapping& mapping, int code) const
@@ -391,7 +493,6 @@ juce::Colour ControllerManager::effectColour (const Mapping& m) const
 
 bool ControllerManager::usesEffectColour (const juce::String& uid, int code, int lay) const
 {
-    if (modeOf (uid, code, lay) != "pequod") return false;
     if (auto* m = mappingFor (uid, code, lay)) return m->ledColour == Mapping::ledEffectColour;
     auto it = pendingFx.find (pendingKey (uid, code, lay));
     return it == pendingFx.end() || it->second;
@@ -407,15 +508,15 @@ void ControllerManager::setUseEffectColour (const juce::String& uid, int code, i
 
 bool ControllerManager::isLatching (const juce::String& uid, int code, int lay) const
 {
-    if (modeOf (uid, code, lay) != "pequod") return (bool) get (actionPath (uid, code, lay) + ".toggle");
     if (auto* m = mappingFor (uid, code, lay)) return m->toggle;
+    if (! midiOf (uid, code, lay).isEmpty()) return get (actionPath (uid, code, lay) + ".toggle").isVoid() || (bool) get (actionPath (uid, code, lay) + ".toggle");
     auto it = pendingLatch.find (pendingKey (uid, code, lay));
     return it == pendingLatch.end() || it->second;
 }
 
 void ControllerManager::setLatching (const juce::String& uid, int code, int lay, bool latching)
 {
-    if (modeOf (uid, code, lay) != "pequod") { set (actionPath (uid, code, lay) + ".toggle", latching); return; }
+    set (actionPath (uid, code, lay) + ".toggle", latching);      // the MIDI it sends
     auto all = mappingsFor (uid, code, lay);
     if (! all.empty())
     {
@@ -498,9 +599,7 @@ bool ControllerManager::mappingIsOn (const Mapping& m) const
 bool ControllerManager::isLit (const juce::String& uid, int code) const
 {
     if (isPressed (uid, code)) return true;
-    auto mode = modeOf (uid, code, layer);
-    if (mode == "pequod")
-        if (mappingFor (uid, code, layer) != nullptr) return controlIsOn (uid, code, layer);
+    if (mappingFor (uid, code, layer) != nullptr && controlIsOn (uid, code, layer)) return true;
     auto led = get (controlPath (uid, code) + ".led").toString();
     return led == "on";
 }
@@ -543,27 +642,30 @@ void ControllerManager::assign (const juce::String& uid, int code, int lay, Mapp
     pendingFx.erase (key);
     pendingLatch.erase (key);
 
-    if (modeOf (uid, code, lay) != "pequod") set (actionPath (uid, code, lay) + ".mode", "pequod");
     if (old.has_value()) control.removeControllerMapping (*old);
     control.setControllerMapping (m);
+    syncLegacy (uid, code, lay);
     updateLeds (true);
 }
 
 void ControllerManager::removeFunction (const Mapping& m)
 {
-    control.removeControllerMapping (m);
+    const Mapping copy = m;
+    control.removeControllerMapping (copy);
+    syncLegacy (copy.ctrlUnit, copy.ctrlControl, copy.ctrlLayer);
     updateLeds (true);
 }
 
 void ControllerManager::unassign (const juce::String& uid, int code, int lay)
 {
     control.clearControllerMapping (uid, code, lay);
+    syncLegacy (uid, code, lay);
     updateLeds (true);
 }
 
 void ControllerManager::learnPluginControl (const juce::String& uid, int code, int lay, const Mapping* replace)
 {
-    if (modeOf (uid, code, lay) != "pequod") set (actionPath (uid, code, lay) + ".mode", "pequod");
+    if (modeOf (uid, code, lay) == "none") set (actionPath (uid, code, lay) + ".mode", "pequod");
     std::optional<Mapping> old;
     if (replace != nullptr) old = *replace;
     if (old.has_value()) control.removeControllerMapping (*old);
@@ -584,7 +686,7 @@ bool ControllerManager::quickSetup()
 
     auto free = [this] (const juce::String& uid, int code)
     {
-        return modeOf (uid, code, 0) == "pequod" && mappingFor (uid, code, 0) == nullptr;
+        return ! hasAnything (uid, code, 0);
     };
 
     auto slots = engine.getFlatSlots();
@@ -900,7 +1002,7 @@ void ControllerManager::updateLeds (bool force)
     for (auto& u : getInfo().units)
         for (int code : controlCodes (u))
         {
-            if (! hasLed (u, code) || modeOf (u.uid, code, layer) != "pequod") continue;
+            if (! hasLed (u, code)) continue;
             auto* m = mappingFor (u.uid, code, layer);
             if (m == nullptr) continue;
             const bool on = controlIsOn (u.uid, code, layer);

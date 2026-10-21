@@ -47,7 +47,16 @@ public:
 
     juce::String unitName (const juce::String& uid) const;
     juce::String describeControl (const juce::String& uid, int code, int lay) const;
-    juce::String modeOf (const juce::String& uid, int code, int lay) const;           // "pequod", "cc", ...
+    juce::String modeOf (const juce::String& uid, int code, int lay) const;           // older single-function setting
+
+    //== What a control sends to other gear / does to layers (kept on the controller). A control can do
+    //   PEQUOD functions, MIDI messages and a layer change all at once (firmware 2.1+).
+    juce::Array<juce::var> midiOf (const juce::String& uid, int code, int lay) const;      // [{type, num, ch}]
+    juce::var layerOf (const juce::String& uid, int code, int lay) const;                  // {type, num} or void
+    void setMidi (const juce::String& uid, int code, int lay, const juce::Array<juce::var>&);
+    void setLayerAction (const juce::String& uid, int code, int lay, const juce::var&);
+    bool hasAnything (const juce::String& uid, int code, int lay) const;
+    bool supportsCombos() const;                                                          // firmware 2.1 or newer
     juce::String shortLabel (const juce::String& uid, int code, int lay) const;       // what it does, in a few letters
     juce::String shortLabelOf (const Mapping&, int code) const;
     juce::Colour colourOf (const juce::String& uid, int code) const;
@@ -154,6 +163,7 @@ private:
     void sendFirmwareChunk();
     void finishFirmware (const juce::String& status);
     void status (const juce::String&);
+    void syncLegacy (const juce::String& uid, int code, int lay);
 
     JUCE_DECLARE_NON_COPYABLE (ControllerManager)
 };

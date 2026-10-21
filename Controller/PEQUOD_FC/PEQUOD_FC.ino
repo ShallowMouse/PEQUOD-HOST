@@ -34,8 +34,8 @@
 #include "mbedtls/base64.h"
 #include "esp_ota_ops.h"
 
-#define FW_VERSION    "2.0.1"
-#define PROTO_VERSION 2
+#define FW_VERSION    "2.1.0"
+#define PROTO_VERSION 3     // 3: a control can do several things at once (PEQUOD + MIDI + layer)
 
 // ── Hardware (same as the previous master) ──────────────────────────────────
 static const int SDA_PIN = 8, SCL_PIN = 18;          // slave bus (Wire)
@@ -67,11 +67,16 @@ enum Mode : uint8_t {
 
 enum LedMode : uint8_t { LED_AUTO, LED_ON, LED_OFF, LED_MIDI };
 
+// One control (on one layer) can do several things at once: always tells PEQUOD (when connected),
+// plus up to 4 MIDI messages to other gear, plus one layer change.
+struct MidiMsg { uint8_t type = M_CC; uint8_t num = 0; uint8_t ch = 1; uint8_t absValue = 0; };
+
 struct Action {
-  uint8_t mode = M_PEQUOD;
-  uint8_t num = 0;
-  uint8_t ch = 1;
-  bool toggle = true;
+  MidiMsg midi[4];
+  uint8_t nMidi = 0;
+  uint8_t layerMode = M_NONE;    // M_LAYER_NEXT / PREV / SET / HOLD, or M_LAYER_DIR for an encoder
+  uint8_t layerNum = 1;
+  bool toggle = true;            // latching (shared by its MIDI messages)
 };
 
 struct Control {
@@ -529,10 +534,35 @@ void applyConfig() {
       JsonArray layers = jc["layers"];
       for (int l = 0; l < MAX_LAYERS; l++) {
         JsonObject a = layers[l];
-        ctl.act[l].mode = modeFromName(a["mode"] | "pequod");
-        ctl.act[l].num = constrain((int) (a["num"] | 20), 0, 127);
-        ctl.act[l].ch = constrain((int) (a["ch"] | 1), 1, 16);
-        ctl.act[l].toggle = a["toggle"] | true;
+        Action& act = ctl.act[l];
+        act = Action();
+        act.toggle = a["toggle"] | true;
+        if (a["midi"].is<JsonArray>()) {                   // PEQUOD 2.1+: everything this control does
+          for (JsonVariant mv : a["midi"].as<JsonArray>()) {
+            if (act.nMidi >= 4) break;
+            MidiMsg& mm = act.midi[act.nMidi];
+            mm.type = modeFromName(mv["type"] | "cc");
+            if (mm.type != M_CC && mm.type != M_NOTE && mm.type != M_PC && mm.type != M_CC_REL && mm.type != M_CC_ABS) continue;
+            mm.num = constrain((int) (mv["num"] | 20), 0, 127);
+            mm.ch = constrain((int) (mv["ch"] | 1), 1, 16);
+            act.nMidi++;
+          }
+          const char* lt = a["layer"]["type"] | "none";
+          act.layerMode = !strcmp(lt, "next") ? M_LAYER_NEXT : !strcmp(lt, "prev") ? M_LAYER_PREV
+                        : !strcmp(lt, "set") ? M_LAYER_SET : !strcmp(lt, "hold") ? M_LAYER_HOLD
+                        : !strcmp(lt, "turn") ? M_LAYER_DIR : M_NONE;
+          act.layerNum = constrain((int) (a["layer"]["num"] | 1), 1, MAX_LAYERS);
+        } else {                                           // older settings: one thing per control
+          uint8_t mode = modeFromName(a["mode"] | "pequod");
+          int num = constrain((int) (a["num"] | 20), 0, 127), ch = constrain((int) (a["ch"] | 1), 1, 16);
+          if (mode == M_CC || mode == M_NOTE || mode == M_PC || mode == M_CC_REL || mode == M_CC_ABS) {
+            act.midi[0].type = mode; act.midi[0].num = num; act.midi[0].ch = ch; act.nMidi = 1;
+          } else if (mode >= M_LAYER_NEXT && mode <= M_LAYER_HOLD) {
+            act.layerMode = mode; act.layerNum = constrain(num, 1, MAX_LAYERS);
+          } else if (mode == M_LAYER_DIR) {
+            act.layerMode = M_LAYER_DIR;
+          }
+        }
       }
     }
     if (b.kind == KIND_PEDAL || b.kind == KIND_PEDAL_SWITCH) {
@@ -777,26 +807,28 @@ void onSwitch(Board& b, Control& ctl, bool pressed) {
     sendToHost(d);
   }
 
-  switch (a.mode) {
-    case M_PEQUOD:
-      if (linked()) sendEvent(b, ctl.code, lay, pressed ? 1 : 0, 0, false);
-      break;
-    case M_CC:
-      if (a.toggle) { if (pressed) { ctl.toggled[lay] = !ctl.toggled[lay]; midiCC(a.num, ctl.toggled[lay] ? 127 : 0, a.ch); } }
-      else midiCC(a.num, pressed ? 127 : 0, a.ch);
-      break;
-    case M_NOTE:
-      if (a.toggle) { if (pressed) { ctl.toggled[lay] = !ctl.toggled[lay]; midiNote(a.num, ctl.toggled[lay], a.ch); } }
-      else midiNote(a.num, pressed, a.ch);
-      break;
-    case M_PC:
-      if (pressed) midiPC(a.num, a.ch);
-      break;
+  if (linked()) sendEvent(b, ctl.code, lay, pressed ? 1 : 0, 0, false);   // PEQUOD does whatever it's set to
+
+  // MIDI to other gear: latching flips once per press, for all of this control's messages
+  bool on = pressed;
+  if (a.toggle && a.nMidi > 0) {
+    if (pressed) ctl.toggled[lay] = !ctl.toggled[lay];
+    on = ctl.toggled[lay];
+  }
+  for (int i = 0; i < a.nMidi; i++) {
+    const MidiMsg& mm = a.midi[i];
+    if (mm.type == M_PC) { if (pressed) midiPC(mm.num, mm.ch); continue; }
+    if (a.toggle && !pressed) continue;                     // latching: only presses change anything
+    if (mm.type == M_CC)   midiCC(mm.num, on ? 127 : 0, mm.ch);
+    if (mm.type == M_NOTE) midiNote(mm.num, on, mm.ch);
+  }
+
+  switch (a.layerMode) {
     case M_LAYER_NEXT: if (pressed) setLayer((layer + 1) % numLayers); break;
     case M_LAYER_PREV: if (pressed) setLayer((layer + numLayers - 1) % numLayers); break;
-    case M_LAYER_SET:  if (pressed) setLayer(max(0, (int) a.num - 1)); break;
+    case M_LAYER_SET:  if (pressed) setLayer((int) a.layerNum - 1); break;
     case M_LAYER_HOLD:
-      if (pressed) { holdReturnLayer = layer; setLayer(max(0, (int) a.num - 1)); }
+      if (pressed) { holdReturnLayer = layer; setLayer((int) a.layerNum - 1); }
       else if (holdReturnLayer >= 0) { setLayer(holdReturnLayer); holdReturnLayer = -1; }
       break;
     default: break;
@@ -815,11 +847,10 @@ void onPedal(Board& b, int raw) {
   b.lastPedal10 = v10;
   int v7 = (v10 * 127 + 511) / 1023;
   const Action& a = ctl->act[layer];
-  if (a.mode == M_PEQUOD) {
-    if (linked()) sendEvent(b, C_PEDAL, layer, v7, v10 / 1023.0f, true);
-  } else if (a.mode == M_CC && v7 != b.lastPedal7) {
-    midiCC(a.num, v7, a.ch);
-  }
+  if (linked()) sendEvent(b, C_PEDAL, layer, v7, v10 / 1023.0f, true);
+  if (v7 != b.lastPedal7)
+    for (int i = 0; i < a.nMidi; i++)
+      if (a.midi[i].type == M_CC) midiCC(a.midi[i].num, v7, a.midi[i].ch);
   b.lastPedal7 = v7;
 }
 
@@ -827,23 +858,26 @@ void onEncoder(Board& b, int steps) {
   if (b.encInvert) steps = -steps;
   Control* ctl = findControl(b, C_ENC_TURN);
   if (!ctl) return;
-  const Action& a = ctl->act[layer];
-  switch (a.mode) {
-    case M_PEQUOD: if (linked()) sendEvent(b, C_ENC_TURN, layer, steps, 0, false); break;
-    case M_CC_REL: midiCC(a.num, constrain(64 + steps, 1, 127), a.ch); break;
-    case M_CC_ABS:
-      ctl->absValue = constrain((int) ctl->absValue + steps, 0, 127);
-      midiCC(a.num, ctl->absValue, a.ch);
-      break;
-    case M_PC: {
-      int p = ((lastPcNum == 255 ? 0 : lastPcNum) + steps) % 128;
-      if (p < 0) p += 128;
-      midiPC(p, a.ch);
-      break;
+  Action& a = ctl->act[layer];
+  if (linked()) sendEvent(b, C_ENC_TURN, layer, steps, 0, false);
+  for (int i = 0; i < a.nMidi; i++) {
+    MidiMsg& mm = a.midi[i];
+    switch (mm.type) {
+      case M_CC_REL: case M_CC: midiCC(mm.num, constrain(64 + steps, 1, 127), mm.ch); break;
+      case M_CC_ABS:
+        mm.absValue = constrain((int) mm.absValue + steps, 0, 127);
+        midiCC(mm.num, mm.absValue, mm.ch);
+        break;
+      case M_PC: {
+        int p = ((lastPcNum == 255 ? 0 : lastPcNum) + steps) % 128;
+        if (p < 0) p += 128;
+        midiPC(p, mm.ch);
+        break;
+      }
+      default: break;
     }
-    case M_LAYER_DIR: setLayer(((layer + (steps > 0 ? 1 : -1)) % numLayers + numLayers) % numLayers); break;
-    default: break;
   }
+  if (a.layerMode == M_LAYER_DIR) setLayer(((layer + (steps > 0 ? 1 : -1)) % numLayers + numLayers) % numLayers);
 }
 
 // ── LEDs ────────────────────────────────────────────────────────────────────
@@ -857,19 +891,13 @@ uint32_t controlColor(Board& b, Control& ctl) {
     case LED_OFF:  on = false; break;
     case LED_MIDI: on = ctl.midiOn; break;
     default:
-      switch (a.mode) {
-        case M_PEQUOD:
-          on = ctl.down || (linked() && ctl.pqOn);
-          if (linked() && ctl.pqHasColor) col = ctl.pqColor;
-          break;
-        case M_CC: case M_NOTE: on = a.toggle ? ctl.toggled[layer] : ctl.down; break;
-        case M_PC:          on = (lastPcCh == a.ch && lastPcNum == a.num); break;
-        case M_LAYER_SET:
-        case M_LAYER_HOLD:  on = (layer == (int) a.num - 1); break;
-        case M_LAYER_NEXT:
-        case M_LAYER_PREV:  on = ctl.down; break;
-        default:            on = false; break;
-      }
+      // lit when PEQUOD says so, while held, when its latched MIDI is on, or when its layer is active
+      on = ctl.down || (linked() && ctl.pqOn);
+      if (linked() && ctl.pqHasColor) col = ctl.pqColor;
+      if (a.nMidi > 0 && a.toggle && ctl.toggled[layer]) on = true;
+      for (int i = 0; i < a.nMidi; i++)
+        if (a.midi[i].type == M_PC && lastPcCh == a.midi[i].ch && lastPcNum == a.midi[i].num) on = true;
+      if ((a.layerMode == M_LAYER_SET || a.layerMode == M_LAYER_HOLD) && layer == (int) a.layerNum - 1) on = true;
   }
 
   if (millis() < b.identifyUntil && (b.identifyCode < 0 || b.identifyCode == ctl.code))
@@ -1196,8 +1224,9 @@ void midiInMessage(uint8_t status, uint8_t d1, uint8_t d2) {
       Control& ctl = boards[i].ctl[c];
       if (ctl.led != LED_MIDI) continue;
       const Action& a = ctl.act[layer];
-      if (a.num == d1 && a.ch == ch && ((isNote && a.mode == M_NOTE) || (isCC && a.mode != M_NOTE)))
-        ctl.midiOn = on;
+      for (int k = 0; k < a.nMidi; k++)
+        if (a.midi[k].num == d1 && a.midi[k].ch == ch && ((isNote && a.midi[k].type == M_NOTE) || (isCC && a.midi[k].type != M_NOTE && a.midi[k].type != M_PC)))
+          ctl.midiOn = on;
     }
 }
 

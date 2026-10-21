@@ -101,7 +101,11 @@ Unit `kind`: `footswitch`, `button`, `pedal`, `pedal_switch`, `encoder`, `knob`.
 ```
 
 * Passwords are never sent to PEQUOD (`null` + `hasPass`); sending `null` keeps the stored one.
-* `mode`
+* Each layer of a control (firmware 2.1+) can do several things at once:
+  `"midi": [{ "type": "cc|note|pc|cc_rel|cc_abs", "num": 20, "ch": 1 }, …]` (up to 4 messages to other gear) and
+  `"layer": { "type": "next|prev|set|hold|turn", "num": 2 }`, while every move is also reported to PEQUOD (`ev`), which runs its own
+  functions for that control. When `midi` is present, `mode` is ignored; PEQUOD still writes `mode` (the closest single thing) for older firmware.
+* `mode` (firmware before 2.1: one thing per control)
   * switches: `pequod` (PEQUOD decides), `cc`, `note`, `pc`, `layer_next`, `layer_prev`, `layer_set` (`num` = layer 1–4), `layer_hold` (`num` = layer while held), `none`
   * pedal: `pequod`, `cc`, `none`
   * encoder turn: `pequod`, `cc_rel` (64 ± steps), `cc_abs` (0–127, kept by the controller), `pc` (steps through programs), `layer`, `none`
