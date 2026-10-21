@@ -784,47 +784,6 @@ void ControllerManager::learnPluginControl (const juce::String& uid, int code, i
     control.armLearnForController (uid, code, lay, describeControl (uid, code, lay));
 }
 
-bool ControllerManager::quickSetup()
-{
-    if (! isConnected()) return false;
-    int switchBoards = 0, nextStomp = 1;
-    bool any = false;
-
-    auto free = [this] (const juce::String& uid, int code)
-    {
-        return ! hasAnything (uid, code, 0);
-    };
-
-    auto slots = engine.getFlatSlots();
-    for (auto& u : getInfo().units)
-    {
-        if (u.hasButtons())
-        {
-            ++switchBoards;
-            for (int c = 0; c < 4; ++c)
-            {
-                const bool lastOfFirst = switchBoards == 1 && c == 3;
-                if (! free (u.uid, c)) { if (! lastOfFirst && switchBoards != 2) ++nextStomp; continue; }
-                if (lastOfFirst)            { assign (u.uid, c, 0, Mapping::Target::presetNext); any = true; }
-                else if (switchBoards == 2) { assign (u.uid, c, 0, Mapping::Target::presetSelect, c + 1); any = true; }
-                else if (nextStomp <= (int) slots.size())          // this preset's effects, in rack order
-                {
-                    assign (u.uid, c, 0, Mapping::Target::bypass, slots[(size_t) nextStomp - 1]->uid);
-                    ++nextStomp;
-                    any = true;
-                }
-            }
-        }
-        else if (u.kind == "pedal_switch" && free (u.uid, 0))  { assign (u.uid, 0, 0, Mapping::Target::tuner); any = true; }
-        else if (u.isEncoder())
-        {
-            if (free (u.uid, Mapping::ctrlEncoderTurn))  { assign (u.uid, Mapping::ctrlEncoderTurn, 0, Mapping::Target::presetNext); any = true; }
-            if (free (u.uid, Mapping::ctrlEncoderPress)) { assign (u.uid, Mapping::ctrlEncoderPress, 0, Mapping::Target::tuner); any = true; }
-        }
-    }
-    return any;
-}
-
 //==============================================================================
 // Maintenance
 //==============================================================================
@@ -838,6 +797,28 @@ void ControllerManager::scanWifi()
     wifiScanning = true;
     sendCmd ("wifiscan");
     sendChangeMessage();
+}
+
+juce::File ControllerManager::bundledFirmwareFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("Controller firmware");
+}
+
+juce::String ControllerManager::bundledFirmwareVersion()
+{
+    return bundledFirmwareFolder().getChildFile ("version.txt").loadFileAsString().trim();
+}
+
+bool ControllerManager::newerFirmwareAvailable() const
+{
+    auto bundled = bundledFirmwareVersion();
+    if (bundled.isEmpty() || ! isConnected() || getInfo().fw.isEmpty()) return false;
+    auto num = [] (const juce::String& v)
+    {
+        auto p = juce::StringArray::fromTokens (v.upToFirstOccurrenceOf ("-", false, false), ".", {});
+        return p[0].getIntValue() * 1000000 + p[1].getIntValue() * 1000 + p[2].getIntValue();
+    };
+    return bundledFirmwareFolder().getChildFile ("PEQUOD_FC.bin").existsAsFile() && num (bundled) > num (getInfo().fw);
 }
 
 bool ControllerManager::startFirmwareUpdate (const juce::File& file, juce::String& whyNot)
@@ -906,7 +887,8 @@ void ControllerManager::controllerConnected()
     lastScreen.clear();
     sendCmd ("get_cfg");
     for (auto& uid : watched) sendCmd ("cal", { { "u", uid }, { "on", true } });
-    status ("Foot controller \"" + getInfo().name + "\" connected (" + describeConnection() + ")");
+    status ("Foot controller \"" + getInfo().name + "\" connected (" + describeConnection() + ")"
+            + (newerFirmwareAvailable() ? " - firmware " + bundledFirmwareVersion() + " is ready to install under CONTROLLER > SETTINGS" : juce::String()));
     sendChangeMessage();
 }
 

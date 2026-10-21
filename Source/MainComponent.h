@@ -8,6 +8,7 @@
 #include "ControlPanel.h"
 #include "PresetLibrary.h"
 #include "ControllerManager.h"
+#include "Updater.h"
 
 class ControllerWindow;
 
@@ -39,6 +40,7 @@ private:
     Tuner tuner { engine };
     std::unique_ptr<ControllerManager> controller;
     std::unique_ptr<ControllerWindow> controllerWindow;
+    Updater updater;
 
     HeaderBar header { engine, control, tuner };
     BrowserPanel browser { engine, library };

@@ -39,6 +39,9 @@ jobs:
           mkdir -p fw
           cp out/PEQUOD_FC.ino.bin fw/PEQUOD_FC.bin
           cp out/PEQUOD_FC.ino.merged.bin fw/PEQUOD_FC-full.bin 2>/dev/null || true
+          # PEQUOD reads this to tell you when the controller can be updated
+          grep -oP '#define FW_VERSION\s+"\K[^"]+' Controller/PEQUOD_FC/PEQUOD_FC.ino > fw/version.txt
+          echo "::notice title=firmware version::$(cat fw/version.txt)"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -48,6 +51,9 @@ jobs:
   build:
     runs-on: windows-latest
     needs: firmware
+    env:
+      # Every build gets its own version; PEQUOD offers it as an update when it's newer than what's installed.
+      PEQUOD_VERSION: 1.0.${{ github.run_number }}
 
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +68,7 @@ jobs:
         shell: pwsh
         run: |
           # Let CMake pick the newest installed Visual Studio.
-          cmake -S . -B build -A x64 *>&1 | Tee-Object -FilePath configure.log
+          cmake -S . -B build -A x64 "-DPEQUOD_VERSION=$env:PEQUOD_VERSION" *>&1 | Tee-Object -FilePath configure.log
           if ($LASTEXITCODE -ne 0) {
             $msg = (Get-Content configure.log -Tail 60) -join "%0A"; Write-Output "::error title=configure::$msg"
             exit 1
@@ -81,14 +87,28 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item "build/PequodHost_artefacts/Release/PEQUOD Host.exe" dist/
-          Copy-Item README.md dist/
-          Copy-Item Resources/Fonts/*.txt dist/
-          New-Item -ItemType Directory -Force "dist/Controller firmware" | Out-Null
-          Copy-Item fw/*.bin "dist/Controller firmware/"
-          Copy-Item Controller/README.md "dist/Controller firmware/"
-          Copy-Item -Recurse Controller/PEQUOD_FC "dist/Controller firmware/source"
-          Copy-Item docs/controller-protocol.md "dist/Controller firmware/"
+          New-Item -ItemType Directory -Force "portable/Controller firmware" | Out-Null
+          Copy-Item "build/PequodHost_artefacts/Release/PEQUOD Host.exe" portable/
+          Copy-Item README.md portable/
+          Copy-Item Resources/Fonts/*.txt portable/
+          Copy-Item fw/* "portable/Controller firmware/"
+          Copy-Item Controller/README.md "portable/Controller firmware/"
+          Copy-Item -Recurse Controller/PEQUOD_FC "portable/Controller firmware/source"
+          Copy-Item docs/controller-protocol.md "portable/Controller firmware/"
+          Compress-Archive -Path portable/* -DestinationPath "dist/PEQUOD-Host-$env:PEQUOD_VERSION-portable.zip"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=$env:PEQUOD_VERSION" Installer\PEQUOD-Host.iss *>&1 | Tee-Object -FilePath iscc.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Get-Content iscc.log -Tail 40) -join "%0A"; Write-Output "::error title=installer::$msg"
+            exit 1
+          }
+          Copy-Item fw/PEQUOD_FC.bin dist/
+          Get-ChildItem dist
 
       - name: Upload build
         uses: actions/upload-artifact@v4
@@ -96,8 +116,20 @@ jobs:
           name: PEQUOD-Host-Windows
           path: dist/
 
-      - name: Attach to release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/PEQUOD Host.exe
+      - name: Publish update
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if (-not $env:GH_TOKEN) {
+            Write-Output "::warning title=updates::Not published - add the RELEASES_TOKEN secret (see Installer/README.md)"
+            exit 0
+          }
+          $notes = git log -1 --pretty=%B
+          $notes | Out-File -Encoding utf8 notes.md
+          gh release create "v$env:PEQUOD_VERSION" --repo ShallowMouse/PEQUOD-Host-Releases `
+            --title "PEQUOD Host $env:PEQUOD_VERSION" --notes-file notes.md `
+            "dist/PEQUOD-Host-Setup-$env:PEQUOD_VERSION.exe" "dist/PEQUOD-Host-$env:PEQUOD_VERSION-portable.zip" "dist/PEQUOD_FC.bin"
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=updates::Publishing the release failed"; exit 1 }
+          Write-Output "::notice title=updates::Published PEQUOD Host $env:PEQUOD_VERSION"

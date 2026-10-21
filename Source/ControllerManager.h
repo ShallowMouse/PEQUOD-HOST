@@ -93,7 +93,6 @@ public:
     void unassign (const juce::String& uid, int code, int lay);
     void learnPluginControl (const juce::String& uid, int code, int lay, const Mapping* replace = nullptr);
     const Mapping* mappingFor (const juce::String& uid, int code, int lay) const;
-    bool quickSetup();      // a sensible layout for every control that isn't set up yet
 
     //== Maintenance
     void identify (const juce::String& uid, int code = -1);
@@ -106,6 +105,10 @@ public:
     bool isScanningWifi() const               { return wifiScanning; }
 
     bool startFirmwareUpdate (const juce::File&, juce::String& whyNot);
+    /** The controller firmware that came with this PEQUOD ("Controller firmware" next to the program). */
+    static juce::File bundledFirmwareFolder();
+    static juce::String bundledFirmwareVersion();
+    bool newerFirmwareAvailable() const;
     bool isUpdating() const                   { return fw.active; }
     float updateProgress() const              { return fw.total > 0 ? (float) fw.next / (float) fw.total : 0.0f; }
     juce::String updateStatus() const         { return fw.status; }

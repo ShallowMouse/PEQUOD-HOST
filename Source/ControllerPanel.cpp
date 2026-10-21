@@ -1576,7 +1576,9 @@ public:
                       + "   -   " + juce::String ((int) i.units.size()) + " board" + (i.units.size() == 1 ? "" : "s"),
                       juce::dontSendNotification);
         updateLabel.setText (mgr.isUpdating() ? mgr.updateStatus() : mgr.updateStatus().isNotEmpty() ? mgr.updateStatus()
-                                              : juce::String ("Load a new PEQUOD_FC.bin onto the controller"), juce::dontSendNotification);
+                             : mgr.newerFirmwareAvailable() ? "Firmware " + ControllerManager::bundledFirmwareVersion() + " came with this PEQUOD - press UPDATE FIRMWARE"
+                             : juce::String ("Load a new PEQUOD_FC.bin onto the controller"), juce::dontSendNotification);
+        updateLabel.setColour (juce::Label::textColourId, mgr.newerFirmwareAvailable() ? Pequod::Colours::mustard : Pequod::Colours::textDim);
         updateButton.setEnabled (! mgr.isUpdating());
     }
 
@@ -1626,7 +1628,7 @@ private:
     void chooseFirmware()
     {
         // The Windows download ships the matching firmware next to PEQUOD Host.exe.
-        auto bundled = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("Controller firmware");
+        auto bundled = ControllerManager::bundledFirmwareFolder();
         auto start = bundled.getChildFile ("PEQUOD_FC.bin").existsAsFile() ? bundled.getChildFile ("PEQUOD_FC.bin") : juce::File();
         chooser = std::make_unique<juce::FileChooser> ("Choose the controller firmware (PEQUOD_FC.bin)", start, "*.bin");
         chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
@@ -1679,13 +1681,6 @@ ControllerPanel::ControllerPanel (ControllerManager& m, HostEngine& e, ControlSu
     controlsTab.onClick = [this] { showSettings (false); };
     settingsTab.onClick = [this] { showSettings (true); };
 
-    quickSetupButton.setTooltip ("Give every switch that isn't set up yet a useful job: the first effects of this preset on/off, next preset, preset 1-4 on a second board, tuner...");
-    quickSetupButton.onClick = [this]
-    {
-        if (! mgr.quickSetup() && mgr.onStatus) mgr.onStatus ("Every control already has a job");
-        inspector->refresh();
-    };
-    addChildComponent (quickSetupButton);
 
     for (int i = 0; i < 4; ++i)
     {
@@ -1744,7 +1739,6 @@ void ControllerPanel::updateVisibility()
 {
     const bool conn = mgr.isConnected();
     controlsViewport.setVisible (conn && ! showingSettings);
-    quickSetupButton.setVisible (conn && ! showingSettings);
     settingsViewport.setVisible (conn && showingSettings);
     controlsTab.setVisible (conn);
     settingsTab.setVisible (conn);
@@ -1807,8 +1801,7 @@ void ControllerPanel::paint (juce::Graphics& g)
 
     if (! showingSettings)
     {
-        auto bar = quickSetupButton.getBounds().withLeft (layerButtons[0]->isVisible() ? layerButtons[mgr.getNumLayers() - 1]->getRight() + 16 : 18)
-                                               .withTrimmedRight (quickSetupButton.getWidth() + 16);
+        auto bar = barArea.withLeft (layerButtons[0]->isVisible() ? layerButtons[mgr.getNumLayers() - 1]->getRight() + 16 : barArea.getX());
         auto bank = control.getBankName ? control.getBankName() : juce::String();
         auto preset = control.getPresetName ? control.getPresetName() : juce::String();
         g.setFont (Pequod::heading (12.0f, false));
@@ -1846,7 +1839,7 @@ void ControllerPanel::resized()
     settings->setSize (settings->getWidth(), settings->getIdealHeight());
 
     auto bar = r.removeFromTop (32);
-    quickSetupButton.setBounds (bar.removeFromRight (130));
+    barArea = bar;
     for (auto* b : layerButtons)
         if (b->isVisible()) { b->setBounds (bar.removeFromLeft (84)); bar.removeFromLeft (4); }
     r.removeFromTop (10);

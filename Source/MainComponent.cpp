@@ -97,6 +97,33 @@ MainComponent::MainComponent()
         return names;
     };
     header.onController = [this] { showController(); };
+
+    // Updates: checked in the background every time PEQUOD starts
+    updater.onChange = [this]
+    {
+        header.setUpdate (updater.isUpdateAvailable() ? updater.getLatestVersion() : juce::String(),
+                          updater.isDownloading(), updater.getProgress());
+    };
+    updater.onStatus = [this] (const juce::String& s) { setStatus (s); };
+    header.onUpdate = [this]
+    {
+        auto notes = updater.getReleaseNotes();
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Update PEQUOD Host",
+            "PEQUOD Host " + updater.getLatestVersion() + " is available (you have " + Updater::currentVersion() + ").\n\n"
+              + (notes.isNotEmpty() ? notes + "\n\n" : juce::String())
+              + "PEQUOD will close, install the update and start again. Your presets and settings are kept.",
+            "Install", "Later", nullptr,
+            juce::ModalCallbackFunction::create ([this] (int r)
+            {
+                if (r != 1) return;
+                saveSettings();
+                updater.install();
+                setStatus ("Downloading PEQUOD Host " + updater.getLatestVersion() + "...");
+            }));
+    };
+   #if JUCE_WINDOWS
+    updater.checkSoon();
+   #endif
     header.controllerState = [this] { return controller->isUpdating() ? 2 : controller->isConnected() ? 1 : 0; };
 
     engine.onSlotAboutToBeRemoved = [this] (int uid)

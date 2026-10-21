@@ -111,6 +111,10 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
     audioButton.onClick   = [this] { if (onAudioSettings) onAudioSettings(); };
     pluginsButton.onClick = [this] { if (onPluginManager) onPluginManager(); };
     controllerButton.onClick = [this] { if (onController) onController(); };
+    updateButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::mustard);
+    updateButton.setColour (juce::TextButton::textColourOffId, Pequod::Colours::rail);
+    updateButton.onClick = [this] { if (onUpdate) onUpdate(); };
+    addChildComponent (updateButton);
     controllerButton.setTooltip ("PEQUOD FC foot controller: what every switch does, and all its settings");
 
     setupKnob (inKnob, inLabel, "IN", engine.getInputStage(), Mapping::Target::inputGain);
@@ -127,6 +131,16 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
 }
 
 HeaderBar::~HeaderBar() { stopTimer(); }
+
+void HeaderBar::setUpdate (const juce::String& version, bool downloading, float progress)
+{
+    const bool show = version.isNotEmpty();
+    updateButton.setButtonText (downloading ? "DOWNLOADING " + juce::String (juce::roundToInt (progress * 100.0f)) + "%"
+                                            : "UPDATE " + version);
+    updateButton.setTooltip ("PEQUOD Host " + version + " is available. Click to download and install it - PEQUOD restarts by itself.");
+    updateButton.setEnabled (! downloading);
+    if (show != updateButton.isVisible()) { updateButton.setVisible (show); resized(); }
+}
 
 void HeaderBar::ControllerButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
@@ -296,6 +310,11 @@ void HeaderBar::resized()
     // Left-hand block: wordmark, preset navigation (preset name takes the remaining space)
     wordmarkArea = r.removeFromLeft (132);
     r.removeFromLeft (8);
+    if (updateButton.isVisible())
+    {
+        updateButton.setBounds (row (r.removeFromLeft (150)));
+        r.removeFromLeft (8);
+    }
     prevButton.setBounds (row (r.removeFromLeft (30)));
     r.removeFromLeft (4);
 

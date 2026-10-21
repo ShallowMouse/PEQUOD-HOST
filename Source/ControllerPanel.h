@@ -29,7 +29,7 @@ private:
     HostEngine& engine;
     ControlSurface& control;
 
-    juce::TextButton controlsTab { "CONTROLS" }, settingsTab { "SETTINGS" }, quickSetupButton { "QUICK SETUP" };
+    juce::TextButton controlsTab { "CONTROLS" }, settingsTab { "SETTINGS" };
     juce::OwnedArray<juce::TextButton> layerButtons;
     std::unique_ptr<BoardView> board;
     std::unique_ptr<Inspector> inspector;
@@ -55,6 +55,7 @@ private:
     bool showingSettings = false;
     bool wasConnected = false;
     int idleTicks = 0;
+    juce::Rectangle<int> barArea;     // layer buttons + which preset is being edited
     bool inResized = false;
     juce::String lastSignature;
 

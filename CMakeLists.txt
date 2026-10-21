@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(PEQUOD_HOST VERSION 1.0.0 LANGUAGES C CXX)
+# The build sets PEQUOD_VERSION (1.0.<build number>); PEQUOD compares it with the latest release to offer updates.
+set(PEQUOD_VERSION "1.0.0" CACHE STRING "Version of this build")
+project(PEQUOD_HOST VERSION ${PEQUOD_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,7 +59,8 @@ target_sources(PequodHost PRIVATE
     Source/PluginManagerPanel.cpp
     Source/ControllerLink.cpp
     Source/ControllerManager.cpp
-    Source/ControllerPanel.cpp)
+    Source/ControllerPanel.cpp
+    Source/Updater.cpp)
 
 target_compile_definitions(PequodHost PRIVATE
     JUCE_PLUGINHOST_VST3=1

@@ -39,6 +39,9 @@ public:
     ~HeaderBar() override;
 
     void setPresetName (const juce::String& name, bool modified);
+    /** Shows the UPDATE button (empty version hides it). */
+    void setUpdate (const juce::String& version, bool downloading, float progress);
+    std::function<void()> onUpdate;
 
     std::function<void()> onPrev, onNext, onSave, onSaveAs, onInit, onAudioSettings, onPluginManager, onToggleLearn;
     std::function<void()> onPresetMenu, onController;
@@ -64,6 +67,7 @@ private:
         void paintButton (juce::Graphics&, bool over, bool down) override;
     };
     ControllerButton controllerButton;
+    juce::TextButton updateButton;
 
     TunerDisplay tunerDisplay;
     LearnableButton muteButton { "MUTE" };
