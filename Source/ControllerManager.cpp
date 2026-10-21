@@ -522,6 +522,7 @@ bool ControllerManager::quickSetup()
         return modeOf (uid, code, 0) == "pequod" && mappingFor (uid, code, 0) == nullptr;
     };
 
+    auto slots = engine.getFlatSlots();
     for (auto& u : getInfo().units)
     {
         if (u.hasButtons())
@@ -529,15 +530,16 @@ bool ControllerManager::quickSetup()
             ++switchBoards;
             for (int c = 0; c < 4; ++c)
             {
-                if (! free (u.uid, c)) { if (switchBoards == 1 && c < 3) ++nextStomp; continue; }
-                any = true;
-                if (switchBoards == 1)
+                const bool lastOfFirst = switchBoards == 1 && c == 3;
+                if (! free (u.uid, c)) { if (! lastOfFirst && switchBoards != 2) ++nextStomp; continue; }
+                if (lastOfFirst)            { assign (u.uid, c, 0, Mapping::Target::presetNext); any = true; }
+                else if (switchBoards == 2) { assign (u.uid, c, 0, Mapping::Target::presetSelect, c + 1); any = true; }
+                else if (nextStomp <= (int) slots.size())          // this preset's effects, in rack order
                 {
-                    if (c < 3) assign (u.uid, c, 0, Mapping::Target::stompSlot, nextStomp++);
-                    else       assign (u.uid, c, 0, Mapping::Target::presetNext);
+                    assign (u.uid, c, 0, Mapping::Target::bypass, slots[(size_t) nextStomp - 1]->uid);
+                    ++nextStomp;
+                    any = true;
                 }
-                else if (switchBoards == 2) assign (u.uid, c, 0, Mapping::Target::presetSelect, c + 1);
-                else                        assign (u.uid, c, 0, Mapping::Target::stompSlot, nextStomp++);
             }
         }
         else if (u.kind == "pedal_switch" && free (u.uid, 0))  { assign (u.uid, 0, 0, Mapping::Target::tuner); any = true; }

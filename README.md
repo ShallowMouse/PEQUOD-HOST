@@ -67,7 +67,7 @@ PEQUOD has native support for the ESP32-S3 modular foot controller (new master f
 the slave boards are unchanged). Plug it in with USB or put it on Wi-Fi and the **CONTROLLER** button's dot turns green.
 
 * Press a switch with your foot and the CONTROLLER window jumps to it; pick what it does in plain words —
-  effect on/off (the same slot in every preset, or one effect in this preset), a plugin knob, next/previous/specific preset,
+  effect on/off, a plugin knob, next/previous/specific preset,
   banks, tuner, mute, split A/B — or let it send its own MIDI to other gear, or change layers.
 * Every mapping (footswitch, MIDI or OSC) is for **every preset** or **this preset only**. A this-preset job on a switch
   overrides its every-preset job while that preset is loaded; every-preset plugin mappings follow the plugin by name.

@@ -851,7 +851,7 @@ private:
         juce::PopupMenu menu;
         if (sw)
         {
-            juce::PopupMenu fx, fxAny, presets, splitMenu;
+            juce::PopupMenu fx, presets, splitMenu;
             for (size_t i = 0; i < slots.size(); ++i)
             {
                 const int slotUid = slots[i]->uid;
@@ -859,9 +859,6 @@ private:
                             [&m, u, c, lay, slotUid, done] { m.assign (u, c, lay, Mapping::Target::bypass, slotUid); done(); });
             }
             if (slots.empty()) fx.addItem ("(this preset has no effects)", false, false, nullptr);
-            for (int n = 1; n <= 12; ++n)
-                fxAny.addItem ("Effect " + juce::String (n) + (n <= (int) slots.size() ? "     now: " + slots[(size_t) n - 1]->description.name : juce::String()),
-                               [&m, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::stompSlot, n); done(); });
             auto names = m.getPresetNames ? m.getPresetNames() : juce::StringArray();
             for (int n = 1; n <= juce::jmax (8, names.size()); ++n)
                 presets.addItem (juce::String (n) + ".  " + (n <= names.size() ? names[n - 1] : juce::String ("(empty)")),
@@ -874,8 +871,7 @@ private:
             }
 
             menu.addSectionHeader ("EFFECTS");
-            menu.addSubMenu ("Effect number...  on/off  (same in every preset)", fxAny);
-            menu.addSubMenu ("A particular effect...  on/off", fx);
+            menu.addSubMenu ("An effect...  on/off", fx);
             menu.addItem ("A plugin knob or switch...  (touch it on the plugin next)", [&m, u, c, lay, done] { m.learnPluginControl (u, c, lay); done(); });
             if (! splits.empty()) menu.addSubMenu ("Split: switch between A and B", splitMenu);
             menu.addSectionHeader ("PRESETS");
@@ -1208,7 +1204,7 @@ ControllerPanel::ControllerPanel (ControllerManager& m, HostEngine& e, ControlSu
     controlsTab.onClick = [this] { showSettings (false); };
     settingsTab.onClick = [this] { showSettings (true); };
 
-    quickSetupButton.setTooltip ("Give every switch that isn't set up yet a useful job: effects 1-3 on/off, next preset, preset 1-4 on a second board, tuner...");
+    quickSetupButton.setTooltip ("Give every switch that isn't set up yet a useful job: the first effects of this preset on/off, next preset, preset 1-4 on a second board, tuner...");
     quickSetupButton.onClick = [this]
     {
         if (! mgr.quickSetup() && mgr.onStatus) mgr.onStatus ("Every control already has a job");

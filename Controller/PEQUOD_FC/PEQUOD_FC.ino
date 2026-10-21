@@ -34,7 +34,7 @@
 #include "mbedtls/base64.h"
 #include "esp_ota_ops.h"
 
-#define FW_VERSION    "2.0.0"
+#define FW_VERSION    "2.0.1"
 #define PROTO_VERSION 2
 
 // ── Hardware (same as the previous master) ──────────────────────────────────
@@ -203,6 +203,20 @@ uint32_t scaleColor(uint32_t c, uint8_t scale) {
   return ((uint32_t) scaleChan((c >> 16) & 0xFF, scale) << 16)
        | ((uint32_t) scaleChan((c >> 8) & 0xFF, scale) << 8)
        |  (uint32_t) scaleChan(c & 0xFF, scale);
+}
+
+// LEDs are linear but eyes aren't: without this a colour's smaller channels look far too
+// strong at full brightness (red goes pink, yellow goes white). Gamma 2.4 keeps colours saturated.
+uint8_t gammaLut[256];
+void buildGamma() {
+  for (int i = 0; i < 256; i++) {
+    float v = powf(i / 255.0f, 2.4f) * 255.0f + 0.5f;
+    gammaLut[i] = (i > 0 && v < 1.0f) ? 1 : (uint8_t) v;
+  }
+}
+
+uint32_t trueColor(uint32_t c) {
+  return ((uint32_t) gammaLut[(c >> 16) & 0xFF] << 16) | ((uint32_t) gammaLut[(c >> 8) & 0xFF] << 8) | gammaLut[c & 0xFF];
 }
 
 Kind kindForType(uint8_t t) {
@@ -700,7 +714,7 @@ void slaveSetAllLeds(uint8_t addr, const uint32_t leds[5]) {
 void slaveSetLayerColor(uint8_t addr, uint32_t color) {
   Wire.beginTransmission(addr);
   Wire.write(0x22);
-  writeRgb(scaleColor(color, brightness));
+  writeRgb(scaleColor(trueColor(color), brightness));
   Wire.endTransmission();
 }
 
@@ -862,6 +876,7 @@ uint32_t controlColor(Board& b, Control& ctl) {
     return ((millis() / 150) % 2) == 0 ? 0xFFFFFF : 0;    // "which one is this?" flash
 
   if (ctl.led == LED_OFF) return 0;
+  col = trueColor(col);
   if (!on) return offGlow == 0 ? 0 : scaleColor(col, (uint8_t) (offGlow * 255 / 100));
   return col;
 }
@@ -1382,6 +1397,7 @@ void drawDisplay() {
 // ── Setup / loop ────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
+  buildGamma();
   Serial1.begin(31250, SERIAL_8N1, MIDI_RX, MIDI_TX);
   esp_ota_mark_app_valid_cancel_rollback();      // we booted fine: keep this firmware
 
