@@ -81,6 +81,11 @@ MainComponent::MainComponent()
     control.getBankIndex   = [this] { return library.getCurrentBankIndex(); };
     control.addChangeListener (this);
     control.setTuner (&tuner);
+    control.onGlobalSettingsChanged = [this]
+    {
+        juce::Component::SafePointer<MainComponent> safe (this);
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->saveSettings(); });
+    };
 
     // Foot controller (PEQUOD FC)
     controller = std::make_unique<ControllerManager> (engine, control, tuner, *settings);
@@ -179,6 +184,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    control.onGlobalSettingsChanged = nullptr;
     controllerWindow.reset();
     saveSettings();
 

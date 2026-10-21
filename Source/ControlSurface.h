@@ -130,6 +130,7 @@ public:
         ("unit:control:layer" -> {midi, layer, toggle}). Saved with the preset. */
     std::map<juce::String, juce::var> presetControllerActions;
     std::function<void()> onPresetMappingsLoaded;
+    std::function<void()> onGlobalSettingsChanged;     // something saved in PEQUOD's settings changed
     void markPresetModified() { engine.markModified(); }
     static juce::String controllerKey (const juce::String& unit, int control, int layer) { return scopeKey (unit, control, layer); }
     void setControllerLedColour (const juce::String& unit, int control, int layer, juce::uint32 colour);

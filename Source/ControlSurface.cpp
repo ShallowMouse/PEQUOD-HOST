@@ -754,6 +754,7 @@ void ControlSurface::setControllerScope (const juce::String& unit, int control, 
     for (auto* m : findControllerMappings (unit, control, layer)) moving.push_back (*m);
 
     ctrlScopes[scopeKey (unit, control, layer)] = perPreset;
+    if (onGlobalSettingsChanged) onGlobalSettingsChanged();      // keep the choice even if PEQUOD isn't closed normally
     if (was == perPreset) { sendChangeMessage(); return; }
 
     // The current functions carry across; nothing is left behind in the other scope.
@@ -1063,7 +1064,22 @@ void ControlSurface::loadRackMappingsXml (const juce::XmlElement* rackRoot)
             {
                 auto m = mappingFromXml (*x);
                 m.perPreset = true;
-                if (m.isController() && ! isControllerPerPreset (m.ctrlUnit, m.ctrlControl, m.ctrlLayer)) continue;
+                if (m.isController())
+                {
+                    const auto key = scopeKey (m.ctrlUnit, m.ctrlControl, m.ctrlLayer);
+                    if (ctrlScopes.count (key) == 0)
+                    {
+                        // Set up before PEQUOD remembered each control's choice: functions saved with a preset
+                        // (and none global) mean it was a THIS PRESET control. Remember that from now on.
+                        const bool hasGlobal = std::any_of (mappings.begin(), mappings.end(), [&] (const Mapping& g)
+                        {
+                            return ! g.perPreset && g.sameControl (m.ctrlUnit, m.ctrlControl, m.ctrlLayer);
+                        });
+                        ctrlScopes[key] = ! hasGlobal;
+                        if (onGlobalSettingsChanged) onGlobalSettingsChanged();
+                    }
+                    if (! ctrlScopes[key]) continue;       // the control is GLOBAL: this preset's old functions don't apply
+                }
                 const bool isSplit = m.target == Mapping::Target::splitMix;
                 if (! m.isRackMapping()) { mappings.push_back (m); continue; }
 
