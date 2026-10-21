@@ -11,7 +11,7 @@ import argparse, json, socket, sys, threading, time
 PORT = 7400
 UNITS = [
     {"slot": 0, "type": 20, "kind": "footswitch", "uid": "1A2B3C4D"},
-    {"slot": 1, "type": 20, "kind": "footswitch", "uid": "22334455"},
+    {"slot": 1, "type": 21, "kind": "footswitch", "uid": "22334455"},
     {"slot": 2, "type": 41, "kind": "pedal_switch", "uid": "5E6F7081"},
     {"slot": 3, "type": 100, "kind": "encoder", "uid": "9A0B1C2D"},
 ]

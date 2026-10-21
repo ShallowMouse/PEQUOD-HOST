@@ -167,7 +167,9 @@ public:
 };
 
 //==============================================================================
-/** The controller drawn as it is: one card per board, in the order they are chained. */
+/** The controller as it sits on the floor: one row of boards, all the same height, laid out
+    like the hardware (2x2 footswitch, vertical 4-switch strip, pedal, knob). Drag a board by
+    its top bar to move it to where it really is. */
 class ControllerPanel::BoardView : public juce::Component
 {
 public:
@@ -180,30 +182,107 @@ public:
     struct Hit { juce::String uid; int code; juce::Rectangle<float> r; };
     struct Card { const ControllerUnit* unit; juce::Rectangle<float> r; };
 
+    /** Boards in the order they are on the floor (the controller's slot setting). */
+    std::vector<const ControllerUnit*> orderedUnits() const
+    {
+        std::vector<const ControllerUnit*> list;
+        for (auto& u : mgr.getInfo().units) list.push_back (&u);
+        auto slotOf = [this] (const ControllerUnit* u)
+        {
+            auto v = mgr.get ("units." + u->uid + ".slot");
+            return v.isVoid() ? u->slot : (int) v;
+        };
+        std::stable_sort (list.begin(), list.end(), [&] (auto* a, auto* b) { return slotOf (a) < slotOf (b); });
+        return list;
+    }
+
     void paint (juce::Graphics& g) override
     {
         g.setColour (Pequod::Colours::well);
         g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
 
         hits.clear();
-        auto& units = mgr.getInfo().units;
-        if (units.empty())
+        if (mgr.getInfo().units.empty())
         {
             g.setColour (Pequod::Colours::textDim);
             g.setFont (Pequod::body (15.0f));
-            g.drawFittedText ("No boards found on the controller.\nCheck the cables between the boards, then press RESCAN under SETTINGS.",
+            g.drawFittedText ("No boards found on the controller.\nCheck the cables between the boards, then press FIND BOARDS AGAIN under SETTINGS.",
                               getLocalBounds().reduced (30), juce::Justification::centred, 4);
             return;
         }
 
-        for (auto& card : layoutCards())
-            drawCard (g, card);
+        auto cards = layoutCards();
+        for (size_t i = 0; i < cards.size(); ++i)
+        {
+            if ((int) i == dragIndex) continue;
+            drawCard (g, cards[i], false);
+        }
+        if (dragIndex >= 0 && dragIndex < (int) cards.size())
+        {
+            // where it will land
+            const int to = dropIndex (cards);
+            const float x = to < (int) cards.size() ? cards[(size_t) to].r.getX() - 8.0f : cards.back().r.getRight() + 8.0f;
+            g.setColour (Pequod::Colours::mustard);
+            g.fillRect (juce::Rectangle<float> (x - 1.5f, cards[0].r.getY(), 3.0f, cards[0].r.getHeight()));
+            auto c = cards[(size_t) dragIndex];
+            c.r = c.r.withX (c.r.getX() + dragOffset);
+            drawCard (g, c, true);
+        }
+
+        // legend
+        auto legend = getLocalBounds().toFloat().reduced (14.0f, 8.0f).removeFromBottom (18.0f);
+        auto ring = legend.removeFromLeft (18.0f).withSizeKeepingCentre (14.0f, 14.0f);
+        drawGlobalRing (g, ring.expanded (2.0f));
+        g.setColour (Pequod::Colours::textDim);
+        g.setFont (Pequod::body (12.0f));
+        g.drawText ("  GLOBAL: the same in every preset.     Press a switch on the controller to pick it.     Drag a board's top bar to move it.",
+                    legend, juce::Justification::centredLeft);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        pressCard = -1;
+        dragIndex = -1;
+        dragOffset = 0.0f;
+        auto cards = layoutCards();
+        for (size_t i = 0; i < cards.size(); ++i)
+            if (cards[i].r.contains (e.position)) pressCard = (int) i;
+        pressedOnBar = pressCard >= 0 && e.position.y < cards[(size_t) pressCard].r.getY() + 30.0f;
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (pressCard < 0) return;
+        if (dragIndex < 0 && (pressedOnBar || e.getDistanceFromDragStart() > 12) && std::abs (e.getDistanceFromDragStartX()) > 6)
+            dragIndex = pressCard;
+        if (dragIndex >= 0)
+        {
+            dragOffset = (float) e.getDistanceFromDragStartX();
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+            repaint();
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+        if (dragIndex >= 0)
+        {
+            auto cards = layoutCards();
+            const int to = dropIndex (cards);
+            auto order = orderedUnits();
+            auto* moving = order[(size_t) dragIndex];
+            order.erase (order.begin() + dragIndex);
+            order.insert (order.begin() + (to > dragIndex ? to - 1 : to), moving);
+            for (size_t i = 0; i < order.size(); ++i)
+                if ((int) mgr.get ("units." + order[i]->uid + ".slot") != (int) i || mgr.get ("units." + order[i]->uid + ".slot").isVoid())
+                    mgr.set ("units." + order[i]->uid + ".slot", (int) i);
+            dragIndex = -1;
+            repaint();
+            return;
+        }
         for (auto& h : hits)
-            if (h.r.expanded (6.0f).contains (e.position))
+            if (h.r.expanded (4.0f).contains (e.position))
             {
                 if (onSelect) onSelect (h.uid, h.code);
                 return;
@@ -213,51 +292,155 @@ public:
 private:
     ControllerManager& mgr;
     std::vector<Hit> hits;
+    int pressCard = -1, dragIndex = -1;
+    bool pressedOnBar = false;
+    float dragOffset = 0.0f;
 
-    static float widthFor (const ControllerUnit& u)
+    enum class Shape { grid, column, pedal, pedalSwitch, encoder, other };
+
+    static Shape shapeOf (const ControllerUnit& u)
     {
-        if (u.hasButtons())         return 330.0f;
-        if (u.kind == "pedal")      return 140.0f;
-        return 200.0f;
+        if (u.kind == "footswitch") return u.type == 21 ? Shape::column : Shape::grid;
+        if (u.kind == "button")       return Shape::grid;
+        if (u.kind == "pedal")        return Shape::pedal;
+        if (u.kind == "pedal_switch") return Shape::pedalSwitch;
+        if (u.kind == "encoder")      return Shape::encoder;
+        return Shape::other;
+    }
+
+    static juce::String kindTitle (const ControllerUnit& u)
+    {
+        switch (shapeOf (u))
+        {
+            case Shape::grid:        return u.kind == "button" ? "BUTTONS" : "FOOTSWITCH";
+            case Shape::column:      return "VERTICAL";
+            case Shape::pedal:       return "PEDAL";
+            case Shape::pedalSwitch: return "PEDAL";
+            case Shape::encoder:     return "KNOB";
+            case Shape::other:       return "BOARD";
+        }
+        return {};
+    }
+
+    /** Width of a board for a given height (all boards are the same height). */
+    static float widthFor (const ControllerUnit& u, float h)
+    {
+        switch (shapeOf (u))
+        {
+            case Shape::grid:        return h * 0.86f;
+            case Shape::column:      return h * 0.40f;
+            case Shape::pedal:       return h * 0.46f;
+            case Shape::pedalSwitch: return h * 0.46f;
+            case Shape::encoder:     return h * 0.50f;
+            case Shape::other:       return h * 0.40f;
+        }
+        return h * 0.5f;
     }
 
     std::vector<Card> layoutCards() const
     {
         std::vector<Card> cards;
-        const float pad = 14.0f, h = 168.0f;
-        float x = pad, y = pad;
-        for (auto& u : mgr.getInfo().units)
+        auto units = orderedUnits();
+        const float pad = 14.0f, gap = 12.0f;
+        const float availW = (float) getWidth() - pad * 2.0f;
+        float h = juce::jmin ((float) getHeight() - pad * 2.0f - 26.0f, 330.0f);
+        float total = 0.0f;
+        for (auto* u : units) total += widthFor (*u, h);
+        total += gap * (float) juce::jmax (0, (int) units.size() - 1);
+        if (total > availW) h *= (availW - gap * (float) juce::jmax (0, (int) units.size() - 1)) / (total - gap * (float) juce::jmax (0, (int) units.size() - 1));
+        float x = pad;
+        const float y = pad;
+        for (auto* u : units)
         {
-            const float w = widthFor (u);
-            if (x + w > (float) getWidth() - pad && x > pad) { x = pad; y += h + pad; }
-            cards.push_back ({ &u, { x, y, w, h } });
-            x += w + pad;
+            const float w = widthFor (*u, h);
+            cards.push_back ({ u, { x, y, w, h } });
+            x += w + gap;
         }
         return cards;
     }
 
-    void drawCard (juce::Graphics& g, const Card& card)
+    int dropIndex (const std::vector<Card>& cards) const
+    {
+        if (dragIndex < 0) return 0;
+        const float centre = cards[(size_t) dragIndex].r.getCentreX() + dragOffset;
+        int to = 0;
+        for (size_t i = 0; i < cards.size(); ++i)
+            if (centre > cards[i].r.getCentreX()) to = (int) i + 1;
+        if (to > dragIndex) to = juce::jmax (to, dragIndex + 1);
+        return juce::jlimit (0, (int) cards.size(), to);
+    }
+
+    static void drawGlobalRing (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        juce::Path ring;
+        ring.addEllipse (r);
+        juce::Path dashed;
+        const float dashes[] = { 3.0f, 3.0f };
+        juce::PathStrokeType (1.4f).createDashedStroke (dashed, ring, dashes, 2);
+        g.setColour (Pequod::Colours::text.withAlpha (0.85f));
+        g.fillPath (dashed);
+    }
+
+    void drawCard (juce::Graphics& g, const Card& card, bool lifted)
     {
         auto& u = *card.unit;
         auto r = card.r;
+        if (lifted)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.4f));
+            g.fillRoundedRectangle (r.translated (4.0f, 6.0f), 6.0f);
+        }
         g.setGradientFill (juce::ColourGradient (Pequod::Colours::panelHi, r.getX(), r.getY(), Pequod::Colours::panel, r.getX(), r.getBottom(), false));
         g.fillRoundedRectangle (r, 6.0f);
-        g.setColour (u.uid == selUid ? Pequod::Colours::mustardLo : Pequod::Colours::line);
-        g.drawRoundedRectangle (r, 6.0f, 1.0f);
+        g.setColour (lifted ? Pequod::Colours::mustard : u.uid == selUid ? Pequod::Colours::mustardLo : Pequod::Colours::line);
+        g.drawRoundedRectangle (r, 6.0f, lifted ? 2.0f : 1.0f);
 
-        auto head = r.reduced (12.0f, 8.0f).removeFromTop (18.0f);
-        g.setColour (Pequod::Colours::mustard);
-        g.setFont (Pequod::heading (13.0f));
-        g.drawText (mgr.unitName (u.uid).toUpperCase(), head, juce::Justification::centredLeft);
+        // top bar: what it is, where it is, grip
+        auto bar = r.reduced (8.0f, 6.0f).removeFromTop (18.0f);
+        auto grip = bar.removeFromRight (12.0f);
         g.setColour (Pequod::Colours::textDim);
-        g.setFont (Pequod::body (11.0f));
-        g.drawText ("#" + juce::String (u.slot + 1), head, juce::Justification::centredRight);
+        for (int row = 0; row < 3; ++row)
+            for (int col = 0; col < 2; ++col)
+                g.fillEllipse (grip.getX() + 2.0f + (float) col * 5.0f, grip.getCentreY() - 6.0f + (float) row * 5.0f, 2.2f, 2.2f);
+        g.setColour (Pequod::Colours::mustard);
+        g.setFont (Pequod::heading (juce::jlimit (9.0f, 13.0f, r.getWidth() / 9.0f)));
+        g.drawFittedText (kindTitle (u), bar.toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
 
-        auto area = r.reduced (12.0f).withTrimmedTop (26.0f);
+        auto area = r.reduced (8.0f).withTrimmedTop (24.0f);
         auto codes = ControllerManager::controlCodes (u);
-        const float slotW = area.getWidth() / (float) juce::jmax (1, codes.size());
-        for (int i = 0; i < codes.size(); ++i)
-            drawControl (g, u, codes[i], area.withX (area.getX() + slotW * (float) i).withWidth (slotW));
+        switch (shapeOf (u))
+        {
+            case Shape::grid:
+            {
+                const float cw = area.getWidth() / 2.0f, ch = area.getHeight() / 2.0f;
+                for (int i = 0; i < 4; ++i)
+                    drawControl (g, u, i, { area.getX() + cw * (float) (i % 2), area.getY() + ch * (float) (i / 2), cw, ch });
+                break;
+            }
+            case Shape::column:
+            {
+                const float ch = area.getHeight() / 4.0f;
+                for (int i = 0; i < 4; ++i)
+                    drawControl (g, u, i, area.withY (area.getY() + ch * (float) i).withHeight (ch));
+                break;
+            }
+            case Shape::pedal:
+                drawControl (g, u, Mapping::ctrlPedal, area);
+                break;
+            case Shape::pedalSwitch:
+                drawControl (g, u, Mapping::ctrlPedal, area.withHeight (area.getHeight() * 0.66f));
+                drawControl (g, u, 0, area.withTrimmedTop (area.getHeight() * 0.66f));
+                break;
+            case Shape::encoder:
+                drawControl (g, u, Mapping::ctrlEncoderTurn, area.withHeight (area.getHeight() * 0.55f));
+                drawControl (g, u, Mapping::ctrlEncoderPress, area.withTrimmedTop (area.getHeight() * 0.55f));
+                break;
+            case Shape::other:
+                for (int i = 0; i < codes.size(); ++i)
+                    drawControl (g, u, codes[i], area.withY (area.getY() + area.getHeight() / (float) codes.size() * (float) i)
+                                                       .withHeight (area.getHeight() / (float) codes.size()));
+                break;
+        }
     }
 
     void drawControl (juce::Graphics& g, const ControllerUnit& u, int code, juce::Rectangle<float> a)
@@ -265,43 +448,45 @@ private:
         const bool selected = u.uid == selUid && code == selCode;
         const bool down = mgr.isPressed (u.uid, code);
         const int lay = mgr.getLayer();
-        auto labelArea = a.removeFromBottom (32.0f);
+        auto* m = mgr.mappingFor (u.uid, code, lay);
+        const bool global = m != nullptr && ! m->perPreset && mgr.modeOf (u.uid, code, lay) == "pequod";
+        const float labelH = juce::jlimit (13.0f, 26.0f, a.getHeight() * 0.24f);
+        auto labelArea = a.removeFromBottom (labelH);
         juce::Rectangle<float> hit;
 
         if (code == Mapping::ctrlPedal)
         {
-            auto bar = a.withSizeKeepingCentre (34.0f, a.getHeight() - 6.0f);
+            auto bar = a.reduced (a.getWidth() * 0.22f, 2.0f);
             g.setColour (Pequod::Colours::rail);
             g.fillRoundedRectangle (bar, 6.0f);
             const float v = mgr.pedalValue (u.uid);
             g.setColour (Pequod::Colours::mustard.withAlpha (0.85f));
             g.fillRoundedRectangle (bar.reduced (4.0f).withTrimmedTop ((1.0f - v) * (bar.getHeight() - 8.0f)), 4.0f);
-            for (int k = 1; k < 8; ++k)
+            for (int k = 1; k < 10; ++k)
             {
                 g.setColour (juce::Colours::black.withAlpha (0.35f));
-                g.fillRect (bar.getX() + 6.0f, bar.getY() + bar.getHeight() * (float) k / 8.0f, bar.getWidth() - 12.0f, 1.0f);
+                g.fillRect (bar.getX() + 5.0f, bar.getY() + bar.getHeight() * (float) k / 10.0f, bar.getWidth() - 10.0f, 1.0f);
             }
             hit = bar;
+            if (global) drawGlobalRing (g, bar.expanded (5.0f));
         }
         else if (code == Mapping::ctrlEncoderTurn)
         {
-            auto k = a.withSizeKeepingCentre (64.0f, 64.0f);
+            const float d = juce::jmin (a.getWidth(), a.getHeight()) * 0.78f;
+            auto k = a.withSizeKeepingCentre (d, d);
             g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a4a4a), k.getX(), k.getY(), juce::Colour (0xff141414), k.getRight(), k.getBottom(), false));
             g.fillEllipse (k);
             g.setColour (Pequod::Colours::line);
             g.drawEllipse (k, 1.0f);
             g.setColour (Pequod::Colours::mustard);
-            g.drawLine (k.getCentreX(), k.getY() + 8.0f, k.getCentreX(), k.getCentreY() - 6.0f, 3.0f);
-            juce::Path arc;
-            arc.addCentredArc (k.getCentreX(), k.getCentreY(), 38.0f, 38.0f, 0.0f, -2.2f, 2.2f, true);
-            g.setColour (Pequod::Colours::textDim.withAlpha (0.5f));
-            g.strokePath (arc, juce::PathStrokeType (1.5f));
+            g.drawLine (k.getCentreX(), k.getY() + d * 0.12f, k.getCentreX(), k.getCentreY() - d * 0.1f, 3.0f);
             hit = k;
+            if (global) drawGlobalRing (g, k.expanded (5.0f));
         }
         else
         {
-            // footswitch: metal cap with an LED ring
-            auto c = a.withSizeKeepingCentre (58.0f, 58.0f);
+            const float d = juce::jmin (a.getWidth(), a.getHeight()) * 0.70f;
+            auto c = a.withSizeKeepingCentre (d, d);
             const bool hasLed = ControllerManager::hasLed (u, code);
             const auto col = mgr.colourOf (u.uid, code);
             const bool lit = mgr.isLit (u.uid, code);
@@ -310,12 +495,12 @@ private:
                 if (lit)
                 {
                     g.setColour (col.withAlpha (0.25f));
-                    g.fillEllipse (c.expanded (7.0f));
+                    g.fillEllipse (c.expanded (d * 0.1f));
                 }
                 g.setColour (lit ? col : col.withAlpha (0.22f));
-                g.drawEllipse (c.reduced (2.0f), 4.0f);
+                g.drawEllipse (c.reduced (2.0f), juce::jmax (2.0f, d * 0.07f));
             }
-            auto cap = c.reduced (9.0f);
+            auto cap = c.reduced (d * 0.16f);
             if (down) cap = cap.reduced (2.0f);
             g.setGradientFill (juce::ColourGradient (juce::Colour (down ? 0xff9a9a9a : 0xff707070), cap.getX(), cap.getY(),
                                                      juce::Colour (0xff1c1c1c), cap.getRight(), cap.getBottom(), false));
@@ -323,21 +508,19 @@ private:
             g.setColour (juce::Colours::black.withAlpha (0.6f));
             g.drawEllipse (cap, 1.0f);
             hit = c;
+            if (global) drawGlobalRing (g, c.expanded (d * 0.11f));
         }
 
         if (selected)
         {
             g.setColour (Pequod::Colours::mustard);
-            g.drawRoundedRectangle (hit.expanded (6.0f), 8.0f, 2.0f);
+            g.drawRoundedRectangle (hit.expanded (juce::jmax (4.0f, hit.getWidth() * 0.13f)), 8.0f, 2.0f);
         }
 
         auto label = mgr.shortLabel (u.uid, code, lay);
         g.setColour (label == "-" ? Pequod::Colours::textDim : Pequod::Colours::text);
-        g.setFont (Pequod::heading (12.0f));
-        g.drawFittedText (label, labelArea.removeFromTop (16.0f).toNearestInt(), juce::Justification::centred, 1);
-        g.setColour (Pequod::Colours::textDim);
-        g.setFont (Pequod::body (10.5f));
-        g.drawText (ControllerManager::controlName (u, code), labelArea, juce::Justification::centredTop);
+        g.setFont (Pequod::heading (juce::jlimit (8.5f, 12.0f, labelH * 0.55f)));
+        g.drawFittedText (label, labelArea.toNearestInt(), juce::Justification::centredTop, 2, 0.75f);
 
         hits.push_back ({ u.uid, code, hit.getUnion (labelArea) });
     }
@@ -379,7 +562,7 @@ class ControllerPanel::Inspector : public juce::Component
 public:
     Inspector (ControllerManager& m, HostEngine& e, ControlSurface& c) : mgr (m), engine (e), control (c)
     {
-        for (auto* comp : std::initializer_list<juce::Component*> { &title, &sub, &identifyButton, &unitName, &modeBox, &functionButton,
+        for (auto* comp : std::initializer_list<juce::Component*> { &title, &sub, &identifyButton, &presetCaption, &modeBox, &functionButton,
                                                                    &latchButton, &momentaryButton, &midiTypeBox, &numberSlider, &channelBox,
                                                                    &layerActionBox, &layerNumBox, &swatches, &ledModeBox, &meter, &everyPresetButton, &thisPresetButton, &useGlobalButton,
                                                                    &calibrateButton, &invertToggle, &hint })
@@ -397,10 +580,8 @@ public:
         identifyButton.onClick = [this] { mgr.identify (uid, code); };
         setWidth (identifyButton, 80);
 
-        styleEditor (unitName);
-        unitName.setTooltip ("Name of this board");
-        unitName.onReturnKey = [this] { commitUnitName(); unitName.unfocusAllComponents(); };
-        unitName.onFocusLost = [this] { commitUnitName(); };
+        presetCaption.setFont (Pequod::body (12.0f));
+        presetCaption.setColour (juce::Label::textColourId, Pequod::Colours::textDim);
 
         for (auto* b : { &modeBox, &midiTypeBox, &channelBox, &layerActionBox, &layerNumBox, &ledModeBox }) styleCombo (*b);
         modeBox.onChange = [this] { modeChosen(); };
@@ -451,7 +632,7 @@ public:
             b->setColour (juce::TextButton::textColourOnId, Pequod::Colours::rail);
             setWidth (*b, 118);
         }
-        everyPresetButton.setTooltip ("This switch does the same in every preset");
+        everyPresetButton.setTooltip ("GLOBAL: this switch does the same in every preset, whichever preset is loaded");
         thisPresetButton.setTooltip ("Give this switch a different job in this preset only. The other presets keep theirs.");
         everyPresetButton.onClick = [this] { setScope (false); };
         thisPresetButton.onClick  = [this] { setScope (true); };
@@ -510,12 +691,10 @@ public:
         const bool sw = ControllerManager::isSwitch (code), pedal = code == Mapping::ctrlPedal, turn = code == Mapping::ctrlEncoderTurn;
 
         title.setText (ControllerManager::controlName (*u, code).toUpperCase(), juce::dontSendNotification);
-        sub.setText (mgr.getNumLayers() > 1 ? "Layer " + juce::String (lay + 1) + " - each layer can do something different"
-                                            : juce::String ("Add layers under SETTINGS to give every switch more jobs"), juce::dontSendNotification);
+        sub.setText (boardTitle (*u) + (mgr.getNumLayers() > 1 ? "   -   layer " + juce::String (lay + 1) : juce::String()),
+                     juce::dontSendNotification);
         form.wide ({ &title, &identifyButton }, 30);
         form.wide ({ &sub }, 16);
-        if (! unitName.hasKeyboardFocus (true)) unitName.setText (mgr.unitName (uid), false);
-        form.row ("Board", { &unitName });
 
         // What it does
         form.heading ("WHAT IT DOES");
@@ -566,9 +745,12 @@ public:
                 everyPresetButton.setToggleState (! m->perPreset, juce::dontSendNotification);
                 thisPresetButton.setToggleState (m->perPreset, juce::dontSendNotification);
                 form.row ("Applies to", { &everyPresetButton, &thisPresetButton });
+                presetCaption.setText (m->perPreset ? "Only in preset " + presetName() : juce::String ("The same in every preset"),
+                                       juce::dontSendNotification);
+                form.row ({}, { &presetCaption }, 16);
                 if (m->perPreset && global != nullptr)
                 {
-                    useGlobalButton.setButtonText ("USE THE EVERY-PRESET JOB HERE");
+                    useGlobalButton.setButtonText ("USE THE GLOBAL FUNCTIONS HERE");
                     useGlobalButton.setTooltip ("In every other preset this switch does: " + describe (*global));
                     form.row ({}, { &useGlobalButton });
                 }
@@ -706,13 +888,13 @@ private:
     juce::Label title, sub, hint;
     juce::TextButton identifyButton { "FIND IT" }, functionButton, calibrateButton { "CALIBRATE" }, addFunctionButton { "+ ADD ANOTHER FUNCTION" };
     juce::OwnedArray<juce::TextButton> funcButtons, removeButtons;
-    juce::TextEditor unitName;
+    juce::Label presetCaption;
     juce::ComboBox modeBox, midiTypeBox, channelBox, layerActionBox, layerNumBox, ledModeBox;
     juce::ToggleButton invertToggle;
     juce::TextButton latchButton { "LATCHING" }, momentaryButton { "MOMENTARY" };
     juce::Slider numberSlider;
     SwatchRow swatches;
-    juce::TextButton everyPresetButton { "EVERY PRESET" }, thisPresetButton { "THIS PRESET" }, useGlobalButton;
+    juce::TextButton everyPresetButton { "GLOBAL" }, thisPresetButton { "THIS PRESET" }, useGlobalButton;
     PedalMeter meter;
 
     bool calibrating = false;
@@ -808,10 +990,21 @@ private:
         mgr.set (ControllerManager::actionPath (uid, code, mgr.getLayer()) + "." + field, v);
     }
 
-    void commitUnitName()
+    juce::String presetName() const
     {
-        auto n = unitName.getText().trim();
-        if (n.isNotEmpty() && n != mgr.unitName (uid)) mgr.set ("units." + uid + ".name", n.substring (0, 20));
+        auto bank = control.getBankName ? control.getBankName() : juce::String();
+        auto preset = control.getPresetName ? control.getPresetName() : juce::String();
+        return (bank.isNotEmpty() ? bank + " / " : juce::String()) + preset;
+    }
+
+    juce::String boardTitle (const ControllerUnit& u) const
+    {
+        auto slot = mgr.get ("units." + u.uid + ".slot");
+        const int pos = (slot.isVoid() ? u.slot : (int) slot) + 1;
+        juce::String k = u.kind == "footswitch" ? (u.type == 21 ? "Vertical footswitch" : "Footswitch")
+                       : u.kind == "button" ? "Buttons" : u.kind == "encoder" ? "Knob"
+                       : u.kind.startsWith ("pedal") ? "Pedal" : "Board";
+        return k + " #" + juce::String (pos);
     }
 
     void modeChosen()
@@ -1388,10 +1581,16 @@ void ControllerPanel::paint (juce::Graphics& g)
 
     if (! showingSettings)
     {
-        auto tip = quickSetupButton.getBounds().withLeft (layerButtons[0]->isVisible() ? layerButtons[mgr.getNumLayers() - 1]->getRight() + 16 : 18);
-        g.setFont (Pequod::body (13.0f));
-        g.drawText ("Press any switch on the controller to pick it here", tip.withTrimmedRight (quickSetupButton.getWidth() + 16),
-                    juce::Justification::centredRight);
+        auto bar = quickSetupButton.getBounds().withLeft (layerButtons[0]->isVisible() ? layerButtons[mgr.getNumLayers() - 1]->getRight() + 16 : 18)
+                                               .withTrimmedRight (quickSetupButton.getWidth() + 16);
+        auto bank = control.getBankName ? control.getBankName() : juce::String();
+        auto preset = control.getPresetName ? control.getPresetName() : juce::String();
+        g.setFont (Pequod::heading (12.0f, false));
+        g.setColour (Pequod::Colours::textDim);
+        g.drawText ("EDITING PRESET", bar.removeFromLeft (120), juce::Justification::centredLeft);
+        g.setFont (Pequod::heading (15.0f));
+        g.setColour (Pequod::Colours::mustard);
+        g.drawText ((bank.isNotEmpty() ? bank + "  /  " : juce::String()) + preset, bar, juce::Justification::centredLeft, true);
     }
 }
 
@@ -1459,11 +1658,8 @@ void ControllerPanel::timerCallback()
         updateVisibility();
     }
     if (! isShowing()) return;
-    if (! mgr.isConnected())
-    {
-        if (++idleTicks % 15 == 0) repaint();     // keep the list of checked ports current
-        return;
-    }
+    if (++idleTicks % 15 == 0) repaint();         // checked ports / which preset is being edited
+    if (! mgr.isConnected()) return;
     inspector->tick();
     board->repaint();
 }
