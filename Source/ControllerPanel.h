@@ -34,7 +34,7 @@ private:
     std::unique_ptr<BoardView> board;
     std::unique_ptr<Inspector> inspector;
     std::unique_ptr<SettingsPage> settings;
-    juce::Viewport settingsViewport;
+    juce::Viewport settingsViewport, boardViewport;
 
     // shown when nothing is connected
     juce::TextEditor ipEditor;

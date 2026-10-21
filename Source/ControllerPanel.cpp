@@ -35,7 +35,7 @@ namespace
     /** Lays out (label, component) rows from the top. */
     struct Form
     {
-        struct Row { juce::String label; juce::Array<juce::Component*> comps; int h = 28; bool heading = false; int labelW = -1; };
+        struct Row { juce::String label; juce::Array<juce::Component*> comps; int h = 28; bool heading = false; int labelW = -1; bool newColumn = false; };
         std::vector<Row> rows;
         std::vector<std::pair<juce::String, juce::Rectangle<int>>> labels, headings;
         int labelWidth = 120;
@@ -50,13 +50,27 @@ namespace
         }
         void wide (std::initializer_list<juce::Component*> c, int h = 28) { Row r; r.labelW = 0; r.h = h; for (auto* x : c) r.comps.add (x); rows.push_back (r); }
         void gap (int h) { Row r; r.h = h; rows.push_back (r); }
+        /** What follows goes in the next column (when laid out side by side). */
+        void column() { if (rows.empty() || rows.back().newColumn) return; Row r; r.newColumn = true; r.h = 0; rows.push_back (r); }
 
-        int layout (juce::Rectangle<int> area)
+        int layout (juce::Rectangle<int> full)
         {
             labels.clear(); headings.clear();
-            int y = area.getY();
+            int columns = 1;
+            for (auto& r : rows) if (r.newColumn) ++columns;
+            const int colGap = 28;
+            const int colW = (full.getWidth() - colGap * (columns - 1)) / columns;
+            auto area = full.withWidth (colW);
+            int y = area.getY(), tallest = 0;
             for (auto& r : rows)
             {
+                if (r.newColumn)
+                {
+                    tallest = juce::jmax (tallest, y - full.getY());
+                    area = area.translated (colW + colGap, 0);
+                    y = full.getY();
+                    continue;
+                }
                 juce::Rectangle<int> line (area.getX(), y, area.getWidth(), r.h);
                 y += r.h + 6;
                 if (r.heading) { headings.push_back ({ r.label, line.withTrimmedTop (10) }); continue; }
@@ -82,7 +96,7 @@ namespace
                 }
                 r.comps[0]->setBounds (line);
             }
-            return y - area.getY();
+            return juce::jmax (tallest, y - full.getY());
         }
 
         void paint (juce::Graphics& g) const
@@ -230,7 +244,7 @@ public:
         }
 
         // legend
-        auto legend = getLocalBounds().toFloat().reduced (14.0f, 8.0f).removeFromBottom (18.0f);
+        auto legend = juce::Rectangle<float> (pad, pad + cardH + 6.0f, juce::jmax ((float) getWidth() - pad * 2.0f, 700.0f), 18.0f);
         auto ring = legend.removeFromLeft (18.0f).withSizeKeepingCentre (14.0f, 14.0f);
         drawGlobalRing (g, ring.expanded (2.0f));
         g.setColour (Pequod::Colours::textDim);
@@ -322,38 +336,43 @@ private:
         return {};
     }
 
-    /** Width of a board for a given height (all boards are the same height). */
-    static float widthFor (const ControllerUnit& u, float h)
+public:
+    // Fixed sizes: a switch is the same size on every board, boards are all the same height.
+    static constexpr float switchSize = 44.0f, cellW = 82.0f, cellH = 76.0f, barH = 26.0f, inner = 8.0f;
+    static constexpr float cardH = barH + 4.0f * cellH + inner * 2.0f;
+    static constexpr float pad = 14.0f, gap = 12.0f, legendH = 26.0f;
+
+    int getRequiredWidth() const
+    {
+        float x = pad;
+        for (auto* u : orderedUnits()) x += widthFor (*u) + gap;
+        return (int) (x - gap + pad);
+    }
+    static int getRequiredHeight() { return (int) (cardH + pad * 2.0f + legendH); }
+
+private:
+    static float widthFor (const ControllerUnit& u)
     {
         switch (shapeOf (u))
         {
-            case Shape::grid:        return h * 0.86f;
-            case Shape::column:      return h * 0.40f;
-            case Shape::pedal:       return h * 0.46f;
-            case Shape::pedalSwitch: return h * 0.46f;
-            case Shape::encoder:     return h * 0.50f;
-            case Shape::other:       return h * 0.40f;
+            case Shape::grid:        return 2.0f * cellW + inner * 2.0f;
+            case Shape::column:      return cellW + inner * 2.0f;
+            case Shape::pedal:
+            case Shape::pedalSwitch:
+            case Shape::encoder:     return cellW + 30.0f + inner * 2.0f;
+            case Shape::other:       return cellW + inner * 2.0f;
         }
-        return h * 0.5f;
+        return cellW;
     }
 
     std::vector<Card> layoutCards() const
     {
         std::vector<Card> cards;
-        auto units = orderedUnits();
-        const float pad = 14.0f, gap = 12.0f;
-        const float availW = (float) getWidth() - pad * 2.0f;
-        float h = juce::jmin ((float) getHeight() - pad * 2.0f - 26.0f, 330.0f);
-        float total = 0.0f;
-        for (auto* u : units) total += widthFor (*u, h);
-        total += gap * (float) juce::jmax (0, (int) units.size() - 1);
-        if (total > availW) h *= (availW - gap * (float) juce::jmax (0, (int) units.size() - 1)) / (total - gap * (float) juce::jmax (0, (int) units.size() - 1));
         float x = pad;
-        const float y = pad;
-        for (auto* u : units)
+        for (auto* u : orderedUnits())
         {
-            const float w = widthFor (*u, h);
-            cards.push_back ({ u, { x, y, w, h } });
+            const float w = widthFor (*u);
+            cards.push_back ({ u, { x, pad, w, cardH } });
             x += w + gap;
         }
         return cards;
@@ -403,42 +422,39 @@ private:
             for (int col = 0; col < 2; ++col)
                 g.fillEllipse (grip.getX() + 2.0f + (float) col * 5.0f, grip.getCentreY() - 6.0f + (float) row * 5.0f, 2.2f, 2.2f);
         g.setColour (Pequod::Colours::mustard);
-        g.setFont (Pequod::heading (juce::jlimit (9.0f, 13.0f, r.getWidth() / 9.0f)));
+        g.setFont (Pequod::heading (11.0f));
         g.drawFittedText (kindTitle (u), bar.toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
 
-        auto area = r.reduced (8.0f).withTrimmedTop (24.0f);
+        auto area = r.reduced (inner).withTrimmedTop (barH - inner + 4.0f);
         auto codes = ControllerManager::controlCodes (u);
+        auto cell = [&] (float col, float row, float cols = 1.0f, float rows = 1.0f)
+        {
+            return juce::Rectangle<float> (area.getX() + col * cellW, area.getY() + row * cellH, cellW * cols, cellH * rows);
+        };
         switch (shapeOf (u))
         {
-            case Shape::grid:
-            {
-                const float cw = area.getWidth() / 2.0f, ch = area.getHeight() / 2.0f;
+            case Shape::grid:          // 2 x 2, in the middle of the board
                 for (int i = 0; i < 4; ++i)
-                    drawControl (g, u, i, { area.getX() + cw * (float) (i % 2), area.getY() + ch * (float) (i / 2), cw, ch });
+                    drawControl (g, u, i, cell ((float) (i % 2), 1.0f + (float) (i / 2)));
                 break;
-            }
-            case Shape::column:
-            {
-                const float ch = area.getHeight() / 4.0f;
+            case Shape::column:        // 4 stacked, switch 1 at the top
                 for (int i = 0; i < 4; ++i)
-                    drawControl (g, u, i, area.withY (area.getY() + ch * (float) i).withHeight (ch));
+                    drawControl (g, u, i, cell (0.0f, (float) i));
                 break;
-            }
             case Shape::pedal:
                 drawControl (g, u, Mapping::ctrlPedal, area);
                 break;
             case Shape::pedalSwitch:
-                drawControl (g, u, Mapping::ctrlPedal, area.withHeight (area.getHeight() * 0.66f));
-                drawControl (g, u, 0, area.withTrimmedTop (area.getHeight() * 0.66f));
+                drawControl (g, u, Mapping::ctrlPedal, area.withHeight (cellH * 3.0f));
+                drawControl (g, u, 0, area.withTrimmedTop (cellH * 3.0f).withHeight (cellH));
                 break;
             case Shape::encoder:
-                drawControl (g, u, Mapping::ctrlEncoderTurn, area.withHeight (area.getHeight() * 0.55f));
-                drawControl (g, u, Mapping::ctrlEncoderPress, area.withTrimmedTop (area.getHeight() * 0.55f));
+                drawControl (g, u, Mapping::ctrlEncoderTurn, area.withTrimmedTop (cellH * 0.5f).withHeight (cellH * 1.6f));
+                drawControl (g, u, Mapping::ctrlEncoderPress, area.withTrimmedTop (cellH * 2.3f).withHeight (cellH));
                 break;
             case Shape::other:
-                for (int i = 0; i < codes.size(); ++i)
-                    drawControl (g, u, codes[i], area.withY (area.getY() + area.getHeight() / (float) codes.size() * (float) i)
-                                                       .withHeight (area.getHeight() / (float) codes.size()));
+                for (int i = 0; i < juce::jmin (4, codes.size()); ++i)
+                    drawControl (g, u, codes[i], cell (0.0f, (float) i));
                 break;
         }
     }
@@ -450,13 +466,13 @@ private:
         const int lay = mgr.getLayer();
         auto* m = mgr.mappingFor (u.uid, code, lay);
         const bool global = m != nullptr && ! m->perPreset && mgr.modeOf (u.uid, code, lay) == "pequod";
-        const float labelH = juce::jlimit (13.0f, 26.0f, a.getHeight() * 0.24f);
+        const float labelH = 20.0f;
         auto labelArea = a.removeFromBottom (labelH);
         juce::Rectangle<float> hit;
 
         if (code == Mapping::ctrlPedal)
         {
-            auto bar = a.reduced (a.getWidth() * 0.22f, 2.0f);
+            auto bar = a.withSizeKeepingCentre (44.0f, a.getHeight() - 6.0f);
             g.setColour (Pequod::Colours::rail);
             g.fillRoundedRectangle (bar, 6.0f);
             const float v = mgr.pedalValue (u.uid);
@@ -472,7 +488,7 @@ private:
         }
         else if (code == Mapping::ctrlEncoderTurn)
         {
-            const float d = juce::jmin (a.getWidth(), a.getHeight()) * 0.78f;
+            const float d = juce::jmin (64.0f, a.getHeight() - 4.0f);
             auto k = a.withSizeKeepingCentre (d, d);
             g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a4a4a), k.getX(), k.getY(), juce::Colour (0xff141414), k.getRight(), k.getBottom(), false));
             g.fillEllipse (k);
@@ -485,7 +501,7 @@ private:
         }
         else
         {
-            const float d = juce::jmin (a.getWidth(), a.getHeight()) * 0.70f;
+            const float d = switchSize;
             auto c = a.withSizeKeepingCentre (d, d);
             const bool hasLed = ControllerManager::hasLed (u, code);
             const auto col = mgr.colourOf (u.uid, code);
@@ -519,8 +535,8 @@ private:
 
         auto label = mgr.shortLabel (u.uid, code, lay);
         g.setColour (label == "-" ? Pequod::Colours::textDim : Pequod::Colours::text);
-        g.setFont (Pequod::heading (juce::jlimit (8.5f, 12.0f, labelH * 0.55f)));
-        g.drawFittedText (label, labelArea.toNearestInt(), juce::Justification::centredTop, 2, 0.75f);
+        g.setFont (Pequod::heading (11.0f));
+        g.drawFittedText (label, labelArea.expanded (6.0f, 0.0f).toNearestInt(), juce::Justification::centredTop, 1, 0.7f);
 
         hits.push_back ({ u.uid, code, hit.getUnion (labelArea) });
     }
@@ -811,6 +827,7 @@ public:
         // LED
         if (ControllerManager::hasLed (*u, code))
         {
+            form.column();
             form.heading ("LIGHT");
             buildSwatches (lay);
             form.row ("Colour", { &swatches }, 30);
@@ -823,6 +840,7 @@ public:
         // Pedal / encoder hardware
         if (pedal)
         {
+            form.column();
             form.heading ("PEDAL");
             form.row ("Position", { &meter, &calibrateButton }, 30);
             calibrateButton.setButtonText (calibrating ? "DONE" : "CALIBRATE");
@@ -833,6 +851,7 @@ public:
         }
         if (turn)
         {
+            form.column();
             form.heading ("KNOB");
             invertToggle.setButtonText ("Reverse direction");
             invertToggle.setToggleState ((bool) mgr.get ("units." + uid + ".encoder.invert"), juce::dontSendNotification);
@@ -1437,7 +1456,9 @@ ControllerPanel::ControllerPanel (ControllerManager& m, HostEngine& e, ControlSu
     inspector = std::make_unique<Inspector> (mgr, engine, control);
     settings = std::make_unique<SettingsPage> (mgr);
 
-    addChildComponent (*board);
+    boardViewport.setViewedComponent (board.get(), false);
+    boardViewport.setScrollBarsShown (false, true);
+    addChildComponent (boardViewport);
     addChildComponent (*inspector);
     settingsViewport.setViewedComponent (settings.get(), false);
     settingsViewport.setScrollBarsShown (true, false);
@@ -1516,7 +1537,7 @@ void ControllerPanel::showSettings (bool s)
 void ControllerPanel::updateVisibility()
 {
     const bool conn = mgr.isConnected();
-    board->setVisible (conn && ! showingSettings);
+    boardViewport.setVisible (conn && ! showingSettings);
     inspector->setVisible (conn && ! showingSettings);
     quickSetupButton.setVisible (conn && ! showingSettings);
     settingsViewport.setVisible (conn && showingSettings);
@@ -1624,10 +1645,12 @@ void ControllerPanel::resized()
         if (b->isVisible()) { b->setBounds (bar.removeFromLeft (84)); bar.removeFromLeft (4); }
     r.removeFromTop (10);
 
-    auto right = r.removeFromRight (juce::jlimit (320, 420, r.getWidth() * 2 / 5));
-    r.removeFromRight (12);
-    inspector->setBounds (right);
-    board->setBounds (r);
+    // boards across the full width (scroll sideways if there are many), settings for the picked control below
+    auto boardArea = r.removeFromTop (BoardView::getRequiredHeight() + boardViewport.getScrollBarThickness());
+    boardViewport.setBounds (boardArea);
+    board->setSize (juce::jmax (boardArea.getWidth(), board->getRequiredWidth()), BoardView::getRequiredHeight());
+    r.removeFromTop (10);
+    inspector->setBounds (r);
 }
 
 void ControllerPanel::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -1670,9 +1693,9 @@ ControllerWindow::ControllerWindow (ControllerManager& m, HostEngine& e, Control
 {
     setUsingNativeTitleBar (true);
     panel = new ControllerPanel (m, e, c);
-    panel->setSize (1040, 680);
+    panel->setSize (1120, 900);
     setContentOwned (panel, true);
     setResizable (true, false);
-    setResizeLimits (820, 520, 2400, 1600);
+    setResizeLimits (820, 760, 2600, 1800);
     centreWithSize (getWidth(), getHeight());
 }
