@@ -340,10 +340,13 @@ private:
     }
 
 public:
-    // Fixed sizes: a switch is the same size on every board, boards are all the same height.
-    static constexpr float switchSize = 44.0f, cellW = 82.0f, cellH = 76.0f, barH = 26.0f, inner = 8.0f;
-    static constexpr float cardH = barH + 4.0f * cellH + inner * 2.0f;
-    static constexpr float pad = 14.0f, gap = 12.0f, legendH = 26.0f;
+    // Sizes and positions measured from a photo of the real controller: a board is 595 units deep,
+    // a 2x2 footswitch board 437 wide, the vertical strip 120, the expression pedal 400.
+    // Everything is drawn to that one scale, so every switch is the same size.
+    static constexpr float photoDepth = 595.0f, faceH = 360.0f, k = faceH / photoDepth;
+    static constexpr float switchSize = 64.0f * k, barH = 24.0f, labelH = 20.0f;
+    static constexpr float cardH = barH + faceH;
+    static constexpr float pad = 14.0f, gap = 10.0f, legendH = 26.0f;
 
     int getRequiredWidth() const
     {
@@ -358,14 +361,14 @@ private:
     {
         switch (shapeOf (u))
         {
-            case Shape::grid:        return 2.0f * cellW + inner * 2.0f;
-            case Shape::column:      return cellW + inner * 2.0f;
+            case Shape::grid:        return 437.0f * k;
+            case Shape::column:      return 120.0f * k;
             case Shape::pedal:
-            case Shape::pedalSwitch:
-            case Shape::encoder:     return cellW + 30.0f + inner * 2.0f;
-            case Shape::other:       return cellW + inner * 2.0f;
+            case Shape::pedalSwitch: return 400.0f * k;
+            case Shape::encoder:     return 220.0f * k;
+            case Shape::other:       return 120.0f * k;
         }
-        return cellW;
+        return 120.0f * k;
     }
 
     std::vector<Card> layoutCards() const
@@ -426,38 +429,53 @@ private:
                 g.fillEllipse (grip.getX() + 2.0f + (float) col * 5.0f, grip.getCentreY() - 6.0f + (float) row * 5.0f, 2.2f, 2.2f);
         g.setColour (Pequod::Colours::mustard);
         g.setFont (Pequod::heading (11.0f));
-        g.drawFittedText (kindTitle (u), bar.toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+        g.drawFittedText (kindTitle (u), bar.withTrimmedRight (2.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.55f);
 
-        auto area = r.reduced (inner).withTrimmedTop (barH - inner + 4.0f);
+        auto face = r.withTrimmedTop (barH);
         auto codes = ControllerManager::controlCodes (u);
-        auto cell = [&] (float col, float row, float cols = 1.0f, float rows = 1.0f)
+        // a switch centred at (fx, fy) of the face, with its label underneath
+        auto at = [&] (float fx, float fy)
         {
-            return juce::Rectangle<float> (area.getX() + col * cellW, area.getY() + row * cellH, cellW * cols, cellH * rows);
+            const float zone = switchSize + 12.0f;
+            const float w = juce::jmax (switchSize + 16.0f, juce::jmin (90.0f, face.getWidth()));
+            return juce::Rectangle<float> (face.getX() + fx * face.getWidth() - w * 0.5f,
+                                           face.getY() + fy * face.getHeight() - zone * 0.5f, w, zone + labelH);
+        };
+        auto part = [&] (float x0, float y0, float x1, float y1)
+        {
+            return juce::Rectangle<float>::leftTopRightBottom (face.getX() + x0 * face.getWidth(), face.getY() + y0 * face.getHeight(),
+                                                               face.getX() + x1 * face.getWidth(), face.getY() + y1 * face.getHeight());
         };
         switch (shapeOf (u))
         {
-            case Shape::grid:          // 2 x 2, in the middle of the board
+            case Shape::grid:          // 2 x 2 as on the boards
+            {
+                const float xs[2] = { 0.26f, 0.74f }, ys[2] = { 0.29f, 0.80f };
                 for (int i = 0; i < 4; ++i)
-                    drawControl (g, u, i, cell ((float) (i % 2), 1.0f + (float) (i / 2)));
+                    drawControl (g, u, i, at (xs[i % 2], ys[i / 2]));
                 break;
-            case Shape::column:        // 4 stacked, switch 1 at the top
+            }
+            case Shape::column:        // the strip of 4, switch 1 at the top
+            {
+                const float ys[4] = { 0.126f, 0.387f, 0.647f, 0.899f };
                 for (int i = 0; i < 4; ++i)
-                    drawControl (g, u, i, cell (0.0f, (float) i));
+                    drawControl (g, u, i, at (0.5f, ys[i]));
                 break;
+            }
             case Shape::pedal:
-                drawControl (g, u, Mapping::ctrlPedal, area);
+                drawControl (g, u, Mapping::ctrlPedal, part (0.07f, 0.03f, 0.93f, 0.97f));
                 break;
             case Shape::pedalSwitch:
-                drawControl (g, u, Mapping::ctrlPedal, area.withHeight (cellH * 3.0f));
-                drawControl (g, u, 0, area.withTrimmedTop (cellH * 3.0f).withHeight (cellH));
+                drawControl (g, u, Mapping::ctrlPedal, part (0.07f, 0.03f, 0.93f, 0.74f));
+                drawControl (g, u, 0, at (0.5f, 0.86f));
                 break;
             case Shape::encoder:
-                drawControl (g, u, Mapping::ctrlEncoderTurn, area.withTrimmedTop (cellH * 0.5f).withHeight (cellH * 1.6f));
-                drawControl (g, u, Mapping::ctrlEncoderPress, area.withTrimmedTop (cellH * 2.3f).withHeight (cellH));
+                drawControl (g, u, Mapping::ctrlEncoderTurn, part (0.05f, 0.12f, 0.95f, 0.55f));
+                drawControl (g, u, Mapping::ctrlEncoderPress, at (0.5f, 0.76f));
                 break;
             case Shape::other:
                 for (int i = 0; i < juce::jmin (4, codes.size()); ++i)
-                    drawControl (g, u, codes[i], cell (0.0f, (float) i));
+                    drawControl (g, u, codes[i], at (0.5f, 0.126f + 0.26f * (float) i));
                 break;
         }
     }
@@ -469,13 +487,12 @@ private:
         const int lay = mgr.getLayer();
         auto* m = mgr.mappingFor (u.uid, code, lay);
         const bool global = m != nullptr && ! m->perPreset && mgr.modeOf (u.uid, code, lay) == "pequod";
-        const float labelH = 20.0f;
         auto labelArea = a.removeFromBottom (labelH);
         juce::Rectangle<float> hit;
 
         if (code == Mapping::ctrlPedal)
         {
-            auto bar = a.withSizeKeepingCentre (44.0f, a.getHeight() - 6.0f);
+            auto bar = a.reduced (2.0f);
             g.setColour (Pequod::Colours::rail);
             g.fillRoundedRectangle (bar, 6.0f);
             const float v = mgr.pedalValue (u.uid);
@@ -491,7 +508,7 @@ private:
         }
         else if (code == Mapping::ctrlEncoderTurn)
         {
-            const float d = juce::jmin (64.0f, a.getHeight() - 4.0f);
+            const float d = juce::jmin (a.getWidth() * 0.8f, a.getHeight() - 4.0f);
             auto k = a.withSizeKeepingCentre (d, d);
             g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a4a4a), k.getX(), k.getY(), juce::Colour (0xff141414), k.getRight(), k.getBottom(), false));
             g.fillEllipse (k);
@@ -1719,7 +1736,7 @@ ControllerWindow::ControllerWindow (ControllerManager& m, HostEngine& e, Control
 {
     setUsingNativeTitleBar (true);
     panel = new ControllerPanel (m, e, c);
-    panel->setSize (1120, 900);
+    panel->setSize (1360, 900);
     setContentOwned (panel, true);
     setResizable (true, false);
     setResizeLimits (560, 420, 2600, 1800);

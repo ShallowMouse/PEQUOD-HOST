@@ -9,11 +9,13 @@ It speaks the same protocol as Controller/PEQUOD_FC (docs/controller-protocol.md
 import argparse, json, socket, sys, threading, time
 
 PORT = 7400
-UNITS = [
-    {"slot": 0, "type": 20, "kind": "footswitch", "uid": "1A2B3C4D"},
-    {"slot": 1, "type": 21, "kind": "footswitch", "uid": "22334455"},
-    {"slot": 2, "type": 41, "kind": "pedal_switch", "uid": "5E6F7081"},
-    {"slot": 3, "type": 100, "kind": "encoder", "uid": "9A0B1C2D"},
+UNITS = [   # like the real one: strip + 2x2 in the master case, two 2x2 boards, expression pedal
+    {"slot": 0, "type": 21, "kind": "footswitch", "uid": "22334455"},
+    {"slot": 1, "type": 20, "kind": "footswitch", "uid": "1A2B3C4D"},
+    {"slot": 2, "type": 20, "kind": "footswitch", "uid": "6A7B8C9D"},
+    {"slot": 3, "type": 20, "kind": "footswitch", "uid": "0E1F2A3B"},
+    {"slot": 4, "type": 41, "kind": "pedal_switch", "uid": "5E6F7081"},
+    {"slot": 5, "type": 100, "kind": "encoder", "uid": "9A0B1C2D"},
 ]
 
 def codes(kind):
