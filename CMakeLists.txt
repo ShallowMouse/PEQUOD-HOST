@@ -31,6 +31,8 @@ juce_add_gui_app(PequodHost
     PRODUCT_NAME "PEQUOD Host"
     COMPANY_NAME "PEQUOD"
     BUNDLE_ID    "com.pequod.host"
+    ICON_BIG     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Icon/PEQUOD-Host.png"
+    ICON_SMALL   "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Icon/PEQUOD-Host-small.png"
     VERSION      ${PROJECT_VERSION})
 
 juce_generate_juce_header(PequodHost)

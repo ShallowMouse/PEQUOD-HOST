@@ -26,6 +26,7 @@ OutputBaseFilename=PEQUOD-Host-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=PEQUOD-Host.ico
 CloseApplications=yes
 RestartApplications=no
 
