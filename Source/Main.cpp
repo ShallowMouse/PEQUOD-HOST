@@ -42,6 +42,7 @@ public:
             if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()) area = d->userBounds.toNearestInt();
             centreWithSize (juce::jmin (getWidth(), area.getWidth() - 40), juce::jmin (getHeight(), area.getHeight() - 40));
             setVisible (true);
+            setFullScreen (true);          // with the Windows title bar this is "maximised", not full screen
             showOnTop();
 
             // Windows can hand a program started by an installer, a shortcut or the updater a "start minimised"
@@ -54,6 +55,7 @@ public:
         void showOnTop()
         {
             if (isMinimised()) setMinimised (false);
+            if (! isFullScreen()) setFullScreen (true);
             toFront (true);
         }
 
