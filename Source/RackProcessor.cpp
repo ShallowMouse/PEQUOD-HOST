@@ -1,6 +1,45 @@
 #include "RackProcessor.h"
 #include "Transport.h"
 #include "HostEngine.h"
+#include "CrashGuard.h"
+
+#if JUCE_WINDOWS && defined (_MSC_VER)
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
+namespace
+{
+    /** Runs the plugin, catching a crash inside it (access violation etc.) so the rest of the rack keeps playing.
+        No C++ objects with destructors live in this function, as __try requires. */
+    bool guardedProcess (juce::AudioPluginInstance* inst, juce::AudioBuffer<float>* buf, juce::MidiBuffer* midi, bool bypassed) noexcept
+    {
+        __try
+        {
+            if (bypassed) inst->processBlockBypassed (*buf, *midi);
+            else          inst->processBlock (*buf, *midi);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+}
+#else
+namespace
+{
+    bool guardedProcess (juce::AudioPluginInstance* inst, juce::AudioBuffer<float>* buf, juce::MidiBuffer* midi, bool bypassed) noexcept
+    {
+        if (bypassed) inst->processBlockBypassed (*buf, *midi);
+        else          inst->processBlock (*buf, *midi);
+        return true;
+    }
+}
+#endif
 
 namespace
 {
@@ -64,6 +103,17 @@ std::unique_ptr<RenderPlan> RackProcessor::swapPlan (std::unique_ptr<RenderPlan>
     const juce::ScopedLock sl (planLock);
     std::swap (plan, newPlan);
     return newPlan;
+}
+
+bool RackProcessor::waitForSilence (int timeoutMs) const
+{
+    const auto end = juce::Time::getMillisecondCounterHiRes() + timeoutMs;
+    while (fadeNow.load() > 0.0f)
+    {
+        if (juce::Time::getMillisecondCounterHiRes() > end) return false;   // audio not running: nothing to wait for
+        juce::Thread::sleep (1);
+    }
+    return true;
 }
 
 void RackProcessor::preparePlugin (juce::AudioPluginInstance& inst) const
@@ -142,14 +192,23 @@ void RackProcessor::processPlugin (RenderPlugin& rp, juce::AudioBuffer<float>& s
     if (rp.wantsMidi)
         rp.midi.addEvents (midiIn, 0, n, 0);
 
+    // A plugin that crashed earlier stays out of the signal (the audio passes around it).
+    if (rp.slot->crashed.load (std::memory_order_relaxed))
+        return;
+
     {
         const juce::ScopedLock sl (inst->getCallbackLock());
         if (inst->isSuspended())
             buf.clear();
-        else if (rp.slot->bypassed.load (std::memory_order_relaxed))
-            inst->processBlockBypassed (buf, rp.midi);
         else
-            inst->processBlock (buf, rp.midi);
+        {
+            CrashGuard::Scope guard (rp.slot->nameUtf8.c_str(), "processing audio");
+            if (! guardedProcess (inst, &buf, &rp.midi, rp.slot->bypassed.load (std::memory_order_relaxed)))
+            {
+                rp.slot->crashed = true;
+                return;                       // l / r still hold the input: the plugin is skipped
+            }
+        }
     }
 
     if (rp.numOut >= 2)
@@ -304,6 +363,24 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
         const juce::ScopedLock sl (planLock);
         if (plan != nullptr && plan->maxBlock >= n)
             processPlan (*plan, stereo, midi, n);
+    }
+
+    // Preset-switch fade (about 6 ms each way).
+    {
+        const float target = fadeTarget.load (std::memory_order_relaxed);
+        if (fadeGain != target || target < 1.0f)
+        {
+            const float step = 1.0f / (float) juce::jmax (1.0, 0.006 * getSampleRate());
+            auto* l = stereo.getWritePointer (0);
+            auto* r = stereo.getWritePointer (1);
+            for (int i = 0; i < n; ++i)
+            {
+                fadeGain = target > fadeGain ? juce::jmin (target, fadeGain + step) : juce::jmax (target, fadeGain - step);
+                l[i] *= fadeGain;
+                r[i] *= fadeGain;
+            }
+            fadeNow.store (fadeGain, std::memory_order_relaxed);
+        }
     }
 
     if (transport != nullptr) transport->endBlock (stereo, n);     // the click goes through the master out (and MUTE)

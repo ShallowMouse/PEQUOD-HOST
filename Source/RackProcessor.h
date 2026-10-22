@@ -109,6 +109,12 @@ public:
     /** Swaps in a new plan; returns the old one so the caller can delete it off the audio thread. */
     std::unique_ptr<RenderPlan> swapPlan (std::unique_ptr<RenderPlan>);
 
+    /** Fades the rack's output out (or back in) over a few ms. Used to switch presets without a click
+        or a burst of dry guitar. waitForSilence returns once the fade has reached zero (or audio isn't running). */
+    void fadeOut()  { fadeTarget = 0.0f; }
+    void fadeIn()   { fadeTarget = 1.0f; }
+    bool waitForSilence (int timeoutMs = 60) const;
+
     /** The master tempo every plugin sees (and the click). */
     Transport* transport = nullptr;
 
@@ -161,6 +167,8 @@ private:
     std::atomic<int> currentBlock { 512 };
     juce::AudioBuffer<float> io;
     juce::MidiBuffer emptyMidi;
+    std::atomic<float> fadeTarget { 1.0f }, fadeNow { 1.0f };
+    float fadeGain = 1.0f;
 
     void processPlan (RenderPlan&, juce::AudioBuffer<float>& stereo, juce::MidiBuffer& midi, int n) noexcept;
 

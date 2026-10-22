@@ -2,6 +2,7 @@
 #include "SettingsPanel.h"
 #include "PluginManagerPanel.h"
 #include "ControllerPanel.h"
+#include "CrashGuard.h"
 
 //==============================================================================
 class PluginWindow : public juce::DocumentWindow
@@ -51,6 +52,7 @@ MainComponent::MainComponent()
                           [this] (const juce::String& s) { setStatus (s); } })
 {
     auto* settings = appProperties->getUserSettings();
+    const auto lastRun = CrashGuard::start (settings->getFile().getParentDirectory());
 
     // Plugins
     if (auto xml = settings->getXmlValue ("knownPlugins"))
@@ -65,6 +67,9 @@ MainComponent::MainComponent()
     engine.transport.clickOn = settings->getBoolValue ("clickOn", false);
     engine.transport.clickGainDb = (float) settings->getDoubleValue ("clickDb", -12.0);
     engine.transport.beatsPerBar = juce::jlimit (2, 7, settings->getIntValue ("beatsPerBar", 4));
+    engine.getOutputStage()->limiterOn = settings->getBoolValue ("limiter", true);
+    if (settings->containsKey ("loudnessTarget"))
+        engine.loudnessReference = settings->getDoubleValue ("loudnessTarget");
 
     // MIDI / OSC
     auto controlXml = settings->getXmlValue ("control");
@@ -100,6 +105,19 @@ MainComponent::MainComponent()
         return names;
     };
     header.onController = [this] { showController(); };
+    header.onStatus = [this] (const juce::String& t) { setStatus (t); };
+    header.onLevelTargetChanged = [this] { saveSettings(); };
+    engine.onBeforeEdit = [this] { pushUndo(); };
+    for (auto* b : { &undoButton, &redoButton })
+    {
+        b->setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
+        addAndMakeVisible (b);
+    }
+    undoButton.setTooltip ("Undo the last rack change (Ctrl+Z)");
+    redoButton.setTooltip ("Redo (Ctrl+Y)");
+    undoButton.onClick = [this] { undo(); };
+    redoButton.onClick = [this] { redo(); };
+    updateUndoButtons();
     header.onTempoSettingsChanged = [this] { engine.markModified(); };     // the tempo is saved with the preset
 
     // Updates: checked in the background every time PEQUOD starts
@@ -194,10 +212,19 @@ MainComponent::MainComponent()
     }
     library.setCurrentBank (currentPresetFile.existsAsFile() ? PresetLibrary::bankOf (currentPresetFile)
                                                              : settings->getValue ("currentBank"));
-    if (auto session = settings->getXmlValue ("session"))
-        loadRack (*session);
-    if (! settings->getBoolValue ("sessionModified", false))
-        savedChangeCounter = engine.getChangeCounter();
+    if (lastRun.crashed)
+    {
+        // PEQUOD didn't close properly last time: ask before loading the same plugins again.
+        waitingForCrashAnswer = true;
+        juce::MessageManager::callAsync ([this, lastRun] { askAfterCrash (lastRun); });
+    }
+    else
+    {
+        if (auto session = settings->getXmlValue ("session"))
+            loadRack (*session);
+        if (! settings->getBoolValue ("sessionModified", false))
+            savedChangeCounter = engine.getChangeCounter();
+    }
     browser.setCurrentPresetFile (currentPresetFile);
 
     if (engine.knownPlugins.getNumTypes() == 0)
@@ -228,6 +255,7 @@ MainComponent::~MainComponent()
     control.setTuner (nullptr);
     control.removeChangeListener (this);
     engine.knownPlugins.removeChangeListener (this);
+    CrashGuard::cleanExit();
 }
 
 void MainComponent::saveSettings()
@@ -240,8 +268,9 @@ void MainComponent::saveSettings()
         s->setValue ("knownPlugins", plugins.get());
     if (auto c = control.createGlobalXml())
         s->setValue ("control", c.get());
-    if (auto rackXml = createFullRackXml())
-        s->setValue ("session", rackXml.get());
+    if (! waitingForCrashAnswer)        // don't overwrite the session we're asking about
+        if (auto rackXml = createFullRackXml())
+            s->setValue ("session", rackXml.get());
 
     s->setValue ("lastPreset", currentPresetFile.getFullPathName());
     s->setValue ("currentBank", library.getCurrentBank());
@@ -249,6 +278,8 @@ void MainComponent::saveSettings()
     s->setValue ("clickOn", engine.transport.clickOn.load());
     s->setValue ("clickDb", (double) engine.transport.clickGainDb.load());
     s->setValue ("beatsPerBar", engine.transport.beatsPerBar.load());
+    s->setValue ("limiter", engine.getOutputStage()->limiterOn.load());
+    if (! std::isnan (engine.loudnessReference)) s->setValue ("loudnessTarget", engine.loudnessReference);
     s->setValue ("pedalboardView", rack.isPedalboard());
     s->setValue ("sessionModified", engine.getChangeCounter() != savedChangeCounter);
     s->saveIfNeeded();
@@ -270,10 +301,14 @@ void MainComponent::resized()
     auto r = getLocalBounds();
     header.setBounds (r.removeFromTop (64));
     auto status = r.removeFromBottom (24);
-    auto toggles = status.removeFromRight (190).reduced (4, 3);
+    auto toggles = status.removeFromRight (316).reduced (4, 3);
     pedalboardViewButton.setBounds (toggles.removeFromRight (100));
     toggles.removeFromRight (4);
     rackViewButton.setBounds (toggles.removeFromRight (60));
+    toggles.removeFromRight (16);
+    redoButton.setBounds (toggles.removeFromRight (56));
+    toggles.removeFromRight (4);
+    undoButton.setBounds (toggles.removeFromRight (56));
     statusBar.setBounds (status.reduced (10, 0));
     browser.setBounds (r.removeFromLeft (260));
     controlPanel.setBounds (r.removeFromRight (280));
@@ -284,6 +319,9 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
 {
     if (k == juce::KeyPress ('s', juce::ModifierKeys::commandModifier, 0)) { save(); return true; }
     if (k == juce::KeyPress ('s', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)) { saveAs(); return true; }
+    if (k == juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0)) { undo(); return true; }
+    if (k == juce::KeyPress ('y', juce::ModifierKeys::commandModifier, 0)
+         || k == juce::KeyPress ('z', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)) { redo(); return true; }
     if (k == juce::KeyPress::escapeKey && control.getLearnState() != ControlSurface::LearnState::off) { control.cancelLearn(); return true; }
     return false;
 }
@@ -320,6 +358,12 @@ void MainComponent::timerCallback()
     header.setPresetName ((currentPresetFile.existsAsFile() ? PresetLibrary::bankOf (currentPresetFile)
                                                             : library.getCurrentBank()) + "  /  " + getPresetDisplayName(),
                           engine.getChangeCounter() != savedChangeCounter);
+
+    // A plugin that crashed while processing has been taken out of the signal: say so once.
+    for (auto& sl : engine.getFlatSlots())
+        if (sl->crashed && reportedCrashes.insert (sl.get()).second)
+            setStatus (sl->description.name + " crashed and has been taken out of the signal. Save your work, "
+                       "then restart PEQUOD to use it again.");
 
     // Autosave the session every ~30 s so a crash (usually a misbehaving plugin) loses little.
     if (++autosaveTicks >= 150)
@@ -385,6 +429,7 @@ void MainComponent::loadPresetFile (const juce::File& f)
     }
 
     loadRack (*xml);
+    clearUndo();
     currentPresetFile = f;
     library.setCurrentBank (PresetLibrary::bankOf (f));
     savedChangeCounter = engine.getChangeCounter();
@@ -589,6 +634,7 @@ void MainComponent::saveAs()
 void MainComponent::initRack()
 {
     windows.clear();
+    pushUndo();
     engine.clearRack();
     control.clearRackMappings();
     engine.currentPresetName = "Init";
@@ -659,8 +705,12 @@ void MainComponent::openPluginWindow (int uid)
     rack.dropEditor (uid);
     if (inst->getActiveEditor() != nullptr) return;
 
-    juce::AudioProcessorEditor* editor = inst->hasEditor() ? inst->createEditorAndMakeActive()
-                                                           : new juce::GenericAudioProcessorEditor (*inst);
+    juce::AudioProcessorEditor* editor = nullptr;
+    {
+        CrashGuard::Scope guard (slot->nameUtf8.c_str(), "opening its window");
+        editor = inst->hasEditor() ? inst->createEditorAndMakeActive()
+                                   : new juce::GenericAudioProcessorEditor (*inst);
+    }
     if (editor == nullptr) return;
 
     windows[uid] = std::make_unique<PluginWindow> (slot->description.name, editor,
@@ -712,4 +762,122 @@ void MainComponent::showPluginManager (bool autoScan)
         setStatus ("First run: scanning your VST3 folders...");
         panel->scanFolders();
     }
+}
+
+//==============================================================================
+void MainComponent::pushUndo()
+{
+    if (restoringUndo) return;
+    undoStack.push_back (createFullRackXml());
+    constexpr size_t maxUndo = 40;
+    if (undoStack.size() > maxUndo) undoStack.erase (undoStack.begin());
+    redoStack.clear();
+    updateUndoButtons();
+}
+
+void MainComponent::clearUndo()
+{
+    undoStack.clear();
+    redoStack.clear();
+    updateUndoButtons();
+}
+
+void MainComponent::restoreSnapshot (const juce::XmlElement& xml)
+{
+    restoringUndo = true;
+    const auto name = engine.currentPresetName;
+    loadRack (xml);
+    engine.currentPresetName = name;
+    engine.markModified();
+    control.sendRackSummary();
+    restoringUndo = false;
+    updateUndoButtons();
+}
+
+void MainComponent::undo()
+{
+    if (undoStack.empty()) { setStatus ("Nothing to undo"); return; }
+    redoStack.push_back (createFullRackXml());
+    auto snap = std::move (undoStack.back());
+    undoStack.pop_back();
+    restoreSnapshot (*snap);
+    setStatus ("Undone");
+}
+
+void MainComponent::redo()
+{
+    if (redoStack.empty()) { setStatus ("Nothing to redo"); return; }
+    undoStack.push_back (createFullRackXml());
+    auto snap = std::move (redoStack.back());
+    redoStack.pop_back();
+    restoreSnapshot (*snap);
+    setStatus ("Redone");
+}
+
+void MainComponent::updateUndoButtons()
+{
+    undoButton.setEnabled (! undoStack.empty());
+    redoButton.setEnabled (! redoStack.empty());
+}
+
+//==============================================================================
+void MainComponent::askAfterCrash (const CrashGuard::LastRun& last)
+{
+    auto* settings = appProperties->getUserSettings();
+    auto session = settings->getXmlValue ("session");
+
+    auto loadSession = [this] (const juce::StringArray& skip)
+    {
+        auto* st = appProperties->getUserSettings();
+        if (auto xml = st->getXmlValue ("session"))
+        {
+            engine.skipPlugins = skip;
+            loadRack (*xml);
+            engine.skipPlugins.clear();
+            if (skip.isEmpty() && ! st->getBoolValue ("sessionModified", false))
+                savedChangeCounter = engine.getChangeCounter();
+        }
+    };
+
+    if (session == nullptr || session->getNumChildElements() == 0)
+    {
+        waitingForCrashAnswer = false;           // nothing was loaded: nothing to protect against
+        return;
+    }
+
+    const bool known = last.plugin.isNotEmpty();
+    juce::String msg = "PEQUOD Host didn't close properly last time";
+    msg << (known ? " - it crashed inside " + last.plugin.quoted() + (last.doing.isNotEmpty() ? " while " + last.doing : juce::String()) + "."
+                  : ".");
+    msg << "\n\nHow do you want to start?";
+
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::NoIcon)
+                       .withTitle ("PEQUOD Host")
+                       .withMessage (msg)
+                       .withAssociatedComponent (this);
+    options = known ? options.withButton ("Without " + last.plugin).withButton ("Empty rack").withButton ("Load normally")
+                    : options.withButton ("Load normally").withButton ("Empty rack");
+
+    juce::AlertWindow::showAsync (options, [this, known, last, loadSession] (int result)
+    {
+        // JUCE numbers the buttons 1, 2, ... with the last one 0.
+        waitingForCrashAnswer = false;
+        const bool emptyRack = known ? result == 2 : result == 0;
+        const bool without = known && result == 1;
+        if (emptyRack)
+        {
+            initRack();
+            setStatus ("Started with an empty rack. Your presets are untouched.");
+        }
+        else if (without)
+        {
+            loadSession (juce::StringArray (last.plugin));
+            setStatus ("Loaded the last session without " + last.plugin + ". Your saved presets are untouched.");
+        }
+        else
+        {
+            loadSession ({});
+        }
+    });
 }

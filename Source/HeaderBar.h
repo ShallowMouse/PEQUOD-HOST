@@ -85,6 +85,8 @@ public:
     std::function<int()> controllerState;   // 0 none, 1 connected, 2 updating
     std::function<void (int stages)> onPipelineStagesChanged;
     std::function<void()> onTempoSettingsChanged;
+    std::function<void (const juce::String&)> onStatus;
+    std::function<void()> onLevelTargetChanged;      // the level-match target changed (save it)
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -128,6 +130,15 @@ private:
     PeakMeter inMeter, outMeter;
 
     juce::Rectangle<int> wordmarkArea;
+    bool showWordmark = true;
+
+    // Level matching between presets
+    static constexpr double measureSeconds = 6.0;
+    int measuring = 0;                   // 1 = setting the target, 2 = matching this preset
+    double measureStart = 0;
+    void addOutputMenu (juce::PopupMenu&);
+    void startLevelMatch (int mode);
+    void updateLevelMatch();
 
     void timerCallback() override;
     void setupKnob (LearnableSlider&, juce::Label&, const juce::String&, GainMeterProcessor*, Mapping::Target);

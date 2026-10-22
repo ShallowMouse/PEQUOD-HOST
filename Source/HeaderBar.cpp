@@ -247,6 +247,12 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
 
     addAndMakeVisible (inMeter);
     addAndMakeVisible (outMeter);
+    outMeter.showsClip = true;
+    outMeter.onClearClip = [this] { engine.getOutputStage()->clipped = false; };
+    outMeter.setTooltip ("Output level. The light on top turns red if the output hit 0 dB (click to clear); "
+                         "mustard while the safety limiter is working.");
+    outKnob.setTooltip ("OUT level, saved with each preset (right-click: learn, match levels, limiter)");
+    outKnob.addToMenu = [this] (juce::PopupMenu& m) { addOutputMenu (m); };
 
     cpuButton.setTooltip ("CPU load. Click to spread the effects chain over more CPU cores.");
     cpuButton.onClick = [this] { showCoresMenu(); };
@@ -305,6 +311,73 @@ void HeaderBar::setupKnob (LearnableSlider& knob, juce::Label& label, const juce
     addAndMakeVisible (label);
 }
 
+//==============================================================================
+void HeaderBar::addOutputMenu (juce::PopupMenu& m)
+{
+    auto* out = engine.getOutputStage();
+    const bool hasRef = ! std::isnan (engine.loudnessReference);
+
+    m.addSeparator();
+    m.addSectionHeader ("MATCH LEVELS BETWEEN PRESETS");
+    m.addItem ("Use this preset's level as the target (play for " + juce::String ((int) measureSeconds) + " s)",
+               measuring == 0, false, [this] { startLevelMatch (1); });
+    m.addItem (hasRef ? "Match this preset to the target (play for " + juce::String ((int) measureSeconds) + " s)"
+                      : juce::String ("Match this preset to the target (set a target first)"),
+               hasRef && measuring == 0, false, [this] { startLevelMatch (2); });
+    if (measuring != 0)
+        m.addItem ("Stop measuring", [this] { measuring = 0; outLabel.setText ("OUT", juce::dontSendNotification); });
+    m.addSeparator();
+    m.addItem ("Safety limiter on the output", true, out->limiterOn.load(), [out]
+    {
+        out->limiterOn = ! out->limiterOn.load();
+    });
+}
+
+void HeaderBar::startLevelMatch (int mode)
+{
+    measuring = mode;
+    measureStart = juce::Time::getMillisecondCounterHiRes();
+    engine.getOutputStage()->startLoudness();
+    if (onStatus) onStatus ("Measuring the level: play the way you normally would with this sound...");
+}
+
+void HeaderBar::updateLevelMatch()
+{
+    if (measuring == 0) return;
+    auto* out = engine.getOutputStage();
+    const double elapsed = (juce::Time::getMillisecondCounterHiRes() - measureStart) / 1000.0;
+    const int left = juce::jmax (0, (int) std::ceil (measureSeconds - elapsed));
+    outLabel.setText ("PLAY " + juce::String (left), juce::dontSendNotification);
+    if (elapsed < measureSeconds) return;
+
+    const int mode = measuring;
+    measuring = 0;
+    outLabel.setText ("OUT", juce::dontSendNotification);
+
+    if (out->secondsMeasured() < 1.5)
+    {
+        if (onStatus) onStatus ("Didn't hear enough playing to measure the level. Try again and keep playing the whole time.");
+        return;
+    }
+
+    const double heard = out->loudnessDb();            // before the OUT level
+    if (mode == 1)
+    {
+        engine.loudnessReference = heard + out->gainDb.load();
+        if (onLevelTargetChanged) onLevelTargetChanged();
+        if (onStatus) onStatus ("Level target set from this preset. On other presets, right-click OUT > Match.");
+    }
+    else
+    {
+        const float before = out->gainDb.load();
+        const float after = (float) juce::jlimit (-36.0, 12.0, std::round ((engine.loudnessReference - heard) * 10.0) / 10.0);
+        out->gainDb = after;
+        engine.markModified();
+        if (onStatus) onStatus ("Level matched: OUT " + juce::String (before, 1) + " dB -> " + juce::String (after, 1)
+                                + " dB. Save the preset to keep it.");
+    }
+}
+
 void HeaderBar::setPresetName (const juce::String& name, bool modified)
 {
     presetButton.setButtonText (name.toUpperCase() + (modified ? " *" : ""));
@@ -316,6 +389,8 @@ void HeaderBar::timerCallback()
     auto* out = engine.getOutputStage();
     inMeter.setLevels (in->peakL, in->peakR);
     outMeter.setLevels (out->peakL, out->peakR);
+    outMeter.setClip (out->clipped.load(), out->reductionDb.load());
+    updateLevelMatch();
 
     const int cs = controllerState ? controllerState() : 0;
     if (cs != controllerButton.state) { controllerButton.state = cs; controllerButton.repaint(); }
@@ -390,6 +465,7 @@ void HeaderBar::paint (juce::Graphics& g)
     g.setColour (Pequod::Colours::mustard);
     g.fillRect (r.removeFromBottom (2.0f));
 
+    if (! showWordmark) return;
     auto wm = wordmarkArea.toFloat();
     g.setColour (Pequod::Colours::mustard);
     g.setFont (Pequod::heading (28.0f));
@@ -401,10 +477,29 @@ void HeaderBar::paint (juce::Graphics& g)
 
 void HeaderBar::resized()
 {
-    auto r = getLocalBounds().reduced (14, 0).withTrimmedBottom (2);
+    auto full = getLocalBounds().reduced (14, 0).withTrimmedBottom (2);
     auto row = [] (juce::Rectangle<int> a, int h = 30) { return a.withSizeKeepingCentre (a.getWidth(), h); };
 
-    // Right-hand block, laid out from the right edge: OUT, IN, CPU, PLUGINS, AUDIO, MUTE, tuner, LEARN
+    // Widths per size: normal, compact; the wordmark goes last when even compact is too wide.
+    struct Sizes { int cpu, controller, gap, tuner, tap, tempo, wordmark, update; };
+    const Sizes normal  { 104, 126, 10, 176, 50, 124, 132, 150 };
+    const Sizes compact {  78, 112,  6, 140, 44, 108, 132, 112 };
+
+    auto needed = [&] (const Sizes& z, bool wordmark)
+    {
+        int w = 66 + 6 + 66 + 8 + z.cpu + 8 + 78 + 4 + z.controller + 4 + 62 + z.gap + 66 + 4 + z.tuner + z.gap
+              + 66 + z.gap + z.tap + 4 + z.tempo + 12;
+        w += (wordmark ? z.wordmark + 8 : 0) + (updateButton.isVisible() ? z.update + 8 : 0);
+        w += 30 + 4 + 4 + 30 + 8 + 48 + 4 + 52 + 4 + 74;   // < > INIT SAVE SAVE AS
+        return w;
+    };
+    constexpr int presetWanted = 200;
+    const bool useCompact = needed (normal, true) + presetWanted > full.getWidth();
+    const Sizes& z = useCompact ? compact : normal;
+    showWordmark = needed (z, true) + 150 <= full.getWidth();
+
+    auto r = full;
+    // Right-hand block, laid out from the right edge: OUT, IN, CPU, PLUGINS, CONTROLLER, AUDIO, MUTE, tuner, LEARN, TAP, tempo
     auto knobBlock = [&] (LearnableSlider& k, juce::Label& l, PeakMeter& m)
     {
         auto b = r.removeFromRight (66);
@@ -417,31 +512,31 @@ void HeaderBar::resized()
     r.removeFromRight (6);
     knobBlock (inKnob, inLabel, inMeter);
     r.removeFromRight (8);
-    cpuButton.setBounds (row (r.removeFromRight (104), 40));
+    cpuButton.setBounds (row (r.removeFromRight (z.cpu), 40));
     r.removeFromRight (8);
     pluginsButton.setBounds (row (r.removeFromRight (78)));
     r.removeFromRight (4);
-    controllerButton.setBounds (row (r.removeFromRight (126)));
+    controllerButton.setBounds (row (r.removeFromRight (z.controller)));
     r.removeFromRight (4);
     audioButton.setBounds (row (r.removeFromRight (62)));
-    r.removeFromRight (10);
+    r.removeFromRight (z.gap);
     muteButton.setBounds (row (r.removeFromRight (66)));
     r.removeFromRight (4);
-    tunerDisplay.setBounds (row (r.removeFromRight (176), 44));
-    r.removeFromRight (10);
+    tunerDisplay.setBounds (row (r.removeFromRight (z.tuner), 44));
+    r.removeFromRight (z.gap);
     learnButton.setBounds (row (r.removeFromRight (66)));
-    r.removeFromRight (10);
-    tapButton.setBounds (row (r.removeFromRight (50)));
+    r.removeFromRight (z.gap);
+    tapButton.setBounds (row (r.removeFromRight (z.tap)));
     r.removeFromRight (4);
-    tempoDisplay.setBounds (row (r.removeFromRight (124), 44));
+    tempoDisplay.setBounds (row (r.removeFromRight (z.tempo), 44));
     r.removeFromRight (12);
 
     // Left-hand block: wordmark, preset navigation (preset name takes the remaining space)
-    wordmarkArea = r.removeFromLeft (132);
-    r.removeFromLeft (8);
+    wordmarkArea = showWordmark ? r.removeFromLeft (z.wordmark) : juce::Rectangle<int>();
+    if (showWordmark) r.removeFromLeft (8);
     if (updateButton.isVisible())
     {
-        updateButton.setBounds (row (r.removeFromLeft (150)));
+        updateButton.setBounds (row (r.removeFromLeft (z.update)));
         r.removeFromLeft (8);
     }
     prevButton.setBounds (row (r.removeFromLeft (30)));
@@ -456,7 +551,7 @@ void HeaderBar::resized()
     auto next = r.removeFromRight (30);
     r.removeFromRight (4);
 
-    presetButton.setBounds (row (r.removeFromLeft (juce::jmin (r.getWidth(), 320))));
+    presetButton.setBounds (row (r.removeFromLeft (juce::jlimit (0, 320, r.getWidth()))));
     nextButton.setBounds (row (next.withX (presetButton.getRight() + 4)));
     initButton.setBounds (row (init.withX (nextButton.getRight() + 8)));
     saveButton.setBounds (row (save.withX (initButton.getRight() + 4)));

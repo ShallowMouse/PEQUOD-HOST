@@ -3,6 +3,7 @@
 #include <map>
 #include "BrowserPanel.h"
 #include "NativeClip.h"
+#include "CrashGuard.h"
 
 namespace
 {
@@ -26,6 +27,13 @@ namespace
     /** Draws a module's CPU share right-aligned in `area`. */
     void drawLoad (juce::Graphics& g, juce::Rectangle<int> area, float load)
     {
+        if (load < 0.0f)      // see readLoad
+        {
+            g.setFont (Pequod::heading (10.0f));
+            g.setColour (Pequod::Colours::danger);
+            g.drawText ("CRASHED - SKIPPED", area.withLeft (area.getRight() - 120), juce::Justification::centredRight);
+            return;
+        }
         if (load < 0.005f) return;
         g.setFont (Pequod::heading (10.0f, false));
         g.setColour (load > 0.5f ? Pequod::Colours::danger : Pequod::Colours::textDim);
@@ -35,6 +43,7 @@ namespace
     float readLoad (HostEngine& engine, int uid)
     {
         auto s = engine.findSlot (uid);
+        if (s != nullptr && s->crashed) return -1.0f;     // drawn as CRASHED
         return s != nullptr ? s->cpuLoad.load() : 0.0f;
     }
 
@@ -121,7 +130,10 @@ public:
                     if (inst->getActiveEditor() != nullptr)
                         note = "Plugin panel is open elsewhere";
                     else if (inst->hasEditor())
+                    {
+                        CrashGuard::Scope guard (s->nameUtf8.c_str(), "opening its panel");
                         editor.reset (inst->createEditorAndMakeActive());
+                    }
                     else
                         editor = std::make_unique<juce::GenericAudioProcessorEditor> (*inst);
 

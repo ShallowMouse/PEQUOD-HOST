@@ -29,7 +29,33 @@ public:
     std::atomic<int>   tapWritePos { 0 };
     bool tapEnabled = false;
 
-    void prepareToPlay (double, int) override { smoothed.reset (getSampleRate() > 0 ? getSampleRate() : 48000.0, 0.02); smoothed.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (gainDb.load())); }
+    //== Output stage only
+    bool isOutput = false;
+    std::atomic<bool> limiterOn { true };     // safety limiter just under 0 dBFS
+    std::atomic<bool> clipped { false };      // the signal reached 0 dBFS (before the limiter); cleared by the UI
+    std::atomic<float> reductionDb { 0.0f };  // how hard the limiter is working (for the meter)
+
+    /** Loudness of the signal before the OUT level (K-weighted, quiet parts ignored).
+        startLoudness() resets it; loudnessDb() / secondsMeasured() read what has been heard since. */
+    void startLoudness() { loudnessReset = true; }
+    double secondsMeasured() const { return (double) loudCount.load() / juce::jmax (1.0, getSampleRate()); }
+    double loudnessDb() const
+    {
+        const auto c = loudCount.load();
+        return c > 0 ? 10.0 * std::log10 (juce::jmax (1.0e-12, loudSum.load() / (double) c)) : -100.0;
+    }
+
+    void prepareToPlay (double, int) override
+    {
+        const double sr = getSampleRate() > 0 ? getSampleRate() : 48000.0;
+        smoothed.reset (sr, 0.02);
+        smoothed.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (gainDb.load()));
+        releaseCoeff = (float) (1.0 - std::exp (-1.0 / (0.08 * sr)));
+        kHigh.setCoefficients (juce::IIRCoefficients::makeHighShelf (sr, 1500.0, 0.71, juce::Decibels::decibelsToGain (4.0)));
+        kLow.setCoefficients (juce::IIRCoefficients::makeHighPass (sr, 60.0, 0.5));
+        kHigh.reset(); kLow.reset();
+        limGain = 1.0f;
+    }
     void releaseResources() override {}
 
     using AudioProcessor::processBlock;
@@ -63,6 +89,22 @@ public:
             tapWritePos.store (w, std::memory_order_release);
         }
 
+        if (isOutput)
+        {
+            if (loudnessReset.exchange (false)) { loudSum = 0.0; loudCount = 0; }
+            double sum = 0.0;
+            for (int i = 0; i < n; ++i)
+            {
+                const float k = kLow.processSingleSampleRaw (kHigh.processSingleSampleRaw (0.5f * (l[i] + r[i])));
+                sum += (double) k * (double) k;
+            }
+            if (n > 0 && sum / n > 1.0e-6)              // ignore silence / between notes (below -60 dB)
+            {
+                loudSum = loudSum.load() + sum;
+                loudCount = loudCount.load() + n;
+            }
+        }
+
         smoothed.setTargetValue (muted.load() ? 0.0f : juce::Decibels::decibelsToGain (gainDb.load(), -60.0f));
         float pl = 0.0f, pr = 0.0f;
         for (int i = 0; i < n; ++i)
@@ -72,6 +114,28 @@ public:
             pl = juce::jmax (pl, std::abs (l[i]));
             pr = juce::jmax (pr, std::abs (r[i]));
         }
+        if (isOutput)
+        {
+            if (pl >= 1.0f || pr >= 1.0f) clipped = true;
+            if (limiterOn.load())
+            {
+                // Instant attack, 80 ms release, ceiling -0.3 dBFS: protects ears and speakers from a runaway plugin.
+                constexpr float ceiling = 0.966f;
+                float minGain = 1.0f;
+                for (int i = 0; i < n; ++i)
+                {
+                    const float pk = juce::jmax (std::abs (l[i]), std::abs (r[i]));
+                    const float need = pk > ceiling ? ceiling / pk : 1.0f;
+                    limGain = need < limGain ? need : limGain + (1.0f - limGain) * releaseCoeff;
+                    l[i] = juce::jlimit (-ceiling, ceiling, l[i] * limGain);
+                    r[i] = juce::jlimit (-ceiling, ceiling, r[i] * limGain);
+                    minGain = juce::jmin (minGain, limGain);
+                }
+                reductionDb.store (juce::jmax (-juce::Decibels::gainToDecibels (minGain, -60.0f), reductionDb.load() * 0.9f));
+            }
+            else reductionDb = 0.0f;
+        }
+
         peakL.store (juce::jmax (pl, peakL.load() * 0.92f));
         peakR.store (juce::jmax (pr, peakR.load() * 0.92f));
     }
@@ -92,6 +156,11 @@ public:
 
 private:
     juce::SmoothedValue<float> smoothed;
+    float limGain = 1.0f, releaseCoeff = 0.0003f;
+    juce::IIRFilter kHigh, kLow;
+    std::atomic<bool> loudnessReset { false };
+    std::atomic<double> loudSum { 0.0 };
+    std::atomic<int64_t> loudCount { 0 };
 };
 
 //==============================================================================
@@ -112,6 +181,8 @@ struct PluginSlot
     juce::PluginDescription description;
     std::atomic<bool> bypassed { false };
     std::atomic<float> cpuLoad { 0.0f };    // share of one block's time this plugin takes (0..1+)
+    std::atomic<bool> crashed { false };     // crashed while processing: left out of the signal
+    std::string nameUtf8;                    // for crash reports
 
     juce::AudioPluginInstance* instance() const { return plugin.get(); }
 
@@ -196,6 +267,8 @@ public:
 
     //== Master
     Transport transport;                       // tempo (saved with the preset) + click
+    /** Loudness the "match level" function aims every preset at (dB, before the OUT level); NaN = none yet. */
+    double loudnessReference = std::numeric_limits<double>::quiet_NaN();
     GainMeterProcessor* getInputStage() const  { return inputStage; }
     GainMeterProcessor* getOutputStage() const { return outputStage; }
 
@@ -209,6 +282,10 @@ public:
     void setParamObserver (ParamObserver* o) { observer = o; }
 
     std::function<void (int slotUid)> onSlotAboutToBeRemoved;
+    /** Called before every rack edit made by hand (add, remove, move): used for undo. */
+    std::function<void()> onBeforeEdit;
+    /** Plugins (by name) to leave out when loading, e.g. one that crashed PEQUOD last time. */
+    juce::StringArray skipPlugins;
 
     /** Rebuilds the audio thread's render plan from the rack (call after any structural change). */
     void rewire();
@@ -252,7 +329,11 @@ private:
     ParamObserver* observer = nullptr;
 
     std::shared_ptr<PluginSlot> createSlot (const juce::PluginDescription&, juce::String& error);
-    void destroySlot (const std::shared_ptr<PluginSlot>&);
+    void destroySlot (const std::shared_ptr<PluginSlot>&, bool notifyUi = true);
+    void detachFromUi (PluginSlot&);
+    void retireSlot (const std::shared_ptr<PluginSlot>&);
+    std::vector<std::shared_ptr<PluginSlot>> spares;   // loaded, not in the rack: reused by later presets
+    void aboutToEdit() { if (onBeforeEdit) onBeforeEdit(); }
     std::shared_ptr<PluginSlot> detachSlot (int slotUid);
     void insertSlot (std::shared_ptr<PluginSlot>, RackLocation where);
     void attachListener (PluginSlot&);

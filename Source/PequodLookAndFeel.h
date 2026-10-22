@@ -303,10 +303,14 @@ public:
 };
 
 //==============================================================================
-/** Stereo peak meter reading a pair of atomics. */
-class PeakMeter : public juce::Component
+/** Stereo peak meter reading a pair of atomics. With showsClip, a light on top turns red when the
+    signal has hit 0 dBFS (click it to clear) and a mustard bar shows the limiter working. */
+class PeakMeter : public juce::Component, public juce::SettableTooltipClient
 {
 public:
+    bool showsClip = false;
+    std::function<void()> onClearClip;
+
     void setLevels (float l, float r)
     {
         auto toPos = [] (float v) { return juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (v, -60.0f) + 60.0f) / 66.0f); };
@@ -318,9 +322,27 @@ public:
         }
     }
 
+    void setClip (bool c, float reduction)
+    {
+        const bool lim = reduction > 0.5f;
+        if (c != clip || lim != limiting) { clip = c; limiting = lim; repaint(); }
+    }
+
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        if (showsClip && clip && onClearClip) onClearClip();
+    }
+
     void paint (juce::Graphics& g) override
     {
         auto r = getLocalBounds().toFloat();
+        if (showsClip)
+        {
+            auto light = r.removeFromTop (5.0f);
+            r.removeFromTop (2.0f);
+            g.setColour (clip ? Pequod::Colours::danger : limiting ? Pequod::Colours::mustard : Pequod::Colours::well);
+            g.fillRect (light);
+        }
         auto barW = (r.getWidth() - 2.0f) * 0.5f;
         for (int ch = 0; ch < 2; ++ch)
         {
@@ -336,6 +358,7 @@ public:
 
 private:
     float levelL = 0, levelR = 0;
+    bool clip = false, limiting = false;
 };
 
 //==============================================================================
@@ -344,13 +367,15 @@ class LearnableSlider : public juce::Slider
 {
 public:
     std::function<void()> onLearn;
+    std::function<void (juce::PopupMenu&)> addToMenu;    // extra right-click items
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        if (e.mods.isPopupMenu() && onLearn)
+        if (e.mods.isPopupMenu() && (onLearn || addToMenu))
         {
             juce::PopupMenu m;
-            m.addItem ("MIDI / OSC learn", onLearn);
+            if (onLearn) m.addItem ("MIDI / OSC learn", onLearn);
+            if (addToMenu) addToMenu (m);
             m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
             return;
         }

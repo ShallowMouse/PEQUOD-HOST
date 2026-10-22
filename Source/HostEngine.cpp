@@ -1,4 +1,5 @@
 #include "HostEngine.h"
+#include "CrashGuard.h"
 
 //==============================================================================
 struct PluginSlot::Listener : public juce::AudioProcessorParameter::Listener
@@ -32,6 +33,7 @@ HostEngine::HostEngine()
     inputStage = inputStageOwned.get();
 
     outputStageOwned = std::make_unique<GainMeterProcessor>();
+    outputStageOwned->isOutput = true;
     outputStage = outputStageOwned.get();
 
     rack = std::make_unique<RackProcessor> (*inputStage, *outputStage);
@@ -51,6 +53,8 @@ HostEngine::~HostEngine()
     player.setProcessor (nullptr);
     rack->onNeedsNewPlan = nullptr;
     clearRack();
+    for (auto& sp : spares) destroySlot (sp, false);
+    spares.clear();
     rack->swapPlan (nullptr);
 }
 
@@ -342,7 +346,13 @@ std::shared_ptr<PluginSlot> HostEngine::createSlot (const juce::PluginDescriptio
     const double sr = rack->getCurrentSampleRate();
     const int bs = rack->getCurrentBlockSize();
 
-    auto inst = formatManager.createPluginInstance (desc, sr, bs, error);
+    const std::string name = desc.name.toStdString();
+    std::unique_ptr<juce::AudioPluginInstance> inst;
+    {
+        CrashGuard::Scope guard (name.c_str(), "loading");
+        DBG ("PEQUOD: loading " << desc.name);
+        inst = formatManager.createPluginInstance (desc, sr, bs, error);
+    }
     if (inst == nullptr)
     {
         if (error.isEmpty()) error = "Could not load " + desc.name;
@@ -355,9 +365,13 @@ std::shared_ptr<PluginSlot> HostEngine::createSlot (const juce::PluginDescriptio
             if (bus->getNumberOfChannels() != 2)
                 bus->setCurrentLayout (juce::AudioChannelSet::stereo());
 
-    rack->preparePlugin (*inst);
+    {
+        CrashGuard::Scope guard (name.c_str(), "starting");
+        rack->preparePlugin (*inst);
+    }
 
     auto slot = std::make_shared<PluginSlot>();
+    slot->nameUtf8 = name;
     slot->uid = nextUid++;
     slot->stableId = newStableId();
     slot->description = desc;
@@ -366,29 +380,55 @@ std::shared_ptr<PluginSlot> HostEngine::createSlot (const juce::PluginDescriptio
     return slot;
 }
 
-void HostEngine::destroySlot (const std::shared_ptr<PluginSlot>& slot)
+void HostEngine::destroySlot (const std::shared_ptr<PluginSlot>& slot, bool notify)
 {
     // Callers must already have rebuilt the plan without this slot.
     if (slot == nullptr) return;
 
-    if (onSlotAboutToBeRemoved)
-        onSlotAboutToBeRemoved (slot->uid);
+    if (notify) detachFromUi (*slot);
 
     if (auto* inst = slot->instance())
     {
-        if (slot->listener != nullptr)
-            for (auto* p : inst->getParameters())
-                p->removeListener (slot->listener.get());
+        CrashGuard::Scope guard (slot->nameUtf8.c_str(), "closing");
         inst->releaseResources();
     }
 
     slot->plugin.reset();
-    slot->listener.reset();
+}
+
+void HostEngine::detachFromUi (PluginSlot& slot)
+{
+    if (onSlotAboutToBeRemoved)
+        onSlotAboutToBeRemoved (slot.uid);
+
+    if (auto* inst = slot.instance())
+        if (slot.listener != nullptr)
+            for (auto* p : inst->getParameters())
+                p->removeListener (slot.listener.get());
+    slot.listener.reset();
+}
+
+void HostEngine::retireSlot (const std::shared_ptr<PluginSlot>& slot)
+{
+    // Callers must already have rebuilt the plan without this slot.
+    // Kept loaded (not processing) so going back to a preset that uses it is instant.
+    if (slot == nullptr || slot->instance() == nullptr) return;
+    detachFromUi (*slot);
+    if (slot->crashed) { destroySlot (slot, false); return; }
+
+    spares.push_back (slot);
+    constexpr size_t maxSpares = 12;
+    while (spares.size() > maxSpares)
+    {
+        destroySlot (spares.front(), false);
+        spares.erase (spares.begin());
+    }
 }
 
 //==============================================================================
 int HostEngine::addPlugin (const juce::PluginDescription& desc, RackLocation where, juce::String& errorOut)
 {
+    aboutToEdit();
     auto slot = createSlot (desc, errorOut);
     if (slot == nullptr) return 0;
 
@@ -420,6 +460,7 @@ void HostEngine::insertSlot (std::shared_ptr<PluginSlot> slot, RackLocation wher
 
 int HostEngine::addSplit (int itemIndex)
 {
+    aboutToEdit();
     RackItem item;
     item.uid = nextUid++;
     item.type = RackItem::Type::split;
@@ -461,16 +502,18 @@ std::shared_ptr<PluginSlot> HostEngine::detachSlot (int slotUid)
 
 void HostEngine::removeSlot (int slotUid)
 {
+    aboutToEdit();
     if (auto s = detachSlot (slotUid))
     {
         rewire();            // audio thread stops using it...
-        destroySlot (s);     // ...before it is deleted
+        retireSlot (s);      // ...before it is put aside (kept loaded, so undo is instant)
         changed();
     }
 }
 
 void HostEngine::removeItem (int itemUid)
 {
+    aboutToEdit();
     for (auto it = items.begin(); it != items.end(); ++it)
     {
         if (it->uid != itemUid) continue;
@@ -480,11 +523,11 @@ void HostEngine::removeItem (int itemUid)
         rewire();
 
         if (item.type == RackItem::Type::plugin)
-            destroySlot (item.plugin);
+            retireSlot (item.plugin);
         else
             for (auto& lane : item.lanes)
                 for (auto& s : lane)
-                    destroySlot (s);
+                    retireSlot (s);
 
         changed();
         return;
@@ -493,6 +536,7 @@ void HostEngine::removeItem (int itemUid)
 
 void HostEngine::moveSlot (int slotUid, RackLocation where)
 {
+    aboutToEdit();
     RackLocation from;
     if (! locateSlot (slotUid, from)) return;
 
@@ -514,6 +558,7 @@ void HostEngine::moveSlot (int slotUid, RackLocation where)
 
 void HostEngine::moveItem (int itemUid, int newIndex)
 {
+    aboutToEdit();
     for (int i = 0; i < (int) items.size(); ++i)
     {
         if (items[(size_t) i].uid != itemUid) continue;
@@ -538,11 +583,11 @@ void HostEngine::clearRack()
     for (auto& item : old)
     {
         if (item.type == RackItem::Type::plugin)
-            destroySlot (item.plugin);
+            retireSlot (item.plugin);
         else
             for (auto& lane : item.lanes)
                 for (auto& s : lane)
-                    destroySlot (s);
+                    retireSlot (s);
     }
     changed();
 }
@@ -750,23 +795,40 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
         return false;
     }
 
-    // Tear down: take the old rack off the audio thread first, then delete it.
+    // Switching presets without a gap:
+    //  1. plugins this preset shares with the one playing are kept loaded and just get new settings;
+    //  2. other plugins come from the spare pool (loaded earlier) or are loaded now, while the old
+    //     preset keeps playing;
+    //  3. only then is the output faded out for a few ms, the new chain swapped in and faded back in.
+    std::vector<std::shared_ptr<PluginSlot>> playing;   // in the current rack, still processing
+    for (auto& item : items)
     {
-        auto old = std::move (items);
-        items.clear();
-        rewire();
-        for (auto& item : old)
-        {
-            if (item.type == RackItem::Type::plugin) destroySlot (item.plugin);
-            else for (auto& lane : item.lanes) for (auto& s : lane) destroySlot (s);
-        }
+        if (item.type == RackItem::Type::plugin) { if (item.plugin) playing.push_back (item.plugin); }
+        else for (auto& lane : item.lanes) for (auto& sl : lane) playing.push_back (sl);
     }
 
-    currentPresetName = root.getStringAttribute ("name", "Untitled");
-    inputStage->gainDb  = (float) root.getDoubleAttribute ("inGain", 0.0);
-    outputStage->gainDb = (float) root.getDoubleAttribute ("outGain", 0.0);
-    if (root.hasAttribute ("bpm")) transport.setBpm (root.getDoubleAttribute ("bpm", 120.0));   // older presets keep the current tempo
-    inputStage->inputMode = root.getIntAttribute ("inputMode", (int) GainMeterProcessor::InputMode::Left);
+    struct Pending
+    {
+        std::shared_ptr<PluginSlot> slot;
+        juce::MemoryBlock state;
+        bool hasState = false;
+        bool live = false;          // still processing in the old rack: settings applied after the fade
+        bool bypass = false;
+        juce::String stableId;
+    };
+    std::vector<Pending> pending;
+
+    auto takeMatching = [] (std::vector<std::shared_ptr<PluginSlot>>& from, const juce::PluginDescription& desc)
+    {
+        for (auto it = from.begin(); it != from.end(); ++it)
+            if ((*it)->instance() != nullptr && ! (*it)->crashed && (*it)->description.isDuplicateOf (desc))
+            {
+                auto sl = *it;
+                from.erase (it);
+                return sl;
+            }
+        return std::shared_ptr<PluginSlot>();
+    };
 
     auto makeSlot = [&] (const juce::XmlElement& xs) -> std::shared_ptr<PluginSlot>
     {
@@ -778,27 +840,65 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
         for (auto& known : knownPlugins.getTypes())
             if (known.isDuplicateOf (desc)) { desc = known; break; }
 
-        juce::String err;
-        auto slot = createSlot (desc, err);
-        if (slot == nullptr)
+        if (skipPlugins.contains (desc.name, true))
         {
-            errors.add (desc.name + ": " + err);
+            errors.add (desc.name + ": left out (it crashed last time)");
             return {};
         }
 
-        if (auto* xst = xs.getChildByName ("STATE"))
+        Pending p;
+        bool fromSpares = false;
+        p.slot = takeMatching (playing, desc);
+        p.live = p.slot != nullptr;
+        if (p.slot == nullptr && (p.slot = takeMatching (spares, desc)) != nullptr)
+            fromSpares = true;
+
+        if (p.slot == nullptr)
         {
-            juce::MemoryBlock mb;
-            if (mb.fromBase64Encoding (xst->getAllSubText().trim()))
-                slot->instance()->setStateInformation (mb.getData(), (int) mb.getSize());
+            juce::String err;
+            p.slot = createSlot (desc, err);
+            if (p.slot == nullptr)
+            {
+                errors.add (desc.name + ": " + err);
+                return {};
+            }
+        }
+        else
+        {
+            if (fromSpares)
+            {
+                CrashGuard::Scope guard (p.slot->nameUtf8.c_str(), "starting");
+                rack->preparePlugin (*p.slot->instance());   // the device may have changed since
+            }
+            if (fromSpares) p.slot->uid = nextUid++;          // a fresh module as far as the UI is concerned
         }
 
-        slot->bypassed = xs.getBoolAttribute ("bypass", false);
-        if (xs.hasAttribute ("id"))
-            slot->stableId = xs.getStringAttribute ("id");   // older presets keep the fresh ID
-        return slot;
+        if (auto* xst = xs.getChildByName ("STATE"))
+            p.hasState = p.state.fromBase64Encoding (xst->getAllSubText().trim());
+
+        // Not playing: safe to set up right away.
+        if (! p.live)
+        {
+            if (p.hasState)
+            {
+                CrashGuard::Scope guard (p.slot->nameUtf8.c_str(), "loading its settings");
+                p.slot->instance()->setStateInformation (p.state.getData(), (int) p.state.getSize());
+            }
+            if (fromSpares) attachListener (*p.slot);
+        }
+
+        p.bypass = xs.getBoolAttribute ("bypass", false);
+        p.stableId = xs.hasAttribute ("id") ? xs.getStringAttribute ("id") : newStableId();
+        if (! p.live)
+        {
+            p.slot->bypassed = p.bypass;
+            p.slot->stableId = p.stableId;
+        }
+        pending.push_back (p);
+        return p.slot;
     };
 
+    std::vector<RackItem> newItems;
     for (auto* xi : root.getChildWithTagNameIterator ("ITEM"))
     {
         RackItem item;
@@ -816,23 +916,66 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
             {
                 auto l = juce::jlimit (0, 1, xl->getIntAttribute ("id"));
                 for (auto* xs : xl->getChildWithTagNameIterator ("SLOT"))
-                    if (auto s = makeSlot (*xs))
-                        item.lanes[l].push_back (s);
+                    if (auto sl = makeSlot (*xs))
+                        item.lanes[l].push_back (sl);
             }
-            items.push_back (std::move (item));
+            newItems.push_back (std::move (item));
         }
         else if (auto* xs = xi->getChildByName ("SLOT"))
         {
-            if (auto s = makeSlot (*xs))
+            if (auto sl = makeSlot (*xs))
             {
                 item.type = RackItem::Type::plugin;
-                item.plugin = s;
-                items.push_back (std::move (item));
+                item.plugin = sl;
+                newItems.push_back (std::move (item));
             }
         }
     }
 
+    // Everything is loaded: now the short swap.
+    const auto swapStart = juce::Time::getMillisecondCounterHiRes();
+    rack->fadeOut();
+    const bool faded = rack->waitForSilence();
+
+    auto oldItems = std::move (items);
+    items.clear();
+    rewire();                                    // nothing processing now
+
+    for (auto& p : pending)
+        if (p.live)
+        {
+            detachFromUi (*p.slot);              // closes its window etc. under the old uid
+            p.slot->uid = nextUid++;             // a fresh module as far as the UI is concerned
+            p.slot->bypassed = p.bypass;
+            p.slot->stableId = p.stableId;
+            if (p.hasState)
+            {
+                CrashGuard::Scope guard (p.slot->nameUtf8.c_str(), "loading its settings");
+                p.slot->instance()->setStateInformation (p.state.getData(), (int) p.state.getSize());
+            }
+            p.slot->instance()->reset();         // drop the old preset's echoes / reverb
+        }
+    for (auto& p : pending)
+        if (p.live || p.slot->listener == nullptr)
+            attachListener (*p.slot);
+
+    currentPresetName = root.getStringAttribute ("name", "Untitled");
+    inputStage->gainDb  = (float) root.getDoubleAttribute ("inGain", 0.0);
+    outputStage->gainDb = (float) root.getDoubleAttribute ("outGain", 0.0);
+    if (root.hasAttribute ("bpm")) transport.setBpm (root.getDoubleAttribute ("bpm", 120.0));   // older presets keep the current tempo
+    inputStage->inputMode = root.getIntAttribute ("inputMode", (int) GainMeterProcessor::InputMode::Left);
+
+    items = std::move (newItems);
     rewire();
+    rack->fadeIn();
+    DBG ("PEQUOD: preset swap " << (int) (juce::Time::getMillisecondCounterHiRes() - swapStart) << " ms"
+         << (faded ? "" : " (audio not running)"));
+
+    // Plugins of the old preset that this one doesn't use: kept loaded as spares.
+    for (auto& sl : playing)
+        retireSlot (sl);
+    oldItems.clear();
+
     changed();
     return errors.isEmpty();
 }

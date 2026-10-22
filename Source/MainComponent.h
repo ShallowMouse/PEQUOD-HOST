@@ -1,4 +1,6 @@
 #pragma once
+#include <set>
+#include "CrashGuard.h"
 
 #include "HostEngine.h"
 #include "ControlSurface.h"
@@ -48,6 +50,21 @@ private:
     ControlPanel controlPanel { engine, control };
     juce::Label statusBar;
     juce::TextButton rackViewButton { "RACK" }, pedalboardViewButton { "PEDALBOARD" };
+    juce::TextButton undoButton { "UNDO" }, redoButton { "REDO" };
+
+    // Undo / redo of rack edits: whole-rack snapshots (plugins, settings, mappings).
+    std::vector<std::unique_ptr<juce::XmlElement>> undoStack, redoStack;
+    bool restoringUndo = false;
+    void pushUndo();
+    void clearUndo();
+    void undo();
+    void redo();
+    void restoreSnapshot (const juce::XmlElement&);
+    void updateUndoButtons();
+
+    std::set<const PluginSlot*> reportedCrashes;
+    bool waitingForCrashAnswer = false;
+    void askAfterCrash (const CrashGuard::LastRun&);
     void setPedalboardView (bool);
     juce::TooltipWindow tooltips { this, 600 };
 
