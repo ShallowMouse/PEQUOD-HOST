@@ -126,7 +126,7 @@ jobs:
             Write-Output "::warning title=updates::Not published - add the RELEASES_TOKEN secret (see Installer/README.md)"
             exit 0
           }
-          $notes = git log -1 --pretty=%B
+          $notes = git log -1 --pretty=%s
           $notes | Out-File -Encoding utf8 notes.md
           gh release create "v$env:PEQUOD_VERSION" --repo ShallowMouse/PEQUOD-Host-Releases `
             --title "PEQUOD Host $env:PEQUOD_VERSION" --notes-file notes.md `

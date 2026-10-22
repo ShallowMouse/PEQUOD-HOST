@@ -29,6 +29,7 @@ public:
     std::function<void (const juce::String&)> onStatus;
 
     static juce::String currentVersion();
+    static juce::String changesSince (const juce::String& installed, const juce::String& latest, const juce::String& latestBody);
     static int compareVersions (const juce::String& a, const juce::String& b);   // <0 a older, 0 same, >0 a newer
 
 private:

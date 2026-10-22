@@ -112,10 +112,8 @@ MainComponent::MainComponent()
     header.onUpdate = [this]
     {
         auto notes = updater.getReleaseNotes();
-        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Update PEQUOD Host",
-            "PEQUOD Host " + updater.getLatestVersion() + " is available (you have " + Updater::currentVersion() + ").\n\n"
-              + (notes.isNotEmpty() ? notes + "\n\n" : juce::String())
-              + "PEQUOD will close, install the update and start again. Your presets and settings are kept.",
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::NoIcon, "PEQUOD Host " + updater.getLatestVersion(),
+            notes.isNotEmpty() ? "What's new:\n\n" + notes : juce::String ("A new version is ready."),
             "Install", "Later", nullptr,
             juce::ModalCallbackFunction::create ([this] (int r)
             {
