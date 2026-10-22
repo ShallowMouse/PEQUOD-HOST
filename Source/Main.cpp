@@ -42,6 +42,19 @@ public:
             if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()) area = d->userBounds.toNearestInt();
             centreWithSize (juce::jmin (getWidth(), area.getWidth() - 40), juce::jmin (getHeight(), area.getHeight() - 40));
             setVisible (true);
+            showOnTop();
+
+            // Windows can hand a program started by an installer, a shortcut or the updater a "start minimised"
+            // request; PEQUOD always opens as a normal window in front.
+            juce::Component::SafePointer<MainWindow> safe (this);
+            for (int ms : { 300, 1200 })
+                juce::Timer::callAfterDelay (ms, [safe] { if (safe != nullptr && safe->isMinimised()) safe->showOnTop(); });
+        }
+
+        void showOnTop()
+        {
+            if (isMinimised()) setMinimised (false);
+            toFront (true);
         }
 
         void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
