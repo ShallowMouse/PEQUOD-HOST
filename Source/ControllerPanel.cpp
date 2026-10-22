@@ -1230,6 +1230,9 @@ private:
             case Mapping::Target::tuner:        return "Tuner";
             case Mapping::Target::inputGain:    return "Input level (IN)";
             case Mapping::Target::outputGain:   return "Master volume (OUT)";
+            case Mapping::Target::tapTempo:     return "Tap tempo";
+            case Mapping::Target::click:        return "Metronome click on/off";
+            case Mapping::Target::tempo:        return "Tempo";
             default:                            return control.describeTarget (m);
         }
     }
@@ -1303,6 +1306,9 @@ private:
             menu.addSectionHeader ("OUTPUT");
             menu.addItem ("Tuner  (mutes while tuning)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tuner, 0, rep.get()); done(); });
             menu.addItem ("Mute",                        [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::mute, 0, rep.get()); done(); });
+            menu.addSectionHeader ("TEMPO");
+            menu.addItem ("Tap tempo  (its light flashes in time)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tapTempo, 0, rep.get()); done(); });
+            menu.addItem ("Metronome click on/off",                 [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::click, 0, rep.get()); done(); });
         }
         else
         {
@@ -1321,6 +1327,8 @@ private:
             }
             menu.addItem ("Master volume (OUT)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::outputGain, 0, rep.get()); done(); });
             menu.addItem ("Input level (IN)",    [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::inputGain, 0, rep.get()); done(); });
+            menu.addItem (turn ? "Tempo  (each click = 1 BPM)" : "Tempo  (40 - 240 BPM)",
+                          [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tempo, 0, rep.get()); done(); });
             if (! splits.empty()) menu.addSubMenu ("Split mix", splitMenu);
         }
         if (rep == nullptr)       // adding: MIDI to other gear and layer changes too, alongside PEQUOD functions

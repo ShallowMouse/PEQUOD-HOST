@@ -1,4 +1,5 @@
 #include "RackProcessor.h"
+#include "Transport.h"
 #include "HostEngine.h"
 
 namespace
@@ -67,6 +68,7 @@ std::unique_ptr<RenderPlan> RackProcessor::swapPlan (std::unique_ptr<RenderPlan>
 
 void RackProcessor::preparePlugin (juce::AudioPluginInstance& inst) const
 {
+    if (transport != nullptr) inst.setPlayHead (transport);
     inst.setRateAndBufferSizeDetails (currentRate.load(), currentBlock.load());
     inst.prepareToPlay (currentRate.load(), currentBlock.load());
 }
@@ -295,6 +297,7 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     else if (numIns == 1)  { stereo.copyFrom (0, 0, buffer, 0, 0, n); stereo.copyFrom (1, 0, buffer, 0, 0, n); }
     else                   stereo.clear();
 
+    if (transport != nullptr) transport->beginBlock (getSampleRate());
     inputStage.processBlock (stereo, midi);
 
     {
@@ -303,6 +306,7 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
             processPlan (*plan, stereo, midi, n);
     }
 
+    if (transport != nullptr) transport->endBlock (stereo, n);     // the click goes through the master out (and MUTE)
     outputStage.processBlock (stereo, midi);
 
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)

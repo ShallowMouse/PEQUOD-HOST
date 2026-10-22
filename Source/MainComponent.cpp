@@ -62,6 +62,9 @@ MainComponent::MainComponent()
     engine.initialiseAudio (deviceXml.get());
 
     engine.setPipelineStages (settings->getIntValue ("pipelineStages", 1));
+    engine.transport.clickOn = settings->getBoolValue ("clickOn", false);
+    engine.transport.clickGainDb = (float) settings->getDoubleValue ("clickDb", -12.0);
+    engine.transport.beatsPerBar = juce::jlimit (2, 7, settings->getIntValue ("beatsPerBar", 4));
 
     // MIDI / OSC
     auto controlXml = settings->getXmlValue ("control");
@@ -97,6 +100,7 @@ MainComponent::MainComponent()
         return names;
     };
     header.onController = [this] { showController(); };
+    header.onTempoSettingsChanged = [this] { engine.markModified(); };     // the tempo is saved with the preset
 
     // Updates: checked in the background every time PEQUOD starts
     updater.onChange = [this]
@@ -244,6 +248,9 @@ void MainComponent::saveSettings()
     s->setValue ("lastPreset", currentPresetFile.getFullPathName());
     s->setValue ("currentBank", library.getCurrentBank());
     s->setValue ("pipelineStages", engine.getPipelineStages());
+    s->setValue ("clickOn", engine.transport.clickOn.load());
+    s->setValue ("clickDb", (double) engine.transport.clickGainDb.load());
+    s->setValue ("beatsPerBar", engine.transport.beatsPerBar.load());
     s->setValue ("pedalboardView", rack.isPedalboard());
     s->setValue ("sessionModified", engine.getChangeCounter() != savedChangeCounter);
     s->saveIfNeeded();

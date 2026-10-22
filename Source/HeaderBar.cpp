@@ -80,14 +80,139 @@ void TunerDisplay::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+//==============================================================================
+void TempoDisplay::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (Pequod::Colours::well);
+    g.fillRoundedRectangle (r, 4.0f);
+    g.setColour (transport.clickOn.load() ? Pequod::Colours::mustardLo : Pequod::Colours::line);
+    g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
+
+    auto inner = r.reduced (8.0f, 4.0f);
+    auto top = inner.removeFromTop (12.0f);
+    g.setFont (Pequod::heading (10.0f, false));
+    g.setColour (Pequod::Colours::textDim);
+    g.drawText (transport.clickOn.load() ? "TEMPO  -  CLICK ON" : "TEMPO", top, juce::Justification::centredLeft);
+
+    // beat dots
+    const int beats = juce::jlimit (1, 8, transport.beatsPerBar.load());
+    const int now = transport.currentBeatInBar();
+    const bool flash = transport.isOnBeatFlash();
+    auto dots = inner.removeFromBottom (8.0f);
+    const float d = 6.0f, gap = 4.0f;
+    float x = dots.getRight() - (float) beats * (d + gap) + gap;
+    for (int i = 0; i < beats; ++i, x += d + gap)
+    {
+        const bool lit = i == now && flash;
+        g.setColour (lit ? (i == 0 ? Pequod::Colours::mustard : Pequod::Colours::text) : Pequod::Colours::line);
+        g.fillEllipse (x, dots.getCentreY() - d * 0.5f, d, d);
+    }
+
+    g.setColour (Pequod::Colours::mustard);
+    g.setFont (Pequod::heading (19.0f));
+    auto bpmText = juce::String (transport.bpm.load(), 1);
+    g.drawText (bpmText, inner.withTrimmedRight (2.0f), juce::Justification::centredLeft);
+    g.setColour (Pequod::Colours::textDim);
+    g.setFont (Pequod::heading (10.0f, false));
+    g.drawText ("BPM", inner, juce::Justification::centredRight);
+}
+
+void TempoDisplay::timerCallback()
+{
+    const int beat = transport.isOnBeatFlash() ? transport.currentBeatInBar() : -1;
+    if (beat != lastBeat || transport.bpm.load() != lastBpm || transport.clickOn.load() != lastClick)
+    {
+        lastBeat = beat;
+        lastBpm = transport.bpm.load();
+        lastClick = transport.clickOn.load();
+        repaint();
+    }
+}
+
+void TempoDisplay::mouseDown (const juce::MouseEvent& e)
+{
+    dragStartBpm = transport.bpm.load();
+    dragged = false;
+    if (e.mods.isPopupMenu()) { showMenu(); dragged = true; }
+}
+
+void TempoDisplay::mouseDrag (const juce::MouseEvent& e)
+{
+    if (std::abs (e.getDistanceFromDragStartY()) < 3 && ! dragged) return;
+    dragged = true;
+    const double perPixel = e.mods.isShiftDown() ? 0.1 : 0.5;
+    transport.setBpm (dragStartBpm - perPixel * (double) e.getDistanceFromDragStartY());
+    repaint();
+}
+
+void TempoDisplay::mouseUp (const juce::MouseEvent& e)
+{
+    if (dragged) { if (onChanged) onChanged(); return; }
+    if (e.getNumberOfClicks() == 1)
+    {
+        juce::Component::SafePointer<TempoDisplay> safe (this);
+        juce::Timer::callAfterDelay (260, [safe] { if (safe != nullptr && ! safe->dragged) safe->showMenu(); });
+    }
+}
+
+void TempoDisplay::mouseDoubleClick (const juce::MouseEvent&)
+{
+    dragged = true;     // cancels the single-click menu
+    typeTempo();
+}
+
+void TempoDisplay::showMenu()
+{
+    juce::PopupMenu m, volume, bars;
+    for (int db : { -30, -24, -18, -12, -6, 0 })
+        volume.addItem (juce::String (db) + " dB", true, std::abs (transport.clickGainDb.load() - (float) db) < 0.5f,
+                        [this, db] { transport.clickGainDb = (float) db; if (onChanged) onChanged(); });
+    for (int b = 2; b <= 7; ++b)
+        bars.addItem (juce::String (b) + " beats", true, transport.beatsPerBar.load() == b,
+                      [this, b] { transport.beatsPerBar = b; repaint(); if (onChanged) onChanged(); });
+    m.addItem ("Metronome click", true, transport.clickOn.load(),
+               [this] { transport.clickOn = ! transport.clickOn.load(); repaint(); if (onChanged) onChanged(); });
+    m.addSubMenu ("Click volume", volume);
+    m.addSubMenu ("Beats per bar", bars);
+    m.addSeparator();
+    m.addItem ("Type a tempo...", [this] { typeTempo(); });
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+}
+
+void TempoDisplay::typeTempo()
+{
+    auto* w = new juce::AlertWindow ("Tempo", "Beats per minute (" + juce::String ((int) Transport::minBpm) + " - "
+                                     + juce::String ((int) Transport::maxBpm) + ")", juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("bpm", juce::String (transport.bpm.load(), 1));
+    w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<TempoDisplay> safe (this);
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w] (int r)
+    {
+        if (r == 1 && safe != nullptr)
+        {
+            const double v = w->getTextEditorContents ("bpm").getDoubleValue();
+            if (v > 0.0) { safe->transport.setBpm (v); safe->repaint(); if (safe->onChanged) safe->onChanged(); }
+        }
+    }), true);
+}
+
+//==============================================================================
 HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
-    : engine (e), control (c), tunerDisplay (t)
+    : engine (e), control (c), tunerDisplay (t), tempoDisplay (e.transport)
 {
     for (auto* b : std::initializer_list<juce::Button*> { &prevButton, &nextButton, &presetButton, &saveButton, &saveAsButton, &initButton,
                      &learnButton, &audioButton, &pluginsButton, &controllerButton })
         addAndMakeVisible (b);
 
     addAndMakeVisible (tunerDisplay);
+    addAndMakeVisible (tempoDisplay);
+    tempoDisplay.onChanged = [this] { if (onTempoSettingsChanged) onTempoSettingsChanged(); };
+    tapButton.setTooltip ("Tap tempo: tap a few times in time. Right-click to learn a MIDI / OSC control (footswitches: CONTROLLER window).");
+    tapButton.onClick = [this] { engine.transport.tap(); };
+    tapButton.onLearn = [this] { control.armLearnFor (Mapping::Target::tapTempo); };
+    addAndMakeVisible (tapButton);
 
     muteButton.setTooltip ("Mute the output (e.g. while tuning). Right-click to learn a MIDI / OSC control.");
     muteButton.onClick = [this] { control.setMuted (! control.isMuted()); };
@@ -305,6 +430,10 @@ void HeaderBar::resized()
     tunerDisplay.setBounds (row (r.removeFromRight (176), 44));
     r.removeFromRight (10);
     learnButton.setBounds (row (r.removeFromRight (66)));
+    r.removeFromRight (10);
+    tapButton.setBounds (row (r.removeFromRight (50)));
+    r.removeFromRight (4);
+    tempoDisplay.setBounds (row (r.removeFromRight (124), 44));
     r.removeFromRight (12);
 
     // Left-hand block: wordmark, preset navigation (preset name takes the remaining space)

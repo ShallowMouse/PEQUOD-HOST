@@ -4,7 +4,7 @@
 
 namespace
 {
-    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner", "stompSlot", "presetSelect" };
+    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner", "stompSlot", "presetSelect", "tapTempo", "tempo", "click" };
     const char* sourceNames[] = { "cc", "note", "osc", "ctrl" };
 
     template <typename Enum>
@@ -180,6 +180,8 @@ void ControlSurface::timerCallback()
     }
 
     // 3. Feedback for host-level values (polled so UI, MIDI and OSC changes are all covered).
+    static double lastBpm = -1;
+    if (std::abs (engine.transport.bpm.load() - lastBpm) > 0.01) { lastBpm = engine.transport.bpm.load(); send ("/pequod/tempo", (float) lastBpm); }
     static float lastIn = -999, lastOut = -999;
     auto inDb = engine.getInputStage()->gainDb.load();
     auto outDb = engine.getOutputStage()->gainDb.load();
@@ -334,6 +336,9 @@ bool ControlSurface::handleFixedOsc (const juce::OSCMessage& msg, float value)
     const bool press = value >= 0.5f;
 
     if (parts[1] == "sync") { sendFullState(); return true; }
+    if (parts[1] == "tap")  { if (msg.isEmpty() || press) { engine.transport.tap(); if (onTempoTapped) onTempoTapped(); } return true; }
+    if (parts[1] == "tempo" && ! msg.isEmpty()) { engine.transport.setBpm (argAsFloat (msg, 120.0f)); return true; }
+    if (parts[1] == "click") { engine.transport.clickOn = msg.isEmpty() ? ! engine.transport.clickOn.load() : press; return true; }
     if (parts[1] == "mute") { setMuted (msg.isEmpty() ? ! isMuted() : press); return true; }
 
     if (parts[1] == "slot" && parts.size() >= 4)
@@ -526,6 +531,16 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
         }
         case Mapping::Target::presetSelect:
             if (risingEdge && onPresetIndex && m.paramIndex > 0) onPresetIndex (m.paramIndex - 1);
+            break;
+        case Mapping::Target::tapTempo:
+            if (risingEdge) { engine.transport.tap(); if (onTempoTapped) onTempoTapped(); }
+            break;
+        case Mapping::Target::tempo:      // a pedal / fader: 40 - 240 BPM
+            engine.transport.setBpm (40.0 + 200.0 * juce::jlimit (0.0f, 1.0f, value));
+            break;
+        case Mapping::Target::click:
+            if (m.toggle) { if (risingEdge) engine.transport.clickOn = ! engine.transport.clickOn.load(); }
+            else          engine.transport.clickOn = isPress;
             break;
         case Mapping::Target::inputGain:  engine.getInputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::outputGain: engine.getOutputStage()->gainDb = normToDb (value); break;
@@ -848,6 +863,9 @@ bool ControlSurface::handleControllerEvent (const juce::String& unit, int contro
                 case Mapping::Target::outputGain:
                     engine.getOutputStage()->gainDb = juce::jlimit (-36.0f, 12.0f, engine.getOutputStage()->gainDb.load() + 0.5f * (float) delta);
                     break;
+                case Mapping::Target::tempo:
+                    engine.transport.setBpm (engine.transport.bpm.load() + (double) delta);
+                    break;
                 default:
                     apply (m, 1.0f, true); apply (m, 0.0f, false);
                     break;
@@ -943,6 +961,9 @@ juce::String ControlSurface::describeTarget (const Mapping& m) const
             return "Effect " + juce::String (m.paramIndex) + " ON-OFF" + now;
         }
         case Mapping::Target::presetSelect: return "Preset " + juce::String (m.paramIndex);
+        case Mapping::Target::tapTempo:     return "TAP TEMPO";
+        case Mapping::Target::tempo:        return "TEMPO";
+        case Mapping::Target::click:        return "CLICK on/off";
     }
     return {};
 }
@@ -993,7 +1014,7 @@ static juce::XmlElement* mappingToXml (const Mapping& m, int targetRef)
 static Mapping mappingFromXml (const juce::XmlElement& x)
 {
     Mapping m;
-    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 13, Mapping::Target::param);
+    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 16, Mapping::Target::param);
     m.paramIndex = x.getIntAttribute ("param", -1);
     m.source = enumFromName (x.getStringAttribute ("source"), sourceNames, 4, Mapping::Source::midiCC);
     m.midiChannel = x.getIntAttribute ("ch");

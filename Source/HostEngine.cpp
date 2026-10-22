@@ -35,6 +35,7 @@ HostEngine::HostEngine()
     outputStage = outputStageOwned.get();
 
     rack = std::make_unique<RackProcessor> (*inputStage, *outputStage);
+    rack->transport = &transport;
     rack->onNeedsNewPlan = [this] { rewire(); };
 
     rewire();
@@ -714,6 +715,7 @@ std::unique_ptr<juce::XmlElement> HostEngine::createRackXml() const
     root->setAttribute ("inGain", inputStage->gainDb.load());
     root->setAttribute ("outGain", outputStage->gainDb.load());
     root->setAttribute ("inputMode", inputStage->inputMode.load());
+    root->setAttribute ("bpm", transport.bpm.load());
 
     for (auto& item : items)
     {
@@ -763,6 +765,7 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
     currentPresetName = root.getStringAttribute ("name", "Untitled");
     inputStage->gainDb  = (float) root.getDoubleAttribute ("inGain", 0.0);
     outputStage->gainDb = (float) root.getDoubleAttribute ("outGain", 0.0);
+    if (root.hasAttribute ("bpm")) transport.setBpm (root.getDoubleAttribute ("bpm", 120.0));   // older presets keep the current tempo
     inputStage->inputMode = root.getIntAttribute ("inputMode", (int) GainMeterProcessor::InputMode::Left);
 
     auto makeSlot = [&] (const juce::XmlElement& xs) -> std::shared_ptr<PluginSlot>

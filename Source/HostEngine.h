@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include "RackProcessor.h"
+#include "Transport.h"
 
 //==============================================================================
 /** Input conditioning + gain + peak metering. Used for the master IN and OUT stages. */
@@ -194,6 +195,7 @@ public:
     int getSplitNumber (int itemUid) const;
 
     //== Master
+    Transport transport;                       // tempo (saved with the preset) + click
     GainMeterProcessor* getInputStage() const  { return inputStage; }
     GainMeterProcessor* getOutputStage() const { return outputStage; }
 

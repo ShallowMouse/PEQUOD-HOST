@@ -3,6 +3,7 @@
 #include "WorkerPool.h"
 
 class GainMeterProcessor;
+class Transport;
 struct PluginSlot;
 
 //==============================================================================
@@ -107,6 +108,9 @@ public:
 
     /** Swaps in a new plan; returns the old one so the caller can delete it off the audio thread. */
     std::unique_ptr<RenderPlan> swapPlan (std::unique_ptr<RenderPlan>);
+
+    /** The master tempo every plugin sees (and the click). */
+    Transport* transport = nullptr;
 
     double getCurrentSampleRate() const noexcept { return currentRate.load(); }
     int getCurrentBlockSize() const noexcept     { return currentBlock.load(); }

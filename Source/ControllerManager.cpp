@@ -555,6 +555,9 @@ juce::String ControllerManager::shortLabelOf (const Mapping& mapping, int code) 
             case Mapping::Target::bankPrev:     return "BANK -";
             case Mapping::Target::mute:         return "MUTE";
             case Mapping::Target::tuner:        return "TUNER";
+            case Mapping::Target::tapTempo:     return "TAP";
+            case Mapping::Target::tempo:        return "TEMPO";
+            case Mapping::Target::click:        return "CLICK";
             case Mapping::Target::splitMix:     return "SPLIT " + juce::String (engine.getSplitNumber (m->slotUid));
             case Mapping::Target::inputGain:    return "IN";
             case Mapping::Target::outputGain:   return "VOLUME";
@@ -694,6 +697,9 @@ bool ControllerManager::mappingIsOn (const Mapping& m) const
         case Mapping::Target::mute:         return control.isMuted() && ! control.isTunerMode();
         case Mapping::Target::tuner:        return control.isTunerMode();
         case Mapping::Target::presetSelect: return control.getPresetIndex && control.getPresetIndex() == m.paramIndex - 1;
+        case Mapping::Target::tapTempo:     return engine.transport.isOnBeatFlash();      // blinks in time
+        case Mapping::Target::click:        return engine.transport.clickOn.load();
+        case Mapping::Target::tempo:        return false;
         case Mapping::Target::presetNext: case Mapping::Target::presetPrev:
         case Mapping::Target::bankNext:   case Mapping::Target::bankPrev:
         case Mapping::Target::inputGain:  case Mapping::Target::outputGain:
@@ -1067,6 +1073,10 @@ juce::String ControllerManager::flashFor (const Mapping& m, bool afterPress) con
             return {};
         case Mapping::Target::mute:
             return control.isMuted() ? "MUTED" : "UNMUTED";
+        case Mapping::Target::tapTempo:
+            return engine.transport.tapCount() >= 2 ? "TEMPO " + juce::String (juce::roundToInt (engine.transport.bpm.load())) : juce::String ("TAP...");
+        case Mapping::Target::click:
+            return engine.transport.clickOn.load() ? "CLICK ON" : "CLICK OFF";
         default:
             return {};
     }
@@ -1145,7 +1155,8 @@ void ControllerManager::updateScreen (bool force)
         const int idx = control.getPresetIndex ? control.getPresetIndex() : -1;
         juce::String sub;
         if (idx >= 0) sub << "PRESET " << (idx + 1);
-        if (getNumLayers() > 1) sub << (sub.isEmpty() ? "" : "   ") << "LAYER " << (layer + 1);
+        if (getNumLayers() > 1) sub << (sub.isEmpty() ? "" : "  ") << "L" << (layer + 1);
+        sub << (sub.isEmpty() ? "" : "  ") << juce::roundToInt (engine.transport.bpm.load()) << " BPM";
         o->setProperty ("mode", "preset");
         o->setProperty ("top", upper (bank, 21));
         o->setProperty ("main", upper (preset, 20));

@@ -30,6 +30,43 @@ private:
 };
 
 //==============================================================================
+/** Tempo readout: shows the BPM and the beat. Drag up/down to change it, double-click to type it,
+    click for the metronome click, its volume and the beats per bar. */
+class TempoDisplay : public juce::Component,
+                     public juce::SettableTooltipClient,
+                     private juce::Timer
+{
+public:
+    explicit TempoDisplay (Transport& t) : transport (t)
+    {
+        setTooltip ("Tempo for tempo-synced effects. Drag up/down to change it (shift = fine), double-click to type it, "
+                    "click for the metronome click.");
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        startTimerHz (30);
+    }
+
+    std::function<void()> onChanged;      // tempo or click settings changed (to save them)
+
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+
+private:
+    Transport& transport;
+    double dragStartBpm = 120.0;
+    bool dragged = false;
+    int lastBeat = -1;
+    double lastBpm = 0;
+    bool lastClick = false;
+
+    void timerCallback() override;
+    void showMenu();
+    void typeTempo();
+};
+
+//==============================================================================
 /** Top strip: wordmark, preset navigation, learn, tuner + mute, settings, master IN/OUT with meters. */
 class HeaderBar : public juce::Component,
                   private juce::Timer
@@ -47,6 +84,7 @@ public:
     std::function<void()> onPresetMenu, onController;
     std::function<int()> controllerState;   // 0 none, 1 connected, 2 updating
     std::function<void (int stages)> onPipelineStagesChanged;
+    std::function<void()> onTempoSettingsChanged;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -70,6 +108,8 @@ private:
     juce::TextButton updateButton;
 
     TunerDisplay tunerDisplay;
+    TempoDisplay tempoDisplay;
+    LearnableButton tapButton { "TAP" };
     LearnableButton muteButton { "MUTE" };
 
     LearnableSlider inKnob, outKnob;
