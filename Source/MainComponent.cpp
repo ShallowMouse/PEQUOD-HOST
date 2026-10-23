@@ -207,6 +207,12 @@ MainComponent::MainComponent()
     browser.onRenameBank   = [this] (const juce::String& b) { renameBank (b); };
     browser.onDeleteBank   = [this] (const juce::String& b) { deleteBank (b); };
     browser.onMovePreset   = [this] (const juce::File& f, const juce::String& b) { movePreset (f, b); };
+    browser.setGrouping (settings->getIntValue ("browserGrouping", 0) == 1 ? BrowserPanel::Grouping::collection
+                                                                          : BrowserPanel::Grouping::function);
+    browser.onGroupingChanged = [this] (BrowserPanel::Grouping g)
+    {
+        appProperties->getUserSettings()->setValue ("browserGrouping", g == BrowserPanel::Grouping::collection ? 1 : 0);
+    };
     library.addChangeListener (this);
 
     browser.refresh();
