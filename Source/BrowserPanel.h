@@ -3,6 +3,7 @@
 #include "HostEngine.h"
 #include "PequodLookAndFeel.h"
 #include "PresetLibrary.h"
+#include "PluginTags.h"
 
 //==============================================================================
 /** Left-hand browser: PRESETS / PLUGINS tabs, search, list. Plugins drag into the rack. */
@@ -17,6 +18,12 @@ public:
     void refresh();
     void showPresets (bool presets);
     void setCurrentPresetFile (const juce::File& f) { currentPreset = f; list.repaint(); }
+
+    /** How the PLUGINS tab is laid out: by function (amps, drives, delays...) or by collection. */
+    enum class Grouping { function = 0, collection = 1 };
+    void setGrouping (Grouping);
+    Grouping getGrouping() const { return grouping; }
+    std::function<void (Grouping)> onGroupingChanged;
 
     std::function<void (const juce::PluginDescription&)> onAddPlugin;
     std::function<void (const juce::File&)> onLoadPreset;
@@ -39,16 +46,20 @@ private:
         int pluginIndex = -1;
         juce::File file;
         juce::String bank;          // bank header rows
+        juce::Colour colour;        // plugin rows and group headers: the function's colour
     };
 
     HostEngine& engine;
     PresetLibrary& library;
     juce::File currentPreset;
     bool presetsTab = false;
+    Grouping grouping = Grouping::function;
+    int hiddenDuplicates = 0;
 
     juce::TextButton presetsTabButton { "PRESETS" }, pluginsTabButton { "PLUGINS" };
     juce::TextEditor search;
     juce::TextButton newBankButton { "+ BANK" };
+    juce::TextButton byFunctionButton { "BY FUNCTION" }, byCollectionButton { "BY COLLECTION" };
     juce::ListBox list { "browser", this };
     std::vector<Row> rows;
 

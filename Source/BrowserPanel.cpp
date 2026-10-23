@@ -1,3 +1,4 @@
+#include <set>
 #include "BrowserPanel.h"
 
 BrowserPanel::BrowserPanel (HostEngine& e, PresetLibrary& lib) : engine (e), library (lib)
@@ -13,6 +14,18 @@ BrowserPanel::BrowserPanel (HostEngine& e, PresetLibrary& lib) : engine (e), lib
         addAndMakeVisible (b);
     }
     presetsTabButton.onClick = [this] { showPresets (true); };
+
+    for (auto* b : { &byFunctionButton, &byCollectionButton })
+    {
+        b->setClickingTogglesState (false);
+        b->setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
+        addChildComponent (b);
+    }
+    byFunctionButton.setTooltip ("Group plugins by what they do: amps, drives, delays, reverbs...");
+    byCollectionButton.setTooltip ("Group plugins by the collection they come from");
+    byFunctionButton.onClick   = [this] { setGrouping (Grouping::function); if (onGroupingChanged) onGroupingChanged (grouping); };
+    byCollectionButton.onClick = [this] { setGrouping (Grouping::collection); if (onGroupingChanged) onGroupingChanged (grouping); };
+    byFunctionButton.setToggleState (true, juce::dontSendNotification);
     pluginsTabButton.onClick = [this] { showPresets (false); };
 
     search.setTextToShowWhenEmpty ("Search...", Pequod::Colours::textDim);
@@ -42,8 +55,19 @@ void BrowserPanel::showPresets (bool p)
     presetsTabButton.setToggleState (p, juce::dontSendNotification);
     pluginsTabButton.setToggleState (! p, juce::dontSendNotification);
     newBankButton.setVisible (p);
+    byFunctionButton.setVisible (! p);
+    byCollectionButton.setVisible (! p);
     resized();
     refresh();
+}
+
+void BrowserPanel::setGrouping (Grouping g)
+{
+    grouping = g;
+    byFunctionButton.setToggleState (g == Grouping::function, juce::dontSendNotification);
+    byCollectionButton.setToggleState (g == Grouping::collection, juce::dontSendNotification);
+    refresh();
+    list.scrollToEnsureRowIsOnscreen (0);
 }
 
 void BrowserPanel::refresh()
@@ -78,34 +102,74 @@ void BrowserPanel::refresh()
     else
     {
         auto types = engine.knownPlugins.getTypes();
-        std::vector<int> order;
+        const bool byFunction = grouping == Grouping::function;
+
+        struct Entry { int index; juce::String group, function, collection; int order; };
+        std::vector<Entry> entries;
+        std::set<juce::String> seen;
+        hiddenDuplicates = 0;
+
         for (int i = 0; i < types.size(); ++i)
         {
             auto& t = types.getReference (i);
-            if (filter.isEmpty() || t.name.containsIgnoreCase (filter) || t.manufacturerName.containsIgnoreCase (filter)
-                 || t.category.containsIgnoreCase (filter))
-                order.push_back (i);
+
+            // The same plugin installed twice (e.g. in its collection and in PEQUOD Pedals): show it once.
+            if (! seen.insert (PluginTags::duplicateKey (t)).second)
+            {
+                ++hiddenDuplicates;
+                continue;
+            }
+
+            const auto function = PluginTags::functionOf (t);
+            const auto collection = PluginTags::collectionOf (t);
+            if (filter.isNotEmpty() && ! (t.name.containsIgnoreCase (filter) || t.manufacturerName.containsIgnoreCase (filter)
+                                           || t.category.containsIgnoreCase (filter) || function.containsIgnoreCase (filter)
+                                           || collection.containsIgnoreCase (filter)))
+                continue;
+
+            int order = 0;
+            if (byFunction)                         order = PluginTags::functionOrder (t);
+            else if (collection == "PEQUOD")        order = 0;   // the standalone PEQUOD tools first
+            else if (collection == "PEQUOD Pedals") order = 1;
+            else if (PluginTags::isPequod (t))      order = 2;
+            else                                    order = 3;   // other makers last
+
+            entries.push_back ({ i, byFunction ? function : collection, function, collection, order });
         }
 
-        std::sort (order.begin(), order.end(), [&] (int a, int b)
+        std::sort (entries.begin(), entries.end(), [&] (const Entry& a, const Entry& b)
         {
-            auto& ta = types.getReference (a);
-            auto& tb = types.getReference (b);
-            auto c = ta.manufacturerName.compareIgnoreCase (tb.manufacturerName);
-            return c != 0 ? c < 0 : ta.name.compareIgnoreCase (tb.name) < 0;
+            if (a.order != b.order) return a.order < b.order;
+            if (auto c = a.group.compareIgnoreCase (b.group); c != 0) return c < 0;
+            auto& ta = types.getReference (a.index);
+            auto& tb = types.getReference (b.index);
+            if (auto c = ta.name.compareIgnoreCase (tb.name); c != 0) return c < 0;
+            return a.collection.compareIgnoreCase (b.collection) < 0;
         });
 
-        juce::String lastMaker = "\x01";
-        for (auto i : order)
+        juce::String lastGroup = "\x01";
+        for (auto& e : entries)
         {
-            auto& t = types.getReference (i);
-            auto maker = t.manufacturerName.isEmpty() ? juce::String ("Unknown") : t.manufacturerName;
-            if (maker != lastMaker)
+            auto& t = types.getReference (e.index);
+            const auto colour = PluginColours::forPlugin (t);
+            if (e.group != lastGroup)
             {
-                rows.push_back ({ true, maker.toUpperCase(), {}, -1, {}, {} });
-                lastMaker = maker;
+                Row h { true, e.group.toUpperCase(), {}, -1, {}, {} };
+                h.colour = byFunction && e.group != "Other" ? colour : juce::Colour();
+                rows.push_back (h);
+                lastGroup = e.group;
             }
-            rows.push_back ({ false, t.name, t.isInstrument ? "INSTRUMENT" : t.category, i, {}, {} });
+
+            // The other tag goes on the right: the collection when grouped by function, and the reverse.
+            juce::String tag;
+            if (byFunction) tag = e.collection.upToFirstOccurrenceOf (PluginTags::sep(), false, false);
+            else            tag = t.isInstrument ? juce::String ("Instrument") : e.function.upToFirstOccurrenceOf (",", false, false)
+                                                                                    .upToFirstOccurrenceOf (" &", false, false);
+            if (byFunction && t.isInstrument) tag = "Instrument" + PluginTags::sep() + tag;
+
+            Row row { false, t.name, tag, e.index, {}, {} };
+            row.colour = colour;
+            rows.push_back (row);
         }
 
         if (rows.empty())
@@ -146,9 +210,10 @@ void BrowserPanel::paintListBoxItem (int rowIndex, juce::Graphics& g, int w, int
             return;
         }
 
-        g.setColour (Pequod::Colours::mustardLo.withAlpha (0.35f));
-        g.fillRect (r.removeFromBottom (1));
-        g.setColour (Pequod::Colours::mustard);
+        const bool tinted = ! row.colour.isTransparent();
+        g.setColour (tinted ? PluginColours::forLed (row.colour).withAlpha (0.6f) : Pequod::Colours::mustardLo.withAlpha (0.35f));
+        g.fillRect (r.removeFromBottom (tinted ? 2 : 1));
+        g.setColour (tinted ? PluginColours::forLed (row.colour) : Pequod::Colours::mustard);
         g.setFont (Pequod::heading (12.0f));
         g.drawText (row.text, r.reduced (10, 0), juce::Justification::bottomLeft);
         return;
@@ -164,12 +229,19 @@ void BrowserPanel::paintListBoxItem (int rowIndex, juce::Graphics& g, int w, int
         g.fillRect (r.withWidth (3));
     }
 
+    if (row.pluginIndex >= 0 && ! row.colour.isTransparent())
+    {
+        // a small LED in the function's colour
+        g.setColour (PluginColours::forLed (row.colour));
+        g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ 10.0f, (float) h * 0.5f }));
+    }
+
     g.setColour (isCurrent ? Pequod::Colours::mustard : Pequod::Colours::text);
     g.setFont (Pequod::body (14.0f, isCurrent));
-    auto textArea = r.reduced (16, 0);
+    auto textArea = r.reduced (16, 0).withTrimmedLeft (row.pluginIndex >= 0 ? 4 : 0);
     if (row.subText.isNotEmpty())
     {
-        auto sub = textArea.removeFromRight (juce::jmin (100, w / 3));
+        auto sub = textArea.removeFromRight (juce::jmin (row.pluginIndex >= 0 ? 110 : 100, w * 2 / 5));
         g.setColour (Pequod::Colours::textDim);
         g.setFont (Pequod::heading (10.0f, false));
         g.drawText (row.subText.upToFirstOccurrenceOf ("|", false, false).toUpperCase(), sub, juce::Justification::centredRight);
@@ -269,7 +341,20 @@ juce::String BrowserPanel::getTooltipForRow (int rowIndex)
 {
     if (! juce::isPositiveAndBelow (rowIndex, (int) rows.size())) return {};
     auto& row = rows[(size_t) rowIndex];
-    if (row.pluginIndex >= 0) return "Drag into the rack, or double-click to add at the end";
+    if (row.pluginIndex >= 0)
+    {
+        auto types = engine.knownPlugins.getTypes();
+        if (juce::isPositiveAndBelow (row.pluginIndex, types.size()))
+        {
+            auto& t = types.getReference (row.pluginIndex);
+            return t.name + "\n" + PluginTags::functionOf (t) + PluginTags::sep() + PluginTags::collectionOf (t)
+                 + "\nDrag into the rack, or double-click to add at the end";
+        }
+        return "Drag into the rack, or double-click to add at the end";
+    }
+    if (row.isHeader && ! presetsTab && hiddenDuplicates > 0)
+        return juce::String (hiddenDuplicates) + " duplicate cop" + (hiddenDuplicates == 1 ? "y" : "ies")
+             + " of plugins installed twice are hidden";
     if (row.file != juce::File()) return "Double-click to load. Right-click to move it to another bank.";
     if (row.bank.isNotEmpty()) return "Click to make this the current bank. Right-click to rename or delete.";
     return {};
@@ -297,5 +382,12 @@ void BrowserPanel::resized()
     }
     search.setBounds (searchRow);
     r.removeFromTop (8);
+    if (! presetsTab)
+    {
+        auto groupRow = r.removeFromTop (24);
+        byFunctionButton.setBounds (groupRow.removeFromLeft (groupRow.getWidth() / 2).reduced (1, 0));
+        byCollectionButton.setBounds (groupRow.reduced (1, 0));
+        r.removeFromTop (6);
+    }
     list.setBounds (r);
 }
