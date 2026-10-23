@@ -9,7 +9,7 @@ struct Mapping
     enum class Target { param, bypass, splitMix, inputGain, outputGain, presetNext, presetPrev, mute, bankNext, bankPrev, tuner,
                         stompSlot,      // on/off of the Nth effect in whatever preset is loaded (paramIndex = N, 1-based)
                         presetSelect,   // load preset N of the current bank (paramIndex = N, 1-based)
-                        tapTempo, tempo, click };
+                        tapTempo, tempo, click, instrumentInput };
     enum class Source { midiCC, midiNote, osc, controller };
 
     // Controller sources: unit uid + control (0-3 switch, 100 pedal, 200 encoder turn, 201 encoder press) + layer
@@ -43,7 +43,8 @@ struct Mapping
     bool isSwitchTarget() const { return target == Target::bypass || target == Target::presetNext || target == Target::presetPrev || target == Target::mute
                                          || target == Target::bankNext || target == Target::bankPrev || target == Target::tuner
                                          || target == Target::stompSlot || target == Target::presetSelect
-                                         || target == Target::tapTempo || target == Target::click; }
+                                         || target == Target::tapTempo || target == Target::click
+                                         || target == Target::instrumentInput; }
 
     bool isController() const { return source == Source::controller; }
     bool isControllerButton() const { return isController() && (ctrlControl < ctrlPedal || ctrlControl == ctrlEncoderPress); }

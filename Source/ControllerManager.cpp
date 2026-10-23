@@ -558,6 +558,7 @@ juce::String ControllerManager::shortLabelOf (const Mapping& mapping, int code) 
             case Mapping::Target::tapTempo:     return "TAP";
             case Mapping::Target::tempo:        return "TEMPO";
             case Mapping::Target::click:        return "CLICK";
+            case Mapping::Target::instrumentInput: return "INST";
             case Mapping::Target::splitMix:     return "SPLIT " + juce::String (engine.getSplitNumber (m->slotUid));
             case Mapping::Target::inputGain:    return "IN";
             case Mapping::Target::outputGain:   return "VOLUME";
@@ -699,6 +700,7 @@ bool ControllerManager::mappingIsOn (const Mapping& m) const
         case Mapping::Target::presetSelect: return control.getPresetIndex && control.getPresetIndex() == m.paramIndex - 1;
         case Mapping::Target::tapTempo:     return engine.transport.isOnBeatFlash();      // blinks in time
         case Mapping::Target::click:        return engine.transport.clickOn.load();
+        case Mapping::Target::instrumentInput: return engine.getRack().instrumentInput.load();
         case Mapping::Target::tempo:        return false;
         case Mapping::Target::presetNext: case Mapping::Target::presetPrev:
         case Mapping::Target::bankNext:   case Mapping::Target::bankPrev:
@@ -1076,6 +1078,8 @@ juce::String ControllerManager::flashFor (const Mapping& m, bool afterPress) con
         case Mapping::Target::tapTempo:     // the BPM on the bottom line updates instead (no flash bar)
         case Mapping::Target::click:
             return {};
+        case Mapping::Target::instrumentInput:
+            return engine.getRack().instrumentInput.load() ? "INSTRUMENT" : "GUITAR";
         default:
             return {};
     }

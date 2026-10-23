@@ -1232,6 +1232,7 @@ private:
             case Mapping::Target::outputGain:   return "Master volume (OUT)";
             case Mapping::Target::tapTempo:     return "Tap tempo";
             case Mapping::Target::click:        return "Metronome click on/off";
+            case Mapping::Target::instrumentInput: return "Input: guitar / instrument";
             case Mapping::Target::tempo:        return "Tempo";
             default:                            return control.describeTarget (m);
         }
@@ -1306,6 +1307,7 @@ private:
             menu.addSectionHeader ("OUTPUT");
             menu.addItem ("Tuner  (mutes while tuning)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tuner, 0, rep.get()); done(); });
             menu.addItem ("Mute",                        [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::mute, 0, rep.get()); done(); });
+            menu.addItem ("Input: guitar / instrument  (mutes the guitar)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::instrumentInput, 0, rep.get()); done(); });
             menu.addSectionHeader ("TEMPO");
             menu.addItem ("Tap tempo  (its light flashes in time)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tapTempo, 0, rep.get()); done(); });
             menu.addItem ("Metronome click on/off",                 [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::click, 0, rep.get()); done(); });

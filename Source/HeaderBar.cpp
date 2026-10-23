@@ -253,15 +253,7 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
                          "mustard while the safety limiter is working.");
     outKnob.setTooltip ("OUT level, saved with each preset (right-click: learn, match levels, limiter)");
     outKnob.addToMenu = [this] (juce::PopupMenu& m) { addOutputMenu (m); };
-    inKnob.addToMenu = [this] (juce::PopupMenu& m)
-    {
-        auto& rack = engine.getRack();
-        m.addSeparator();
-        m.addItem ("Mute the guitar while an instrument plugin is on", true, rack.muteGuitarForInstruments.load(), [&rack]
-        {
-            rack.muteGuitarForInstruments = ! rack.muteGuitarForInstruments.load();
-        });
-    };
+
 
     cpuButton.setTooltip ("CPU load. Click to spread the effects chain over more CPU cores.");
     cpuButton.onClick = [this] { showCoresMenu(); };
@@ -407,7 +399,7 @@ void HeaderBar::timerCallback()
         showingGuitarOff = guitarOff;
         inLabel.setText (guitarOff ? "IN OFF" : "IN", juce::dontSendNotification);
         inLabel.setColour (juce::Label::textColourId, guitarOff ? Pequod::Colours::mustard : Pequod::Colours::textDim);
-        inLabel.setTooltip (guitarOff ? "The guitar is muted while an instrument plugin is on (right-click IN to change)" : juce::String());
+        inLabel.setTooltip (guitarOff ? "The guitar is muted: INPUT is set to INSTRUMENT (bottom right)" : juce::String());
     }
 
     const int cs = controllerState ? controllerState() : 0;

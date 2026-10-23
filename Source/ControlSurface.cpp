@@ -4,7 +4,7 @@
 
 namespace
 {
-    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner", "stompSlot", "presetSelect", "tapTempo", "tempo", "click" };
+    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner", "stompSlot", "presetSelect", "tapTempo", "tempo", "click", "instrument" };
     const char* sourceNames[] = { "cc", "note", "osc", "ctrl" };
 
     template <typename Enum>
@@ -339,6 +339,13 @@ bool ControlSurface::handleFixedOsc (const juce::OSCMessage& msg, float value)
     if (parts[1] == "tap")  { if (msg.isEmpty() || press) { engine.transport.tap(); if (onTempoTapped) onTempoTapped(); } return true; }
     if (parts[1] == "tempo" && ! msg.isEmpty()) { engine.transport.setBpm (argAsFloat (msg, 120.0f)); return true; }
     if (parts[1] == "click") { engine.transport.clickOn = msg.isEmpty() ? ! engine.transport.clickOn.load() : press; return true; }
+    if (parts[1] == "instrument")
+    {
+        auto& in = engine.getRack().instrumentInput;
+        in = msg.isEmpty() ? ! in.load() : press;
+        engine.markModified();
+        return true;
+    }
     if (parts[1] == "mute") { setMuted (msg.isEmpty() ? ! isMuted() : press); return true; }
 
     if (parts[1] == "slot" && parts.size() >= 4)
@@ -542,6 +549,14 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
             if (m.toggle) { if (risingEdge) engine.transport.clickOn = ! engine.transport.clickOn.load(); }
             else          engine.transport.clickOn = isPress;
             break;
+        case Mapping::Target::instrumentInput:
+        {
+            auto& in = engine.getRack().instrumentInput;
+            if (m.toggle) { if (risingEdge) in = ! in.load(); }
+            else          in = isPress;
+            engine.markModified();
+            break;
+        }
         case Mapping::Target::inputGain:  engine.getInputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::outputGain: engine.getOutputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::presetNext: if (risingEdge && onPresetNext) onPresetNext(); break;
@@ -964,6 +979,7 @@ juce::String ControlSurface::describeTarget (const Mapping& m) const
         case Mapping::Target::tapTempo:     return "TAP TEMPO";
         case Mapping::Target::tempo:        return "TEMPO";
         case Mapping::Target::click:        return "CLICK on/off";
+        case Mapping::Target::instrumentInput: return "INPUT guitar / instrument";
     }
     return {};
 }
@@ -1014,7 +1030,7 @@ static juce::XmlElement* mappingToXml (const Mapping& m, int targetRef)
 static Mapping mappingFromXml (const juce::XmlElement& x)
 {
     Mapping m;
-    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 16, Mapping::Target::param);
+    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 17, Mapping::Target::param);
     m.paramIndex = x.getIntAttribute ("param", -1);
     m.source = enumFromName (x.getStringAttribute ("source"), sourceNames, 4, Mapping::Source::midiCC);
     m.midiChannel = x.getIntAttribute ("ch");

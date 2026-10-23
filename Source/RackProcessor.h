@@ -119,10 +119,10 @@ public:
     /** Notes from the on-screen keyboard (merged with the MIDI inputs). */
     juce::MidiKeyboardState keyboardState;
 
-    /** Mute the guitar while an instrument plugin is on (so only the instrument is heard). */
-    std::atomic<bool> muteGuitarForInstruments { true };
-    /** True while the guitar is muted because an instrument is on (for the UI). */
-    bool isGuitarMutedForInstrument() const noexcept { return guitarMuted.load(); }
+    /** INPUT: GUITAR (false) or INSTRUMENT (true). On INSTRUMENT the guitar is muted so only the
+        instrument plugins are heard (the tuner still listens). Saved with each preset. */
+    std::atomic<bool> instrumentInput { false };
+    bool isGuitarMutedForInstrument() const noexcept { return instrumentInput.load(); }
 
     /** The master tempo every plugin sees (and the click). */
     Transport* transport = nullptr;
@@ -179,7 +179,6 @@ private:
     std::atomic<float> fadeTarget { 1.0f }, fadeNow { 1.0f };
     float fadeGain = 1.0f;
     float guitarGain = 1.0f;
-    std::atomic<bool> guitarMuted { false };
 
     void processPlan (RenderPlan&, juce::AudioBuffer<float>& stereo, juce::MidiBuffer& midi, int n) noexcept;
 

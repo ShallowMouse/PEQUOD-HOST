@@ -368,13 +368,8 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
         const juce::ScopedLock sl (planLock);
         if (plan != nullptr && plan->maxBlock >= n)
         {
-            // An instrument that's on takes over: fade the guitar out (after the tuner has heard it).
-            bool instrumentOn = false;
-            if (muteGuitarForInstruments.load (std::memory_order_relaxed))
-                for (auto* slot : plan->instruments)
-                    if (! slot->bypassed.load (std::memory_order_relaxed) && ! slot->crashed.load (std::memory_order_relaxed))
-                        { instrumentOn = true; break; }
-            guitarMuted.store (instrumentOn, std::memory_order_relaxed);
+            // INPUT: INSTRUMENT fades the guitar out (after the tuner has heard it).
+            const bool instrumentOn = instrumentInput.load (std::memory_order_relaxed);
 
             const float target = instrumentOn ? 0.0f : 1.0f;
             if (guitarGain != target || target < 1.0f)
