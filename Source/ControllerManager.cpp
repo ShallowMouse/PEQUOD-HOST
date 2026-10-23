@@ -1073,10 +1073,9 @@ juce::String ControllerManager::flashFor (const Mapping& m, bool afterPress) con
             return {};
         case Mapping::Target::mute:
             return control.isMuted() ? "MUTED" : "UNMUTED";
-        case Mapping::Target::tapTempo:
-            return engine.transport.tapCount() >= 2 ? "TEMPO " + juce::String (juce::roundToInt (engine.transport.bpm.load())) : juce::String ("TAP...");
+        case Mapping::Target::tapTempo:     // the BPM on the bottom line updates instead (no flash bar)
         case Mapping::Target::click:
-            return engine.transport.clickOn.load() ? "CLICK ON" : "CLICK OFF";
+            return {};
         default:
             return {};
     }
@@ -1129,6 +1128,92 @@ void ControllerManager::updateLeds (bool force)
     sendCmd ("leds", { { "l", list } });
 }
 
+//==============================================================================
+bool ControllerManager::supportsScreenLayouts() const
+{
+    auto parts = juce::StringArray::fromTokens (getInfo().fw.upToFirstOccurrenceOf ("-", false, false), ".", {});
+    const int major = parts[0].getIntValue(), minor = parts[1].getIntValue();
+    return major > 2 || (major == 2 && minor >= 2);
+}
+
+bool ControllerManager::hasCustomScreen() const
+{
+    return (bool) get ("screen.custom");
+}
+
+bool ControllerManager::usesCustomScreen() const
+{
+    return hasCustomScreen() && supportsScreenLayouts();
+}
+
+ScreenLayout::Layout ControllerManager::getScreenLayout() const
+{
+    auto v = get ("screen.layout");
+    return v.isObject() ? ScreenLayout::Layout::fromVar (v) : ScreenLayout::Layout::standard();
+}
+
+void ControllerManager::setScreenLayout (const ScreenLayout::Layout& l, bool custom)
+{
+    set ("screen.layout", l.toVar());
+    set ("screen.custom", custom);
+    lastScreen.clear();
+    updateScreen (true);
+}
+
+juce::String ControllerManager::screenToken (const juce::String& name, int number) const
+{
+    if (name == "preset") return control.getPresetName ? upper (control.getPresetName(), 64) : juce::String();
+    if (name == "bank")   return control.getBankName ? upper (control.getBankName(), 64) : juce::String();
+    if (name == "num")
+    {
+        const int idx = control.getPresetIndex ? control.getPresetIndex() : -1;
+        return idx >= 0 ? juce::String (idx + 1) : juce::String ("-");
+    }
+    if (name == "next")
+    {
+        auto names = getPresetNames ? getPresetNames() : juce::StringArray();
+        const int idx = control.getPresetIndex ? control.getPresetIndex() : -1;
+        return names.isEmpty() ? juce::String() : upper (names[(idx + 1) % names.size()], 64);
+    }
+    if (name == "bpm")    return juce::String (juce::roundToInt (engine.transport.bpm.load()));
+    if (name == "beat")   return juce::String (engine.transport.currentBeatInBar() + 1);
+    if (name == "click")  return engine.transport.clickOn.load() ? "CLICK" : "";
+    if (name == "layer")  return getNumLayers() > 1 ? "L" + juce::String (layer + 1) : juce::String();
+    if (name == "msg")    return juce::Time::getMillisecondCounterHiRes() - lastMessageAt < 1500 ? lastMessage : juce::String();
+    if (name == "mute")   return control.isMuted() ? "MUTED" : "";
+    if (name == "name")   return upper (getInfo().name, 64);
+    if (name == "time")   return juce::Time::getCurrentTime().formatted ("%H:%M");
+    if (name == "fx" || name == "on")
+    {
+        auto slots = engine.getFlatSlots();
+        if (number < 1 || number > (int) slots.size()) return {};
+        auto& sl = slots[(size_t) number - 1];
+        return name == "fx" ? upper (sl->description.name, 64) : juce::String (sl->bypassed ? "OFF" : "ON");
+    }
+    return "{" + name + (number > 0 ? " " + juce::String (number) : juce::String()) + "}";
+}
+
+std::vector<ScreenLayout::Item> ControllerManager::resolveScreen (const ScreenLayout::Layout& l, bool examples) const
+{
+    return ScreenLayout::resolve (l, [this, examples] (const juce::String& n, int num)
+    {
+        auto v = screenToken (n, num);
+        if (examples && v.isEmpty())
+        {
+            // the editor shows what a blank token will look like when it has something to say
+            if (n == "msg")   return juce::String ("DELAY ON");
+            if (n == "click") return juce::String ("CLICK");
+            if (n == "mute")  return juce::String ("MUTED");
+            if (n == "layer") return juce::String ("L1");
+            if (n == "fx")    return "EFFECT " + juce::String (num);
+            if (n == "on")    return juce::String ("ON");
+            if (n == "next")  return juce::String ("NEXT PRESET");
+            if (n == "name")  return juce::String ("PEQUOD FC");
+        }
+        return v;
+    });
+}
+
 void ControllerManager::updateScreen (bool force)
 {
     if (! isConnected() || fw.active) return;
@@ -1147,6 +1232,11 @@ void ControllerManager::updateScreen (bool force)
         o->setProperty ("note", r.valid ? r.noteName : juce::String());
         o->setProperty ("cents", r.valid ? juce::roundToInt (r.cents * 10.0f) / 10.0 : 0.0);
         o->setProperty ("inTune", r.valid && std::abs (r.cents) < 3.0f);
+    }
+    else if (usesCustomScreen())
+    {
+        o->setProperty ("mode", "layout");
+        o->setProperty ("items", ScreenLayout::itemsToVar (resolveScreen (getScreenLayout())));
     }
     else
     {
@@ -1169,7 +1259,11 @@ void ControllerManager::updateScreen (bool force)
 
     if (pendingFlash.isNotEmpty())
     {
-        o->setProperty ("flash", pendingFlash);
+        lastMessage = pendingFlash;
+        lastMessageAt = now;
+        // A custom layout can show messages in its own {msg} text instead of the white bar.
+        if (! usesCustomScreen() || getScreenLayout().messageBar)
+            o->setProperty ("flash", pendingFlash);
         pendingFlash.clear();
     }
     else

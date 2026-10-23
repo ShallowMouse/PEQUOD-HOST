@@ -2,6 +2,7 @@
 
 #include "ControllerManager.h"
 #include "PequodLookAndFeel.h"
+#include "ScreenEditor.h"
 
 //==============================================================================
 /** The CONTROLLER window: the foot controller drawn as it is on the floor. Press a
@@ -29,11 +30,12 @@ private:
     HostEngine& engine;
     ControlSurface& control;
 
-    juce::TextButton controlsTab { "CONTROLS" }, settingsTab { "SETTINGS" };
+    juce::TextButton controlsTab { "CONTROLS" }, screenTab { "SCREEN" }, settingsTab { "SETTINGS" };
     juce::OwnedArray<juce::TextButton> layerButtons;
     std::unique_ptr<BoardView> board;
     std::unique_ptr<Inspector> inspector;
     std::unique_ptr<SettingsPage> settings;
+    std::unique_ptr<ScreenEditor> screenEditor;
     /** Scrolls sideways only; an ordinary mouse wheel scrolls the page around it instead. */
     struct SideScroller : public juce::Viewport
     {
@@ -45,14 +47,14 @@ private:
     };
 
     juce::Component controlsPage;      // declared before the viewport that shows it
-    juce::Viewport settingsViewport, controlsViewport;
+    juce::Viewport settingsViewport, controlsViewport, screenViewport;
     SideScroller boardViewport;
 
     // shown when nothing is connected
     juce::TextEditor ipEditor;
     juce::TextButton ipButton { "CONNECT" };
 
-    bool showingSettings = false;
+    bool showingSettings = false, showingScreen = false;
     bool wasConnected = false;
     int idleTicks = 0;
     juce::Rectangle<int> barArea;     // layer buttons + which preset is being edited
@@ -60,6 +62,7 @@ private:
     juce::String lastSignature;
 
     void showSettings (bool);
+    void showScreen();
     void updateVisibility();
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;

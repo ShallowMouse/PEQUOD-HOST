@@ -63,7 +63,9 @@ target_sources(PequodHost PRIVATE
     Source/ControllerManager.cpp
     Source/ControllerPanel.cpp
     Source/Updater.cpp
-    Source/CrashGuard.cpp)
+    Source/CrashGuard.cpp
+    Source/ScreenLayout.cpp
+    Source/ScreenEditor.cpp)
 
 target_compile_definitions(PequodHost PRIVATE
     JUCE_PLUGINHOST_VST3=1

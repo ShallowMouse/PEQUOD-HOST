@@ -34,8 +34,9 @@
 #include "mbedtls/base64.h"
 #include "esp_ota_ops.h"
 
-#define FW_VERSION    "2.1.0"
-#define PROTO_VERSION 3     // 3: a control can do several things at once (PEQUOD + MIDI + layer)
+#define FW_VERSION    "2.2.0"
+#define PROTO_VERSION 4     // 3: a control can do several things at once (PEQUOD + MIDI + layer)
+                            // 4: screen "layout" mode (PEQUOD lays out the screen, see drawLayout)
 
 // ── Hardware (same as the previous master) ──────────────────────────────────
 static const int SDA_PIN = 8, SCL_PIN = 18;          // slave bus (Wire)
@@ -172,6 +173,18 @@ struct Screen {
   bool inTune = false;
   unsigned long flashUntil = 0;
 } screen;
+
+// "layout" screens: PEQUOD sends ready-made items, the controller just draws them
+struct ScreenItem {
+  char kind = 't';              // 't' text, 'b' filled box, 'r' outline
+  int16_t x = 0, y = 0, w = 0, h = 0;
+  uint8_t size = 1, align = 0;  // text: size 1-4, align 0 left / 1 centre / 2 right (x is that edge / the centre)
+  bool inv = false;             // text: black on a white box
+  String text;
+};
+const int MAX_ITEMS = 24;
+ScreenItem items[MAX_ITEMS];
+int numItems = 0;
 bool displayDirty = true;
 
 // firmware update
@@ -1169,6 +1182,29 @@ void handleMessage(Transport tr, JsonDocument& m) {
     screen.cents = m["cents"] | 0.0f;
     screen.inTune = m["inTune"] | false;
     if (m["flash"].is<const char*>()) { screen.flash = m["flash"].as<const char*>(); screen.flashUntil = millis() + 1200; }
+    if (screen.mode == "layout") {
+      // items: [["t",x,y,size,align,inv,"text"], ["b",x,y,w,h], ["r",x,y,w,h], ...]
+      numItems = 0;
+      for (JsonVariant ev : m["items"].as<JsonArray>()) {
+        if (numItems >= MAX_ITEMS) break;
+        JsonArray e = ev.as<JsonArray>();
+        ScreenItem& it = items[numItems];
+        const char* k = e[0] | "t";
+        it.kind = k[0];
+        it.x = e[1] | 0;
+        it.y = e[2] | 0;
+        if (it.kind == 't') {
+          it.size = constrain((int) (e[3] | 1), 1, 4);
+          it.align = constrain((int) (e[4] | 0), 0, 2);
+          it.inv = (e[5] | 0) != 0;
+          it.text = e[6] | "";
+        } else {
+          it.w = e[3] | 0;
+          it.h = e[4] | 0;
+        }
+        numItems++;
+      }
+    }
     displayDirty = true;
     return;
   }
@@ -1365,8 +1401,30 @@ void drawCentered(const String& s, int y, int size) {
   display.print(s);
 }
 
+void drawLayout() {
+  display.setTextWrap(false);
+  for (int i = 0; i < numItems; i++) {
+    const ScreenItem& it = items[i];
+    if (it.kind == 'b') { display.fillRect(it.x, it.y, it.w, it.h, SSD1306_WHITE); continue; }
+    if (it.kind == 'r') { display.drawRect(it.x, it.y, it.w, it.h, SSD1306_WHITE); continue; }
+    const int w = it.text.length() * 6 * it.size, h = 8 * it.size;
+    int x = it.align == 1 ? it.x - w / 2 : it.align == 2 ? it.x - w : it.x;
+    if (it.inv) {
+      display.fillRect(x - 2, it.y - 1, w + 3, h + 1, SSD1306_WHITE);
+      display.setTextColor(SSD1306_BLACK);
+    }
+    display.setTextSize(it.size);
+    display.setCursor(x, it.y);
+    display.print(it.text);
+    display.setTextColor(SSD1306_WHITE);
+  }
+  display.setTextWrap(true);
+}
+
 void drawHostScreen() {
-  if (screen.mode == "tuner") {
+  if (screen.mode == "layout") {
+    drawLayout();
+  } else if (screen.mode == "tuner") {
     drawCentered(screen.note.length() ? screen.note : String("-"), 6, 4);
     const int y = 50, cx = 64;
     display.drawFastHLine(8, y, 112, SSD1306_WHITE);

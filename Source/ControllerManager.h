@@ -3,6 +3,7 @@
 #include "ControllerLink.h"
 #include "ControlSurface.h"
 #include "Tuner.h"
+#include "ScreenLayout.h"
 
 //==============================================================================
 /** Everything PEQUOD does with the PEQUOD FC foot controller: the controller's own
@@ -113,6 +114,15 @@ public:
     float updateProgress() const              { return fw.total > 0 ? (float) fw.next / (float) fw.total : 0.0f; }
     juce::String updateStatus() const         { return fw.status; }
 
+    //== The controller's screen: the standard one, or a layout made in the SCREEN tab (firmware 2.2+)
+    bool supportsScreenLayouts() const;
+    bool hasCustomScreen() const;
+    bool usesCustomScreen() const;                 // custom and the firmware can show it
+    ScreenLayout::Layout getScreenLayout() const;  // the custom one, or the standard one as a starting point
+    void setScreenLayout (const ScreenLayout::Layout&, bool custom);
+    /** As it would show now. examples: blank tokens show a sample ({msg} "DELAY ON"...) so they can be placed. */
+    std::vector<ScreenLayout::Item> resolveScreen (const ScreenLayout::Layout&, bool examples = false) const;
+
     std::function<void (const juce::String&)> onStatus;
     std::function<juce::StringArray()> getPresetNames;    // presets of the current bank, in order
 
@@ -139,7 +149,9 @@ private:
     std::vector<Network> networks;
     bool wifiScanning = false;
 
-    juce::String lastLeds, lastScreen, pendingFlash;
+    juce::String lastLeds, lastScreen, pendingFlash, lastMessage;
+    double lastMessageAt = -1.0e9;
+    juce::String screenToken (const juce::String& name, int number) const;
     double lastLedsSent = 0, lastScreenSent = 0, lastParamFlash = 0;
 
     struct FirmwareJob

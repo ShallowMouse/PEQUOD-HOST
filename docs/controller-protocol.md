@@ -114,3 +114,16 @@ Unit `kind`: `footswitch`, `button`, `pedal`, `pedal_switch`, `encoder`, `knob`.
 * `led`: `auto` (PEQUOD's state for PEQUOD controls; latched/held/active state otherwise), `on`, `off`, `midi` (follows incoming MIDI with the same number and channel, ≥ 64 = on).
 * What a PEQUOD-mode control does (effect on/off, next preset, tuner, a plugin knob …) is stored in PEQUOD, with the other MIDI/OSC mappings, not on the controller.
 * Fields the controller doesn't know are kept, so newer PEQUOD versions can add settings.
+
+
+## Screen layouts (protocol 4, firmware 2.2+)
+
+`{"t":"screen","mode":"layout","items":[...]}` draws a screen PEQUOD has laid out. Items are drawn in order:
+
+| item | meaning |
+|---|---|
+| `["t", x, y, size, align, inv, "text"]` | text in the 5x7 font, `size` 1-4 (6x8 px per letter at size 1); `align` 0 = `x` is the left edge, 1 = centre, 2 = right edge; `inv` 1 = black text on a white box |
+| `["b", x, y, w, h]` | filled box (a line when `w` or `h` is 1) |
+| `["r", x, y, w, h]` | outline box |
+
+`flash` still works with layouts (the white bar at the bottom). PEQUOD fills in tokens and fits text before sending, so the controller only draws. The layout itself is kept in the controller's settings as `screen.layout` (with `screen.custom` = true to use it); the firmware doesn't read it.

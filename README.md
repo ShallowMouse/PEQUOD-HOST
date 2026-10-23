@@ -33,6 +33,7 @@ A standalone VST3 host for Windows with a Guitar Rig-style layout, MIDI and OSC 
 - **Crash protection**: if a plugin crashes while processing audio, PEQUOD takes it out of the signal and keeps playing; the module shows **CRASHED - SKIPPED** (restart PEQUOD to use it again). If PEQUOD itself didn't close properly, the next start asks how to start: without the plugin it crashed in (when known), with an empty rack, or normally. Your saved presets are never changed.
 - **Output safety**: a limiter just under 0 dB on the output protects ears and speakers from a runaway plugin (right-click **OUT** to turn it off). The light on top of the OUT meter turns red if the output hit 0 dB (click it to clear), and mustard while the limiter is working.
 - **Level per preset**: the **OUT** level is saved with each preset. To even out presets, right-click **OUT** > *Use this preset's level as the target* and play for 6 seconds; then on each other preset, right-click **OUT** > *Match this preset to the target* and play the same way. OUT is set for you; save the preset to keep it.
+- **Instruments (VSTi)**: add a synth, piano etc. from the browser like any plugin (they're marked INSTRUMENT) and play it from any MIDI keyboard (enable it under **AUDIO**), or click **KEYS** at the bottom for an on-screen keyboard (also playable from the computer keyboard: A W S E D F T G Y H U J K). While an instrument is on, the guitar input is muted so only the instrument is heard (the tuner still listens); the IN label shows **IN OFF**. Turn the instrument off and the guitar comes back. Right-click **IN** to turn the auto-mute off (e.g. to play both). Effects after the instrument in the rack process it.
 
 ## MIDI
 
@@ -82,6 +83,8 @@ the slave boards are unchanged). Plug it in with USB or put it on Wi-Fi and the 
   brightness, name, firmware updates.
 
 Setup and flashing: [Controller/README.md](Controller/README.md). Protocol: [docs/controller-protocol.md](docs/controller-protocol.md).
+
+**Screen layout**: the **SCREEN** tab in the controller window lays out the controller's screen. The preview is the real screen, pixel for pixel. Add text, lines and boxes; drag them around (or use the arrow keys); pick the size (1-4), left / centre / right and black-on-white. Text can include things PEQUOD fills in (**INSERT...**): `{preset}`, `{bank}`, `{num}`, `{next}`, `{bpm}`, `{beat}`, `{click}`, `{layer}`, `{msg}` (what a switch just did), `{fx 1}` / `{on 1}` (name / ON-OFF of effect 1, any number), `{mute}`, `{name}`, `{time}`. Turn off the white message bar to show messages only where you put `{msg}`. The layout is stored on the controller. Needs controller firmware 2.2 or newer (older firmware keeps the standard screen).
 
 ## Building
 

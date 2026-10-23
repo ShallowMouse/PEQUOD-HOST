@@ -66,7 +66,7 @@ class Fake:
 
     def info(self):
         units = [dict(u, name=self.cfg["units"][u["uid"]]["name"], layer=self.layer) for u in UNITS]
-        return {"t": "info", "proto": 2, "fw": "2.1.0-fake", "id": "F00DCAFE0001", "name": self.cfg["name"], "via": "wifi",
+        return {"t": "info", "proto": 4, "fw": "2.2.0-fake", "id": "F00DCAFE0001", "name": self.cfg["name"], "via": "wifi",
                 "layers": self.cfg["layers"], "layer": self.layer, "globalLayers": True, "brightness": self.cfg["brightness"],
                 "wifi": {"connected": True, "ap": False, "ssid": self.cfg["wifi"]["ssid"], "ssid2": "", "ip": "127.0.0.1", "rssi": -51},
                 "ota": {"ok": True, "max": 1966080}, "units": units}

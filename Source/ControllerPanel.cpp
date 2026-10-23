@@ -1678,8 +1678,13 @@ ControllerPanel::ControllerPanel (ControllerManager& m, HostEngine& e, ControlSu
     settingsViewport.setViewedComponent (settings.get(), false);
     settingsViewport.setScrollBarsShown (true, false);
     addChildComponent (settingsViewport);
+    screenEditor = std::make_unique<ScreenEditor> (mgr);
+    screenEditor->onSizeChanged = [this] { if (! inResized) resized(); };
+    screenViewport.setViewedComponent (screenEditor.get(), false);
+    screenViewport.setScrollBarsShown (true, false);
+    addChildComponent (screenViewport);
 
-    for (auto* b : { &controlsTab, &settingsTab })
+    for (auto* b : { &controlsTab, &screenTab, &settingsTab })
     {
         b->setClickingTogglesState (false);
         b->setColour (juce::TextButton::buttonOnColourId, Pequod::Colours::mustard);
@@ -1688,6 +1693,7 @@ ControllerPanel::ControllerPanel (ControllerManager& m, HostEngine& e, ControlSu
     }
     controlsTab.onClick = [this] { showSettings (false); };
     settingsTab.onClick = [this] { showSettings (true); };
+    screenTab.onClick = [this] { showScreen(); };
 
 
     for (int i = 0; i < 4; ++i)
@@ -1740,21 +1746,34 @@ void ControllerPanel::select (const juce::String& uid, int code)
 void ControllerPanel::showSettings (bool s)
 {
     showingSettings = s;
+    showingScreen = false;
+    updateVisibility();
+}
+
+void ControllerPanel::showScreen()
+{
+    showingSettings = false;
+    showingScreen = true;
+    screenEditor->reload();
     updateVisibility();
 }
 
 void ControllerPanel::updateVisibility()
 {
     const bool conn = mgr.isConnected();
-    controlsViewport.setVisible (conn && ! showingSettings);
+    const bool onControls = ! showingSettings && ! showingScreen;
+    controlsViewport.setVisible (conn && onControls);
     settingsViewport.setVisible (conn && showingSettings);
+    screenViewport.setVisible (conn && showingScreen);
     controlsTab.setVisible (conn);
+    screenTab.setVisible (conn);
     settingsTab.setVisible (conn);
-    controlsTab.setToggleState (! showingSettings, juce::dontSendNotification);
+    controlsTab.setToggleState (onControls, juce::dontSendNotification);
+    screenTab.setToggleState (showingScreen, juce::dontSendNotification);
     settingsTab.setToggleState (showingSettings, juce::dontSendNotification);
     for (int i = 0; i < layerButtons.size(); ++i)
     {
-        layerButtons[i]->setVisible (conn && ! showingSettings && mgr.getNumLayers() > 1 && i < mgr.getNumLayers());
+        layerButtons[i]->setVisible (conn && onControls && mgr.getNumLayers() > 1 && i < mgr.getNumLayers());
         layerButtons[i]->setToggleState (i == mgr.getLayer(), juce::dontSendNotification);
     }
     ipEditor.setVisible (! conn);
@@ -1807,7 +1826,7 @@ void ControllerPanel::paint (juce::Graphics& g)
     g.setFont (Pequod::body (13.0f));
     g.drawText (mgr.describeConnection() + "   -   firmware " + info.fw, nameArea.withTrimmedLeft (nameW + 16), juce::Justification::centredLeft);
 
-    if (! showingSettings)
+    if (! showingSettings && ! showingScreen)
     {
         auto bar = barArea.withLeft (layerButtons[0]->isVisible() ? layerButtons[mgr.getNumLayers() - 1]->getRight() + 16 : barArea.getX());
         auto bank = control.getBankName ? control.getBankName() : juce::String();
@@ -1839,12 +1858,19 @@ void ControllerPanel::resized()
 
     settingsTab.setBounds (top.removeFromRight (100).withSizeKeepingCentre (100, 30));
     top.removeFromRight (4);
+    screenTab.setBounds (top.removeFromRight (100).withSizeKeepingCentre (100, 30));
+    top.removeFromRight (4);
     controlsTab.setBounds (top.removeFromRight (100).withSizeKeepingCentre (100, 30));
 
     r.removeFromTop (10);
     settingsViewport.setBounds (r);
     settings->setSize (r.getWidth() - settingsViewport.getScrollBarThickness(), 10);
     settings->setSize (settings->getWidth(), settings->getIdealHeight());
+    screenViewport.setBounds (r);
+    {
+        const int sw = r.getWidth() - screenViewport.getScrollBarThickness();
+        screenEditor->setSize (sw, juce::jmax (r.getHeight(), screenEditor->getIdealHeight (sw)));
+    }
 
     auto bar = r.removeFromTop (32);
     barArea = bar;
@@ -1891,6 +1917,7 @@ void ControllerPanel::timerCallback()
     if (mgr.isConnected() != wasConnected)
     {
         wasConnected = mgr.isConnected();
+        screenEditor->reload();
         updateVisibility();
     }
     if (! isShowing()) return;
@@ -1898,6 +1925,7 @@ void ControllerPanel::timerCallback()
     if (! mgr.isConnected()) return;
     inspector->tick();
     board->repaint();
+    if (showingScreen && idleTicks % 6 == 0) screenEditor->refreshPreview();   // live values (preset, BPM...)
 }
 
 //==============================================================================

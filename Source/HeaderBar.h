@@ -131,6 +131,7 @@ private:
 
     juce::Rectangle<int> wordmarkArea;
     bool showWordmark = true;
+    bool showingGuitarOff = false;
 
     // Level matching between presets
     static constexpr double measureSeconds = 6.0;

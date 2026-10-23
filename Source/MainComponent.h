@@ -52,6 +52,11 @@ private:
     juce::TextButton rackViewButton { "RACK" }, pedalboardViewButton { "PEDALBOARD" };
     juce::TextButton undoButton { "UNDO" }, redoButton { "REDO" };
 
+    // On-screen keyboard for instrument plugins (also played from the computer keyboard: A W S E D...)
+    juce::TextButton keysButton { "KEYS" };
+    std::unique_ptr<juce::MidiKeyboardComponent> keyboard;
+    void showKeyboard (bool);
+
     // Undo / redo of rack edits: whole-rack snapshots (plugins, settings, mappings).
     std::vector<std::unique_ptr<juce::XmlElement>> undoStack, redoStack;
     bool restoringUndo = false;

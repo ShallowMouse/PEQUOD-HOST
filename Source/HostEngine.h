@@ -251,6 +251,8 @@ public:
     void setSplitMix (int itemUid, float mix);
 
     std::shared_ptr<PluginSlot> findSlot (int slotUid) const;
+    /** A VSTi (synth, piano...): played with MIDI, mutes the guitar while it's on. */
+    static bool isInstrument (const PluginSlot&);
     /** Runtime uid of the slot or split with this saved ID, 0 if it isn't in the rack. */
     int findUidByStableId (const juce::String& stableId, bool isSplit) const;
     juce::String getStableId (int uid, bool isSplit) const;

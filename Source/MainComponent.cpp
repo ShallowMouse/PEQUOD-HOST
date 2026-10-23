@@ -113,6 +113,31 @@ MainComponent::MainComponent()
         b->setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
         addAndMakeVisible (b);
     }
+    keyboard = std::make_unique<juce::MidiKeyboardComponent> (engine.getRack().keyboardState,
+                                                              juce::MidiKeyboardComponent::horizontalKeyboard);
+    keyboard->setAvailableRange (24, 108);
+    keyboard->setLowestVisibleKey (48);
+    keyboard->setKeyPressBaseOctave (4);
+    keyboard->setOctaveForMiddleC (4);
+    keyboard->setColour (juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour (0xffe8e2d4));
+    keyboard->setColour (juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour (0xff1c1c1c));
+    keyboard->setColour (juce::MidiKeyboardComponent::keySeparatorLineColourId, juce::Colour (0xff4a4a4a));
+    keyboard->setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, Pequod::Colours::mustard);
+    keyboard->setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, Pequod::Colours::mustard.withAlpha (0.3f));
+    keyboard->setColour (juce::MidiKeyboardComponent::shadowColourId, juce::Colours::black.withAlpha (0.4f));
+    keyboard->setColour (juce::MidiKeyboardComponent::upDownButtonBackgroundColourId, Pequod::Colours::panel);
+    keyboard->setColour (juce::MidiKeyboardComponent::upDownButtonArrowColourId, Pequod::Colours::mustard);
+    keyboard->setColour (juce::MidiKeyboardComponent::textLabelColourId, juce::Colour (0xff555555));
+    addChildComponent (*keyboard);
+    keysButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
+    keysButton.setColour (juce::TextButton::buttonOnColourId, Pequod::Colours::mustard);
+    keysButton.setColour (juce::TextButton::textColourOnId, Pequod::Colours::rail);
+    keysButton.setTooltip ("On-screen keyboard for instrument plugins (click it, then play with A W S E D F T G... too)");
+    keysButton.onClick = [this] { showKeyboard (! keyboard->isVisible()); };
+    addAndMakeVisible (keysButton);
+    engine.getRack().muteGuitarForInstruments = settings->getBoolValue ("muteGuitarForInstruments", true);
+    showKeyboard (settings->getBoolValue ("keyboardShown", false));
+
     undoButton.setTooltip ("Undo the last rack change (Ctrl+Z)");
     redoButton.setTooltip ("Redo (Ctrl+Y)");
     undoButton.onClick = [this] { undo(); };
@@ -279,6 +304,8 @@ void MainComponent::saveSettings()
     s->setValue ("clickDb", (double) engine.transport.clickGainDb.load());
     s->setValue ("beatsPerBar", engine.transport.beatsPerBar.load());
     s->setValue ("limiter", engine.getOutputStage()->limiterOn.load());
+    s->setValue ("muteGuitarForInstruments", engine.getRack().muteGuitarForInstruments.load());
+    s->setValue ("keyboardShown", keyboard != nullptr && keyboard->isVisible());
     if (! std::isnan (engine.loudnessReference)) s->setValue ("loudnessTarget", engine.loudnessReference);
     s->setValue ("pedalboardView", rack.isPedalboard());
     s->setValue ("sessionModified", engine.getChangeCounter() != savedChangeCounter);
@@ -301,7 +328,7 @@ void MainComponent::resized()
     auto r = getLocalBounds();
     header.setBounds (r.removeFromTop (64));
     auto status = r.removeFromBottom (24);
-    auto toggles = status.removeFromRight (316).reduced (4, 3);
+    auto toggles = status.removeFromRight (380).reduced (4, 3);
     pedalboardViewButton.setBounds (toggles.removeFromRight (100));
     toggles.removeFromRight (4);
     rackViewButton.setBounds (toggles.removeFromRight (60));
@@ -309,9 +336,17 @@ void MainComponent::resized()
     redoButton.setBounds (toggles.removeFromRight (56));
     toggles.removeFromRight (4);
     undoButton.setBounds (toggles.removeFromRight (56));
+    toggles.removeFromRight (16);
+    keysButton.setBounds (toggles.removeFromRight (56));
     statusBar.setBounds (status.reduced (10, 0));
     browser.setBounds (r.removeFromLeft (260));
     controlPanel.setBounds (r.removeFromRight (280));
+    if (keyboard != nullptr && keyboard->isVisible())
+    {
+        auto k = r.removeFromBottom (96).reduced (8, 6);
+        keyboard->setBounds (k);
+        keyboard->setKeyWidth (juce::jlimit (16.0f, 34.0f, (float) k.getWidth() / 36.0f));   // about three octaves
+    }
     rack.setBounds (r);
 }
 
@@ -880,4 +915,17 @@ void MainComponent::askAfterCrash (const CrashGuard::LastRun& last)
             loadSession ({});
         }
     });
+}
+
+void MainComponent::showKeyboard (bool show)
+{
+    keyboard->setVisible (show);
+    keysButton.setToggleState (show, juce::dontSendNotification);
+    if (! show) engine.getRack().keyboardState.allNotesOff (0);
+    resized();
+    if (show)
+    {
+        keyboard->setLowestVisibleKey (48);        // from C below middle C
+        keyboard->grabKeyboardFocus();
+    }
 }

@@ -91,6 +91,7 @@ struct RenderPlan
     int maxBlock = 0;
     double sampleRate = 0;
     int pluginLatency = 0;                   // summed latency of the chain (longest lane in splits)
+    std::vector<PluginSlot*> instruments;    // VSTis in the rack: while one is on, the guitar is muted
 
     // Pipeline buffers: one per stage, rotated every block.
     std::vector<juce::AudioBuffer<float>> stageAudio;
@@ -114,6 +115,14 @@ public:
     void fadeOut()  { fadeTarget = 0.0f; }
     void fadeIn()   { fadeTarget = 1.0f; }
     bool waitForSilence (int timeoutMs = 60) const;
+
+    /** Notes from the on-screen keyboard (merged with the MIDI inputs). */
+    juce::MidiKeyboardState keyboardState;
+
+    /** Mute the guitar while an instrument plugin is on (so only the instrument is heard). */
+    std::atomic<bool> muteGuitarForInstruments { true };
+    /** True while the guitar is muted because an instrument is on (for the UI). */
+    bool isGuitarMutedForInstrument() const noexcept { return guitarMuted.load(); }
 
     /** The master tempo every plugin sees (and the click). */
     Transport* transport = nullptr;
@@ -169,6 +178,8 @@ private:
     juce::MidiBuffer emptyMidi;
     std::atomic<float> fadeTarget { 1.0f }, fadeNow { 1.0f };
     float fadeGain = 1.0f;
+    float guitarGain = 1.0f;
+    std::atomic<bool> guitarMuted { false };
 
     void processPlan (RenderPlan&, juce::AudioBuffer<float>& stereo, juce::MidiBuffer& midi, int n) noexcept;
 

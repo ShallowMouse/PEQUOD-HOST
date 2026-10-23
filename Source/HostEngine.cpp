@@ -95,6 +95,15 @@ std::unique_ptr<RenderPlugin> HostEngine::makeRenderPlugin (PluginSlot& slot, in
     return rp;
 }
 
+bool HostEngine::isInstrument (const PluginSlot& slot)
+{
+    if (slot.description.isInstrument) return true;
+    // Some instruments don't say so: no audio input, takes MIDI, makes sound.
+    if (auto* inst = slot.instance())
+        return inst->getMainBusNumInputChannels() == 0 && inst->acceptsMidi() && inst->getMainBusNumOutputChannels() > 0;
+    return false;
+}
+
 float HostEngine::getItemLoad (const RackItem& item) const
 {
     if (item.type == RackItem::Type::plugin)
@@ -219,6 +228,10 @@ void HostEngine::rewire()
             plan->ring[(size_t) s] = s;
         }
     }
+
+    for (auto& sl : getFlatSlots())
+        if (isInstrument (*sl))
+            plan->instruments.push_back (sl.get());
 
     plan->pluginLatency = computeChainLatency();
     lastPlanLatency = plan->pluginLatency;

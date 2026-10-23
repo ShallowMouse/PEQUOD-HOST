@@ -195,6 +195,9 @@ void RackProcessor::processPlugin (RenderPlugin& rp, juce::AudioBuffer<float>& s
     // A plugin that crashed earlier stays out of the signal (the audio passes around it).
     if (rp.slot->crashed.load (std::memory_order_relaxed))
         return;
+    // A switched-off instrument (no audio input) steps aside instead of outputting silence.
+    if (rp.numIn == 0 && rp.slot->bypassed.load (std::memory_order_relaxed))
+        return;
 
     {
         const juce::ScopedLock sl (inst->getCallbackLock());
@@ -359,10 +362,36 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     if (transport != nullptr) transport->beginBlock (getSampleRate());
     inputStage.processBlock (stereo, midi);
 
+    keyboardState.processNextMidiBuffer (midi, 0, n, true);
+
     {
         const juce::ScopedLock sl (planLock);
         if (plan != nullptr && plan->maxBlock >= n)
+        {
+            // An instrument that's on takes over: fade the guitar out (after the tuner has heard it).
+            bool instrumentOn = false;
+            if (muteGuitarForInstruments.load (std::memory_order_relaxed))
+                for (auto* slot : plan->instruments)
+                    if (! slot->bypassed.load (std::memory_order_relaxed) && ! slot->crashed.load (std::memory_order_relaxed))
+                        { instrumentOn = true; break; }
+            guitarMuted.store (instrumentOn, std::memory_order_relaxed);
+
+            const float target = instrumentOn ? 0.0f : 1.0f;
+            if (guitarGain != target || target < 1.0f)
+            {
+                const float step = 1.0f / (float) juce::jmax (1.0, 0.01 * getSampleRate());
+                auto* l = stereo.getWritePointer (0);
+                auto* r = stereo.getWritePointer (1);
+                for (int i = 0; i < n; ++i)
+                {
+                    guitarGain = target > guitarGain ? juce::jmin (target, guitarGain + step) : juce::jmax (target, guitarGain - step);
+                    l[i] *= guitarGain;
+                    r[i] *= guitarGain;
+                }
+            }
+
             processPlan (*plan, stereo, midi, n);
+        }
     }
 
     // Preset-switch fade (about 6 ms each way).
