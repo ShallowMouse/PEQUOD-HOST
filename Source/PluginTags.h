@@ -33,6 +33,7 @@ namespace PluginTags
             { "thestrokes",               { "The Strokes", "Transporterraum" } },
             { "blocparty",                { "Bloc Party", "Deltalab" } },
             { "blink182",                 { "blink-182", "Poway" } },
+            { "oingoboingo",              { "Oingo Boingo", "Only a Lad" } },
             { "pedals",                   { "PEQUOD Pedals", nullptr } },
         };
         auto it = titles.find (PluginColours::normalise (vendorSuffix));

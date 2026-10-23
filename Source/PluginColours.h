@@ -21,27 +21,27 @@ namespace PluginColours
             { "Drive, fuzz & boost", 0xC2611B, "Big Muff|Blues Driver|Centaur|Distortion+|DS-1|EP Booster|First Fuzz|Fuzz Face|Fuzz Factory|"
                                                "Harmonic Percolator|Jekyll & Hyde|Low Drive|Micro Amp|Muff R22|Octavia|OS-2|Power Boost|Rangemaster|"
                                                "RAT|Tone Bender|Treble Booster|TS-808" },
-            { "Compressors & limiters", 0xA87A1C, "Barker Bus|Black Box Limiter|Channel Dynamics|Dyna Comp|FET Limiter|Grit Comp|Hard to Explain|"
+            { "Compressors & limiters", 0xA87A1C, "Barker Bus|Black Box Limiter|Vatos Kit|Channel Dynamics|Dyna Comp|FET Limiter|Grit Comp|Hard to Explain|"
                                                   "Level Loc|Listen Mic|Opto Comp|Room Crush|RS124|Vari-Mu" },
             { "Expanders, gates & levellers", 0x66661C, "Evenhand|Expander|Slow Gear|Smart Gate" },
             { "Tape & saturation", 0x6B4A2E, "A800 Bus|Ampex 350|Analog Tape|Backwards|Multitrack Tape|Repro Head|Studer 169|Tape Loop|"
                                              "Tape Machine|Twin-Track Tape|Varispeed|Warmer" },
-            { "Consoles, preamps & strips", 0x46596B, "Ampex 351|Gold Star Desk|Neotek Channel|Plank Console|TG Channel|TG Strip|V72 V76|"
-                                                      "Valve Desk|Valve Mixer|Vocal Chain" },
+            { "Consoles, preamps & strips", 0x46596B, "Ampex 351|Elfman Vocal|Gold Star Desk|Neotek Channel|Plank Console|TG Channel|TG Strip|V72 V76|"
+                                                      "Mystic Horns|Valve Desk|Valve Mixer|Vocal Chain" },
             { "EQ & filters", 0x2C4A9A, "Black Box EQ|Envelope Filter|GE-7 EQ|Studio EQ|Talk Box|Wah" },
             { "Delays & echoes", 0x1E5A84, "AMS 15-80S|Brighton Rock Delay|Chorus Echo|Copicat|Digital Delay|DL4|DM-1 Delay|Doubler|Echorec|"
                                            "Ford Space Station|Memory Man|Ping-Pong Delay|Plank Echo|Quad Tracker|RE-301|Revox Loop|Rhythm Taps|"
                                            "Space Station|Tape Echo|Three-Head Echo" },
             { "Plates, springs & reverbs", 0x1F5F63, "Cloud|EMT Plate|Hall|Heater Spring|Nonlin|Plate 140|Reverse Reverb|Shimmer|Soaked|"
                                                      "Spring Reverb|Strawberry Plate" },
-            { "Rooms, chambers & spaces", 0x1F5E4A, "Albini Rooms|Antonoff Rooms|blink Rooms|Deltalab Rooms|Echo Chamber|Floyd Spaces|Ford Rooms|"
+            { "Rooms, chambers & spaces", 0x1F5E4A, "Albini Rooms|Antonoff Rooms|blink Rooms|Boingo Rooms|Deltalab Rooms|Echo Chamber|Floyd Spaces|Ford Rooms|"
                                                     "Gold Star Chamber|Hannett Rooms|Meek Rooms|Monkeys Rooms|Plank Rooms|Queen Rooms|sombr Rooms|"
                                                     "Spector Rooms|Stray Cats Rooms|Strokes Rooms|Studio Spaces|Townhouse Rooms" },
-            { "Modulation", 0x5C2E7A, "Auto-Pan|Bi-Phase|Bigsby|CE-2 Chorus|Deja Vibe|Dimension|Electric Mistress|Flanger|Hand Phaser|"
+            { "Modulation", 0x5C2E7A, "Auto-Pan|Bi-Phase|Bigsby|CE-1 Chorus Ensemble|CE-2 Chorus|Deja Vibe|Dimension|Electric Mistress|Flanger|Hand Phaser|"
                                       "Harmonic Trem|Pad Chopper|Phase 90|Ring Mod|Rotary Speakers|Rotor|Slicer|Small Clone|Small Stone|"
                                       "Tape Flanger|Time Modulator|TR-2 Tremolo|Uni-Vibe|Vibrato|Wall of Sound" },
             { "Synths, keys & instruments", 0x3F6B2A, "6120 Voice|Bass Voice|Clavioline|Compact Organ|Electric Grand|Juno Six|P-Bass Voice|"
-                                                      "Red Special|Synare 3|Tonewheel Organ|TR-606|Twenty-Six|Upright Slap|VCS3" },
+                                                      "Prophet Five|Red Special|Synare 3|Tonewheel Organ|TR-606|Twenty-Six|Upright Slap|VCS3" },
             { "Lo-fi & character", 0x8C2F62, "Car Radio|Cheap Speaker|Lo-Fi Crush|Phone Line|Practice Amp Vocal" },
             { "Microphones", 0x444B52, "Mic Pair|Studio Mics" },
             { "Experimental & pitch", 0x3B336B, "Drop Tune|Feedback|Freeze|Guitar Orchestra|Harmonizer|HOG|POG|Sympathy|Whammy" },
