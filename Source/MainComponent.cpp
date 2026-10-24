@@ -68,6 +68,12 @@ MainComponent::MainComponent()
     engine.transport.clickGainDb = (float) settings->getDoubleValue ("clickDb", -12.0);
     engine.transport.beatsPerBar = juce::jlimit (2, 7, settings->getIntValue ("beatsPerBar", 4));
     engine.getOutputStage()->limiterOn = settings->getBoolValue ("limiter", true);
+    engine.networkOut.setName (settings->getValue ("networkName", "PEQUOD Host - " + juce::SystemStats::getComputerName()));
+    if (settings->getBoolValue ("networkOut", false))
+    {
+        juce::String netError;
+        engine.setNetworkOutput (true, engine.networkOut.getName(), settings->getBoolValue ("networkDry", false), netError);
+    }
     if (settings->containsKey ("loudnessTarget"))
         engine.loudnessReference = settings->getDoubleValue ("loudnessTarget");
 
@@ -322,6 +328,9 @@ void MainComponent::saveSettings()
     s->setValue ("clickDb", (double) engine.transport.clickGainDb.load());
     s->setValue ("beatsPerBar", engine.transport.beatsPerBar.load());
     s->setValue ("limiter", engine.getOutputStage()->limiterOn.load());
+    s->setValue ("networkOut", engine.isNetworkOutputOn());
+    s->setValue ("networkName", engine.networkOut.getName());
+    s->setValue ("networkDry", engine.isNetworkSendingDry());
     s->setValue ("keyboardShown", keyboard != nullptr && keyboard->isVisible());
     if (! std::isnan (engine.loudnessReference)) s->setValue ("loudnessTarget", engine.loudnessReference);
     s->setValue ("pedalboardView", rack.isPedalboard());

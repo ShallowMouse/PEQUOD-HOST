@@ -65,7 +65,8 @@ target_sources(PequodHost PRIVATE
     Source/Updater.cpp
     Source/CrashGuard.cpp
     Source/ScreenLayout.cpp
-    Source/ScreenEditor.cpp)
+    Source/ScreenEditor.cpp
+    Source/HawthorneLink/NetSender.cpp)
 
 target_compile_definitions(PequodHost PRIVATE
     JUCE_PLUGINHOST_VST3=1

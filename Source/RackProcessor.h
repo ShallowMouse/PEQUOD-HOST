@@ -1,6 +1,7 @@
 #pragma once
 
 #include "WorkerPool.h"
+#include "HawthorneLink/NetSender.h"
 
 class GainMeterProcessor;
 class Transport;
@@ -124,6 +125,12 @@ public:
     std::atomic<bool> instrumentInput { false };
     bool isGuitarMutedForInstrument() const noexcept { return instrumentInput.load(); }
 
+    /** Network output to Hawthorne (Hawthorne Link). Channels 1-2: PEQUOD's output (after OUT, the limiter
+        and MUTE); with sendDry, 3-4: the guitar as it comes in (after IN), for re-amping. */
+    hawthorne::NetSender* netOut = nullptr;
+    void setNetworkOutput (bool on, bool sendDry);      // message thread
+    bool isNetworkOutputOn() const noexcept { return netActive.load(); }
+
     /** The master tempo every plugin sees (and the click). */
     Transport* transport = nullptr;
 
@@ -179,6 +186,9 @@ private:
     std::atomic<float> fadeTarget { 1.0f }, fadeNow { 1.0f };
     float fadeGain = 1.0f;
     float guitarGain = 1.0f;
+    std::atomic<bool> netActive { false };
+    int netChannels = 2;
+    juce::AudioBuffer<float> dryCopy;
 
     void processPlan (RenderPlan&, juce::AudioBuffer<float>& stereo, juce::MidiBuffer& midi, int n) noexcept;
 

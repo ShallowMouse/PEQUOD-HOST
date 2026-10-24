@@ -38,6 +38,7 @@ HostEngine::HostEngine()
 
     rack = std::make_unique<RackProcessor> (*inputStage, *outputStage);
     rack->transport = &transport;
+    rack->netOut = &networkOut;
     rack->onNeedsNewPlan = [this] { rewire(); };
 
     rewire();
@@ -52,6 +53,8 @@ HostEngine::~HostEngine()
     deviceManager.removeAudioCallback (&player);
     player.setProcessor (nullptr);
     rack->onNeedsNewPlan = nullptr;
+    rack->setNetworkOutput (false, false);
+    networkOut.stop();
     clearRack();
     for (auto& sp : spares) destroySlot (sp, false);
     spares.clear();
@@ -93,6 +96,20 @@ std::unique_ptr<RenderPlugin> HostEngine::makeRenderPlugin (PluginSlot& slot, in
     rp->scratch.setSize (rp->numScratch, maxBlock);
     rp->midi.ensureSize (4096);
     return rp;
+}
+
+bool HostEngine::setNetworkOutput (bool on, const juce::String& name, bool sendDry, juce::String& error)
+{
+    networkDry = sendDry;
+    if (on)
+    {
+        if (! networkOut.start (name, error)) { rack->setNetworkOutput (false, sendDry); networkOn = false; return false; }
+        networkOut.setName (name);
+    }
+    rack->setNetworkOutput (on, sendDry);
+    if (! on) networkOut.stop();
+    networkOn = on;
+    return true;
 }
 
 bool HostEngine::isInstrument (const PluginSlot& slot)

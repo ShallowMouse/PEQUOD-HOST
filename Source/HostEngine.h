@@ -267,6 +267,13 @@ public:
     std::vector<RackItem*> getSplits();
     int getSplitNumber (int itemUid) const;
 
+    //== Network output to Hawthorne (Hawthorne Link)
+    hawthorne::NetSender networkOut;
+    /** Starts or stops sending; name is how PEQUOD appears in Hawthorne's NETWORK window. */
+    bool setNetworkOutput (bool on, const juce::String& name, bool sendDry, juce::String& error);
+    bool isNetworkOutputOn() const noexcept { return networkOn; }
+    bool isNetworkSendingDry() const noexcept { return networkDry; }
+
     //== Master
     Transport transport;                       // tempo (saved with the preset) + click
     /** Loudness the "match level" function aims every preset at (dB, before the OUT level); NaN = none yet. */
@@ -317,6 +324,7 @@ public:
 
 private:
     int changeCounter = 0;
+    bool networkOn = false, networkDry = false;
     std::unique_ptr<GainMeterProcessor> inputStageOwned, outputStageOwned;
     GainMeterProcessor* inputStage = nullptr;
     GainMeterProcessor* outputStage = nullptr;
