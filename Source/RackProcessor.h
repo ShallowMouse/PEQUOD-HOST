@@ -129,6 +129,8 @@ public:
         and MUTE); with sendDry, 3-4: the guitar as it comes in (after IN), for re-amping. */
     hawthorne::NetSender* netOut = nullptr;
     void setNetworkOutput (bool on, bool sendDry);      // message thread
+    /** The interface's input latency (set by the engine): with the buffer and the plugins, Hawthorne shows the delay. */
+    std::atomic<int> netInputLatency { 0 };
     bool isNetworkOutputOn() const noexcept { return netActive.load(); }
 
     /** The master tempo every plugin sees (and the click). */
@@ -189,6 +191,7 @@ private:
     std::atomic<bool> netActive { false };
     int netChannels = 2;
     juce::AudioBuffer<float> dryCopy;
+    int networkLatency (int blockSize) const;            // call with planLock held
 
     void processPlan (RenderPlan&, juce::AudioBuffer<float>& stereo, juce::MidiBuffer& midi, int n) noexcept;
 

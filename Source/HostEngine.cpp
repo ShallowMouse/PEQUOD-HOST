@@ -80,6 +80,8 @@ void HostEngine::initialiseAudio (const juce::XmlElement* savedDeviceState)
 
 void HostEngine::changeListenerCallback (juce::ChangeBroadcaster*)
 {
+    if (auto* dev = deviceManager.getCurrentAudioDevice())
+        rack->netInputLatency = dev->getInputLatencyInSamples();
     rewire();
 }
 
@@ -100,6 +102,8 @@ std::unique_ptr<RenderPlugin> HostEngine::makeRenderPlugin (PluginSlot& slot, in
 
 bool HostEngine::setNetworkOutput (bool on, const juce::String& name, bool sendDry, juce::String& error)
 {
+    if (auto* dev = deviceManager.getCurrentAudioDevice())
+        rack->netInputLatency = dev->getInputLatencyInSamples();
     networkDry = sendDry;
     if (on)
     {

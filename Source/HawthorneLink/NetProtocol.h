@@ -45,7 +45,7 @@ struct PacketHeader
     uint32_t session;        // random per audio-device start: frame numbers restart
     uint32_t sampleRate;
     uint16_t frames;         // frames per block
-    uint16_t reserved;
+    uint16_t latency;        // sender's input latency + audio buffer, samples (information)
     uint64_t firstFrame;     // block A
     uint64_t prevFirstFrame; // block B
 };
@@ -113,6 +113,9 @@ inline bool parseAnnounce (const juce::String& msg, Announce& a)
     a.name        = msg.fromFirstOccurrenceOf ("\n", false, false).trim();
     return a.senderId != 0 && a.controlPort > 0;
 }
+
+/** Bigger kernel socket buffers than the OS default (Windows' is small). In NetSender.cpp. */
+void setSocketBuffers (int socketHandle, int receiveBytes, int sendBytes);
 
 inline juce::String makeSubscribe (uint32_t senderId, uint32_t receiverId) { return "HWNA1 SUB " + hex (senderId) + " " + hex (receiverId); }
 inline juce::String makeBye (uint32_t senderId)         { return "HWNA1 BYE " + hex (senderId); }

@@ -124,9 +124,18 @@ void RackProcessor::setNetworkOutput (bool on, bool sendDry)
     netChannels = sendDry ? 4 : 2;
     if (on)
     {
-        netOut->prepare (currentRate.load(), netChannels);   // a new session: Hawthorne resyncs
+        netOut->prepare (currentRate.load(), netChannels, networkLatency (currentBlock.load()));   // a new session: Hawthorne resyncs
         netActive = true;
     }
+}
+
+int RackProcessor::networkLatency (int blockSize) const
+{
+    // What Hawthorne shows as the delay: into the interface, one buffer, the plugins (and the multi-core pipeline).
+    int chain = 0;
+    if (plan != nullptr)
+        chain = plan->pluginLatency + (juce::jmax (1, (int) plan->stages.size()) - 1) * blockSize;
+    return netInputLatency.load() + blockSize + chain;
 }
 
 void RackProcessor::preparePlugin (juce::AudioPluginInstance& inst) const
@@ -153,7 +162,7 @@ void RackProcessor::prepareToPlay (double sampleRate, int newBlockSize)
         io.setSize (2, juce::jmax (newBlockSize, 32), false, true, true);
         dryCopy.setSize (2, juce::jmax (newBlockSize, 32), false, true, true);
         if (netOut != nullptr && netActive.load())
-            netOut->prepare (sampleRate, netChannels);         // new sample rate: a new session
+            netOut->prepare (sampleRate, netChannels, networkLatency (newBlockSize));   // new sample rate: a new session
         planTooSmall = plan == nullptr || plan->maxBlock < newBlockSize;
 
         if (plan != nullptr)

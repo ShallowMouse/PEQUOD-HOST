@@ -1,10 +1,29 @@
+#if defined (_WIN32)
+ #include <winsock2.h>      // before anything that might pull in windows.h
+#else
+ #include <sys/socket.h>
+#endif
 #include "NetSender.h"
 
 namespace hawthorne
 {
 
+void net::setSocketBuffers (int h, int receiveBytes, int sendBytes)
+{
+    if (h < 0) return;
+   #if JUCE_WINDOWS
+    using Opt = const char*;
+    const auto sock = (SOCKET) h;
+   #else
+    using Opt = const void*;
+    const auto sock = h;
+   #endif
+    ::setsockopt (sock, SOL_SOCKET, SO_RCVBUF, (Opt) &receiveBytes, sizeof (receiveBytes));
+    ::setsockopt (sock, SOL_SOCKET, SO_SNDBUF, (Opt) &sendBytes, sizeof (sendBytes));
+}
+
 //==============================================================================
-void Packetizer::prepare (uint32_t id, uint32_t sess, double sr, int ch, bool red)
+void Packetizer::prepare (uint32_t id, uint32_t sess, double sr, int ch, bool red, int latencySamples)
 {
     channels = juce::jlimit (1, net::maxChannels, ch);
     redundant = red;
@@ -26,6 +45,7 @@ void Packetizer::prepare (uint32_t id, uint32_t sess, double sr, int ch, bool re
     header.session = sess;
     header.sampleRate = (uint32_t) std::lround (sr);
     header.frames = (uint16_t) fpp;
+    header.latency = (uint16_t) juce::jlimit (0, 65535, latencySamples);
 }
 
 void Packetizer::finishPacket() noexcept
@@ -96,6 +116,7 @@ bool NetSender::start (const juce::String& n, juce::String& error)
         return false;
     }
     boundPort = socket->getBoundPort();
+    net::setSocketBuffers (socket->getRawSocketHandle(), 1 << 20, 4 << 20);
 
     running = true;
     thread = std::make_unique<LambdaThread> ("Hawthorne Link TX", [this] { run(); });
@@ -133,13 +154,13 @@ std::vector<NetSender::Subscriber> NetSender::getSubscribers() const
     return subscribers;
 }
 
-void NetSender::prepare (double sr, int ch)
+void NetSender::prepare (double sr, int ch, int latencySamples)
 {
     prepared = false;
     session = randomNonZero();
     channels = juce::jlimit (1, net::maxChannels, ch);
     sampleRate = sr;
-    packetizer.prepare (senderId, session, sr, channels, redundancy);
+    packetizer.prepare (senderId, session, sr, channels, redundancy, latencySamples);
     prepared = true;
 }
 

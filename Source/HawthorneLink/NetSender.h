@@ -16,7 +16,7 @@ namespace hawthorne
 class Packetizer
 {
 public:
-    void prepare (uint32_t senderId, uint32_t session, double sampleRate, int channels, bool redundant);
+    void prepare (uint32_t senderId, uint32_t session, double sampleRate, int channels, bool redundant, int latencySamples = 0);
 
     /** Calls emit (data, size) for every completed datagram. */
     template <typename Emit>
@@ -69,7 +69,7 @@ public:
     bool getRedundancy() const noexcept   { return redundancy.load(); }
 
     /** Before the audio starts (device about to start): begins a new session. */
-    void prepare (double sampleRate, int channels);
+    void prepare (double sampleRate, int channels, int latencySamples = 0);
     /** Audio thread. */
     void push (const float* const* in, int numChannels, int n) noexcept;
 
