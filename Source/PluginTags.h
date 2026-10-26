@@ -34,6 +34,14 @@ namespace PluginTags
             { "blocparty",                { "Bloc Party", "Deltalab" } },
             { "blink182",                 { "blink-182", "Poway" } },
             { "oingoboingo",              { "Oingo Boingo", "Only a Lad" } },
+            { "direstraits",              { "Dire Straits", "Montserrat" } },
+            { "thelivingend",             { "The Living End", "Sing Sing" } },
+            { "lastshadowpuppets",        { "Last Shadow Puppets", "Black Box" } },
+            { "roylanham",                { "Roy Lanham", "Sizzling Strings" } },
+            { "finnbrothers",             { "Finn Brothers", "Karekare" } },
+            { "duaneeddy",                { "Duane Eddy", "Phoenix" } },
+            { "amps",                     { "PEQUOD Amps", nullptr } },
+            { "cabs",                     { "PEQUOD Cabs", nullptr } },
             { "pedals",                   { "PEQUOD Pedals", nullptr } },
         };
         auto it = titles.find (PluginColours::normalise (vendorSuffix));
