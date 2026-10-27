@@ -1,5 +1,6 @@
 #include "HostEngine.h"
 #include "CrashGuard.h"
+#include "PequodNative.h"
 
 //==============================================================================
 struct PluginSlot::Listener : public juce::AudioProcessorParameter::Listener
@@ -26,6 +27,7 @@ struct PluginSlot::Listener : public juce::AudioProcessorParameter::Listener
 HostEngine::HostEngine()
 {
     juce::addDefaultFormatsToManager (formatManager);
+    formatManager.addFormat (new PequodNative::Format());   // PEQUOD's own plugins, built in
 
     inputStageOwned = std::make_unique<GainMeterProcessor>();
     inputStageOwned->inputMode = (int) GainMeterProcessor::InputMode::Left; // guitar into input 1 by default
@@ -852,6 +854,11 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
         // Prefer the locally-scanned description (path may differ between machines).
         for (auto& known : knownPlugins.getTypes())
             if (known.isDuplicateOf (desc)) { desc = known; break; }
+
+        // A PEQUOD plugin saved as a VST3 runs on the built-in engine (it reads the VST3's settings).
+        if (desc.pluginFormatName != PequodNative::formatName && desc.manufacturerName.startsWith ("PEQUOD"))
+            for (auto& i : PequodNative::all())
+                if (i.name == desc.name && i.vendor == desc.manufacturerName) { desc = PequodNative::describe (i); break; }
 
         if (skipPlugins.contains (desc.name, true))
         {

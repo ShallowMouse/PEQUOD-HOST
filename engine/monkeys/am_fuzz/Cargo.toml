@@ -1,0 +1,20 @@
+[package]
+name = "am_fuzz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+vintage = { workspace = true }
+
+[features]
+standalone = ["vintage/standalone"]
+
+[[bin]]
+name = "preview_am_fuzz"
+path = "src/bin/preview.rs"
+required-features = ["standalone"]

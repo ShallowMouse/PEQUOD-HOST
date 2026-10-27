@@ -1,0 +1,20 @@
+[package]
+name = "jf_loop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+vintage = { workspace = true }
+
+[features]
+standalone = ["vintage/standalone"]
+
+[[bin]]
+name = "preview_jf_loop"
+path = "src/bin/preview.rs"
+required-features = ["standalone"]

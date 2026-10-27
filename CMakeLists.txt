@@ -65,7 +65,9 @@ target_sources(PequodHost PRIVATE
     Source/Updater.cpp
     Source/CrashGuard.cpp
     Source/ScreenLayout.cpp
-    Source/ScreenEditor.cpp)
+    Source/ScreenEditor.cpp
+    Source/PequodNative.cpp
+    Source/PequodPanel.cpp)
 
 target_compile_definitions(PequodHost PRIVATE
     JUCE_PLUGINHOST_VST3=1
@@ -82,8 +84,18 @@ target_compile_definitions(PequodHost PRIVATE
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:PequodHost,JUCE_VERSION>"
     JUCE_DISPLAY_SPLASH_SCREEN=0)
 
+# The PEQUOD engine: every PEQUOD plugin, built from the Rust source in engine/
+# (cargo build --release -p pequod_engine --target x86_64-pc-windows-msvc, with RUSTFLAGS=-C target-feature=+crt-static
+# to match the static runtime above). The workflow builds it before CMake runs.
+set(PEQUOD_ENGINE_LIB "${CMAKE_CURRENT_SOURCE_DIR}/engine/target/x86_64-pc-windows-msvc/release/pequod_engine.lib" CACHE FILEPATH "The built PEQUOD engine library")
+if(NOT EXISTS "${PEQUOD_ENGINE_LIB}")
+    message(FATAL_ERROR "PEQUOD engine not built: run 'cargo build --release -p pequod_engine --target x86_64-pc-windows-msvc' in engine/ first (see engine/README.md)")
+endif()
+
 target_link_libraries(PequodHost
     PRIVATE
+        "${PEQUOD_ENGINE_LIB}"
+        ws2_32 userenv bcrypt ntdll advapi32 ole32 oleaut32 shell32 user32 crypt32 secur32 propsys uuid
         PequodFonts
         juce::juce_audio_utils
         juce::juce_audio_processors

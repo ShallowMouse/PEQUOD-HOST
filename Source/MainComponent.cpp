@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "PequodNative.h"
 #include "SettingsPanel.h"
 #include "PluginManagerPanel.h"
 #include "ControllerPanel.h"
@@ -57,6 +58,7 @@ MainComponent::MainComponent()
     // Plugins
     if (auto xml = settings->getXmlValue ("knownPlugins"))
         engine.knownPlugins.recreateFromXml (*xml);
+    PequodNative::registerAll (engine.knownPlugins);   // the built-in PEQUOD plugins: always there, no scan
     engine.knownPlugins.addChangeListener (this);
 
     // Audio + MIDI
@@ -258,7 +260,7 @@ MainComponent::MainComponent()
     }
     browser.setCurrentPresetFile (currentPresetFile);
 
-    if (engine.knownPlugins.getNumTypes() == 0)
+    if (engine.knownPlugins.getNumTypes() <= (int) PequodNative::all().size())
         juce::MessageManager::callAsync ([this] { showPluginManager (true); });
 
     setWantsKeyboardFocus (true);

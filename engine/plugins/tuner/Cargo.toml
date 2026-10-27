@@ -1,0 +1,22 @@
+[package]
+name = "tuner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+vintage = { workspace = true }
+
+[features]
+standalone = ["vintage/standalone"]
+# preview only: feeds a slightly flat G string into the tuner
+demo = []
+
+[[bin]]
+name = "preview_tuner"
+path = "src/bin/preview.rs"
+required-features = ["standalone"]

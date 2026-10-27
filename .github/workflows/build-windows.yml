@@ -64,6 +64,24 @@ jobs:
           name: PEQUOD-FC-Firmware
           path: fw
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+
+      - name: Build the PEQUOD engine
+        shell: pwsh
+        env:
+          # the same static C runtime as the host (CMAKE_MSVC_RUNTIME_LIBRARY)
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          rustup default stable
+          cargo build --release -p pequod_engine --target x86_64-pc-windows-msvc --manifest-path engine/Cargo.toml *>&1 | Tee-Object -FilePath engine.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Select-String -Path engine.log -Pattern "error" | Select-Object -First 60 | ForEach-Object { $_.Line }) -join "%0A"; Write-Output "::error title=engine::$msg"
+            exit 1
+          }
+          Get-ChildItem engine/target/x86_64-pc-windows-msvc/release/pequod_engine.lib
+
       - name: Configure
         shell: pwsh
         run: |
