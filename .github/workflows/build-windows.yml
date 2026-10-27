@@ -85,6 +85,10 @@ jobs:
           Get-ChildItem $lib
           $libs = Select-String -Path engine.log -Pattern "native-static-libs: (.*)" | Select-Object -Last 1
           if ($libs) { Set-Content -Path "$lib.libs" -Value $libs.Matches[0].Groups[1].Value; Get-Content "$lib.libs" }
+          # import libraries the windows-rs crates ship (windows.0.52.0.lib etc.), next to the engine for the linker
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+          $reg = Join-Path $cargoHome "registry\src"
+          Get-ChildItem $reg -Recurse -Filter "*.lib" | Where-Object { $_.FullName -match "windows_x86_64_msvc-[^\\]+\\lib\\" } | ForEach-Object { Copy-Item $_.FullName (Split-Path $lib) -Force; $_.Name }
 
       - name: Configure
         shell: pwsh

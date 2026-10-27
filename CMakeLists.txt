@@ -116,6 +116,9 @@ else()
     set(PEQUOD_ENGINE_NATIVE_LIBS xcb GL X11-xcb X11 pthread dl m rt util)
 endif()
 message(STATUS "PEQUOD engine system libraries: ${PEQUOD_ENGINE_NATIVE_LIBS}")
+# the engine's folder also holds the import libraries the windows-rs crates ship (copied there by the workflow)
+get_filename_component(PEQUOD_ENGINE_DIR "${PEQUOD_ENGINE_LIB}" DIRECTORY)
+target_link_directories(PequodHost PRIVATE "${PEQUOD_ENGINE_DIR}")
 
 target_link_libraries(PequodHost
     PRIVATE
