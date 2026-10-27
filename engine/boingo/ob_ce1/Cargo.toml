@@ -1,0 +1,20 @@
+[package]
+name = "ob_ce1"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+vintage = { workspace = true }
+
+[features]
+standalone = ["vintage/standalone"]
+
+[[bin]]
+name = "preview_ob_ce1"
+path = "src/bin/preview.rs"
+required-features = ["standalone"]

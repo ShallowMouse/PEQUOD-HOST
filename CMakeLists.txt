@@ -41,7 +41,9 @@ juce_add_binary_data(PequodFonts SOURCES
     Resources/Fonts/CourierPrime-Regular.ttf
     Resources/Fonts/CourierPrime-Bold.ttf
     Resources/Fonts/Roboto-Regular.ttf
-    Resources/Fonts/Roboto-Bold.ttf)
+    Resources/Fonts/Roboto-Bold.ttf
+    Resources/Fonts/Ubuntu-Light.ttf
+    Resources/Fonts/Hack-Regular.ttf)
 
 target_sources(PequodHost PRIVATE
     Source/Main.cpp
@@ -66,7 +68,9 @@ target_sources(PequodHost PRIVATE
     Source/CrashGuard.cpp
     Source/ScreenLayout.cpp
     Source/ScreenEditor.cpp
-    Source/HawthorneLink/NetSender.cpp)
+    Source/HawthorneLink/NetSender.cpp
+    Source/PequodNative.cpp
+    Source/PequodPanel.cpp)
 
 target_compile_definitions(PequodHost PRIVATE
     JUCE_PLUGINHOST_VST3=1
@@ -83,8 +87,40 @@ target_compile_definitions(PequodHost PRIVATE
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:PequodHost,JUCE_VERSION>"
     JUCE_DISPLAY_SPLASH_SCREEN=0)
 
+# The PEQUOD engine: every PEQUOD plugin, built from the Rust source in engine/
+# (cargo build --release -p pequod_engine --target x86_64-pc-windows-msvc, with RUSTFLAGS=-C target-feature=+crt-static
+# to match the static runtime above). The workflow builds it before CMake runs.
+set(PEQUOD_ENGINE_LIB "${CMAKE_CURRENT_SOURCE_DIR}/engine/target/x86_64-pc-windows-msvc/release/pequod_engine.lib" CACHE FILEPATH "The built PEQUOD engine library")
+if(NOT EXISTS "${PEQUOD_ENGINE_LIB}")
+    message(FATAL_ERROR "PEQUOD engine not built: run 'cargo build --release -p pequod_engine --target x86_64-pc-windows-msvc' in engine/ first (see engine/README.md)")
+endif()
+
+# The system libraries the engine needs, as rustc reports them (--print native-static-libs,
+# saved next to the library by the build step); a fixed list if that file is missing.
+set(PEQUOD_ENGINE_NATIVE_LIBS)
+if(EXISTS "${PEQUOD_ENGINE_LIB}.libs")
+    file(READ "${PEQUOD_ENGINE_LIB}.libs" _pq_libs)
+    string(REGEX REPLACE "[ \t\r\n]+" ";" _pq_libs "${_pq_libs}")
+    foreach(_l IN LISTS _pq_libs)
+        if(_l MATCHES "^-l(.+)$")
+            list(APPEND PEQUOD_ENGINE_NATIVE_LIBS "${CMAKE_MATCH_1}")
+        elseif(_l MATCHES "^([^/].*)\\.lib$")
+            list(APPEND PEQUOD_ENGINE_NATIVE_LIBS "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES PEQUOD_ENGINE_NATIVE_LIBS)
+    list(REMOVE_ITEM PEQUOD_ENGINE_NATIVE_LIBS c msvcrt libcmt ucrt libucrt vcruntime libvcruntime)
+elseif(WIN32)
+    set(PEQUOD_ENGINE_NATIVE_LIBS kernel32 advapi32 bcrypt ntdll userenv ws2_32 ole32 oleaut32 shell32 user32 gdi32 opengl32 dwmapi uxtheme crypt32 secur32 propsys uuid)
+else()
+    set(PEQUOD_ENGINE_NATIVE_LIBS xcb GL X11-xcb X11 pthread dl m rt util)
+endif()
+message(STATUS "PEQUOD engine system libraries: ${PEQUOD_ENGINE_NATIVE_LIBS}")
+
 target_link_libraries(PequodHost
     PRIVATE
+        "${PEQUOD_ENGINE_LIB}"
+        ${PEQUOD_ENGINE_NATIVE_LIBS}
         PequodFonts
         juce::juce_audio_utils
         juce::juce_audio_processors

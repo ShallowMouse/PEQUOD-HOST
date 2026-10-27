@@ -1,5 +1,6 @@
 #include <set>
 #include "BrowserPanel.h"
+#include "PequodNative.h"
 
 BrowserPanel::BrowserPanel (HostEngine& e, PresetLibrary& lib) : engine (e), library (lib)
 {
@@ -109,7 +110,14 @@ void BrowserPanel::refresh()
         std::set<juce::String> seen;
         hiddenDuplicates = 0;
 
+        // built-in PEQUOD plugins first, so they win over a VST3 copy of the same plugin
+        std::vector<int> scanOrder;
         for (int i = 0; i < types.size(); ++i)
+            if (types.getReference (i).pluginFormatName == PequodNative::formatName) scanOrder.push_back (i);
+        for (int i = 0; i < types.size(); ++i)
+            if (types.getReference (i).pluginFormatName != PequodNative::formatName) scanOrder.push_back (i);
+
+        for (int i : scanOrder)
         {
             auto& t = types.getReference (i);
 

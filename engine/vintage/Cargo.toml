@@ -1,0 +1,20 @@
+[package]
+name = "vintage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+realfft = "3.4"
+hound = "3.5"
+serde_json = "1"
+
+[features]
+standalone = ["nih_plug/standalone"]
+# built into the PEQUOD engine (PEQUOD Host) instead of exported as VST3s
+engine = []
+
+[target.'cfg(windows)'.dependencies]
+rfd = { version = "0.15", default-features = false }
