@@ -54,6 +54,8 @@ private:
 
     // On-screen keyboard for instrument plugins (also played from the computer keyboard: A W S E D...)
     juce::TextButton keysButton { "KEYS" };
+    LearnableButton inputButton { "INPUT: GUITAR" };     // guitar or instrument plugins (mutes the guitar)
+    void updateInputButton();
     std::unique_ptr<juce::MidiKeyboardComponent> keyboard;
     void showKeyboard (bool);
 

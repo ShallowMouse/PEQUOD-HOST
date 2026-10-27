@@ -70,6 +70,12 @@ MainComponent::MainComponent()
     engine.transport.clickGainDb = (float) settings->getDoubleValue ("clickDb", -12.0);
     engine.transport.beatsPerBar = juce::jlimit (2, 7, settings->getIntValue ("beatsPerBar", 4));
     engine.getOutputStage()->limiterOn = settings->getBoolValue ("limiter", true);
+    engine.networkOut.setName (settings->getValue ("networkName", "PEQUOD Host - " + juce::SystemStats::getComputerName()));
+    if (settings->getBoolValue ("networkOut", false))
+    {
+        juce::String netError;
+        engine.setNetworkOutput (true, engine.networkOut.getName(), settings->getBoolValue ("networkDry", false), netError);
+    }
     if (settings->containsKey ("loudnessTarget"))
         engine.loudnessReference = settings->getDoubleValue ("loudnessTarget");
 
@@ -137,7 +143,19 @@ MainComponent::MainComponent()
     keysButton.setTooltip ("On-screen keyboard for instrument plugins (click it, then play with A W S E D F T G... too)");
     keysButton.onClick = [this] { showKeyboard (! keyboard->isVisible()); };
     addAndMakeVisible (keysButton);
-    engine.getRack().muteGuitarForInstruments = settings->getBoolValue ("muteGuitarForInstruments", true);
+    inputButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
+    inputButton.setColour (juce::TextButton::buttonOnColourId, Pequod::Colours::mustard);
+    inputButton.setColour (juce::TextButton::textColourOnId, Pequod::Colours::rail);
+    inputButton.setTooltip ("What you're playing: GUITAR, or INSTRUMENT plugins (mutes the guitar). Saved with the preset. Right-click to learn a footswitch.");
+    inputButton.onClick = [this]
+    {
+        auto& in = engine.getRack().instrumentInput;
+        in = ! in.load();
+        engine.markModified();
+        updateInputButton();
+    };
+    inputButton.onLearn = [this] { control.armLearnFor (Mapping::Target::instrumentInput); };
+    addAndMakeVisible (inputButton);
     showKeyboard (settings->getBoolValue ("keyboardShown", false));
 
     undoButton.setTooltip ("Undo the last rack change (Ctrl+Z)");
@@ -312,7 +330,9 @@ void MainComponent::saveSettings()
     s->setValue ("clickDb", (double) engine.transport.clickGainDb.load());
     s->setValue ("beatsPerBar", engine.transport.beatsPerBar.load());
     s->setValue ("limiter", engine.getOutputStage()->limiterOn.load());
-    s->setValue ("muteGuitarForInstruments", engine.getRack().muteGuitarForInstruments.load());
+    s->setValue ("networkOut", engine.isNetworkOutputOn());
+    s->setValue ("networkName", engine.networkOut.getName());
+    s->setValue ("networkDry", engine.isNetworkSendingDry());
     s->setValue ("keyboardShown", keyboard != nullptr && keyboard->isVisible());
     if (! std::isnan (engine.loudnessReference)) s->setValue ("loudnessTarget", engine.loudnessReference);
     s->setValue ("pedalboardView", rack.isPedalboard());
@@ -336,7 +356,7 @@ void MainComponent::resized()
     auto r = getLocalBounds();
     header.setBounds (r.removeFromTop (64));
     auto status = r.removeFromBottom (24);
-    auto toggles = status.removeFromRight (380).reduced (4, 3);
+    auto toggles = status.removeFromRight (540).reduced (4, 3);
     pedalboardViewButton.setBounds (toggles.removeFromRight (100));
     toggles.removeFromRight (4);
     rackViewButton.setBounds (toggles.removeFromRight (60));
@@ -346,6 +366,8 @@ void MainComponent::resized()
     undoButton.setBounds (toggles.removeFromRight (56));
     toggles.removeFromRight (16);
     keysButton.setBounds (toggles.removeFromRight (56));
+    toggles.removeFromRight (4);
+    inputButton.setBounds (toggles.removeFromRight (150));
     statusBar.setBounds (status.reduced (10, 0));
     browser.setBounds (r.removeFromLeft (260));
     controlPanel.setBounds (r.removeFromRight (280));
@@ -401,6 +423,8 @@ void MainComponent::timerCallback()
     header.setPresetName ((currentPresetFile.existsAsFile() ? PresetLibrary::bankOf (currentPresetFile)
                                                             : library.getCurrentBank()) + "  /  " + getPresetDisplayName(),
                           engine.getChangeCounter() != savedChangeCounter);
+
+    updateInputButton();
 
     // A plugin that crashed while processing has been taken out of the signal: say so once.
     for (auto& sl : engine.getFlatSlots())
@@ -681,6 +705,7 @@ void MainComponent::initRack()
     engine.clearRack();
     control.clearRackMappings();
     engine.currentPresetName = "Init";
+    engine.getRack().instrumentInput = false;
     currentPresetFile = juce::File();
     savedChangeCounter = engine.getChangeCounter();
     browser.setCurrentPresetFile ({});
@@ -936,4 +961,11 @@ void MainComponent::showKeyboard (bool show)
         keyboard->setLowestVisibleKey (48);        // from C below middle C
         keyboard->grabKeyboardFocus();
     }
+}
+
+void MainComponent::updateInputButton()
+{
+    const bool inst = engine.getRack().instrumentInput.load();
+    inputButton.setToggleState (inst, juce::dontSendNotification);
+    inputButton.setButtonText (inst ? "INPUT: INSTRUMENT" : "INPUT: GUITAR");
 }

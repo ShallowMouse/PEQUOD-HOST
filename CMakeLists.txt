@@ -66,6 +66,7 @@ target_sources(PequodHost PRIVATE
     Source/CrashGuard.cpp
     Source/ScreenLayout.cpp
     Source/ScreenEditor.cpp
+    Source/HawthorneLink/NetSender.cpp
     Source/PequodNative.cpp
     Source/PequodPanel.cpp)
 

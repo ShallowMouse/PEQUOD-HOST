@@ -40,6 +40,7 @@ HostEngine::HostEngine()
 
     rack = std::make_unique<RackProcessor> (*inputStage, *outputStage);
     rack->transport = &transport;
+    rack->netOut = &networkOut;
     rack->onNeedsNewPlan = [this] { rewire(); };
 
     rewire();
@@ -54,6 +55,8 @@ HostEngine::~HostEngine()
     deviceManager.removeAudioCallback (&player);
     player.setProcessor (nullptr);
     rack->onNeedsNewPlan = nullptr;
+    rack->setNetworkOutput (false, false);
+    networkOut.stop();
     clearRack();
     for (auto& sp : spares) destroySlot (sp, false);
     spares.clear();
@@ -79,6 +82,8 @@ void HostEngine::initialiseAudio (const juce::XmlElement* savedDeviceState)
 
 void HostEngine::changeListenerCallback (juce::ChangeBroadcaster*)
 {
+    if (auto* dev = deviceManager.getCurrentAudioDevice())
+        rack->netInputLatency = dev->getInputLatencyInSamples();
     rewire();
 }
 
@@ -95,6 +100,22 @@ std::unique_ptr<RenderPlugin> HostEngine::makeRenderPlugin (PluginSlot& slot, in
     rp->scratch.setSize (rp->numScratch, maxBlock);
     rp->midi.ensureSize (4096);
     return rp;
+}
+
+bool HostEngine::setNetworkOutput (bool on, const juce::String& name, bool sendDry, juce::String& error)
+{
+    if (auto* dev = deviceManager.getCurrentAudioDevice())
+        rack->netInputLatency = dev->getInputLatencyInSamples();
+    networkDry = sendDry;
+    if (on)
+    {
+        if (! networkOut.start (name, error)) { rack->setNetworkOutput (false, sendDry); networkOn = false; return false; }
+        networkOut.setName (name);
+    }
+    rack->setNetworkOutput (on, sendDry);
+    if (! on) networkOut.stop();
+    networkOn = on;
+    return true;
 }
 
 bool HostEngine::isInstrument (const PluginSlot& slot)
@@ -776,6 +797,7 @@ std::unique_ptr<juce::XmlElement> HostEngine::createRackXml() const
     root->setAttribute ("outGain", outputStage->gainDb.load());
     root->setAttribute ("inputMode", inputStage->inputMode.load());
     root->setAttribute ("bpm", transport.bpm.load());
+    root->setAttribute ("input", rack->instrumentInput.load() ? "instrument" : "guitar");
 
     for (auto& item : items)
     {
@@ -984,6 +1006,7 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
     outputStage->gainDb = (float) root.getDoubleAttribute ("outGain", 0.0);
     if (root.hasAttribute ("bpm")) transport.setBpm (root.getDoubleAttribute ("bpm", 120.0));   // older presets keep the current tempo
     inputStage->inputMode = root.getIntAttribute ("inputMode", (int) GainMeterProcessor::InputMode::Left);
+    rack->instrumentInput = root.getStringAttribute ("input") == "instrument";
 
     items = std::move (newItems);
     rewire();

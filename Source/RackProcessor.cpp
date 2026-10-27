@@ -116,6 +116,28 @@ bool RackProcessor::waitForSilence (int timeoutMs) const
     return true;
 }
 
+void RackProcessor::setNetworkOutput (bool on, bool sendDry)
+{
+    if (netOut == nullptr) return;
+    const juce::ScopedLock sl (planLock);       // the audio thread pushes under this lock
+    netActive = false;
+    netChannels = sendDry ? 4 : 2;
+    if (on)
+    {
+        netOut->prepare (currentRate.load(), netChannels, networkLatency (currentBlock.load()));   // a new session: Hawthorne resyncs
+        netActive = true;
+    }
+}
+
+int RackProcessor::networkLatency (int blockSize) const
+{
+    // What Hawthorne shows as the delay: into the interface, one buffer, the plugins (and the multi-core pipeline).
+    int chain = 0;
+    if (plan != nullptr)
+        chain = plan->pluginLatency + (juce::jmax (1, (int) plan->stages.size()) - 1) * blockSize;
+    return netInputLatency.load() + blockSize + chain;
+}
+
 void RackProcessor::preparePlugin (juce::AudioPluginInstance& inst) const
 {
     if (transport != nullptr) inst.setPlayHead (transport);
@@ -138,6 +160,9 @@ void RackProcessor::prepareToPlay (double sampleRate, int newBlockSize)
     {
         const juce::ScopedLock sl (planLock);
         io.setSize (2, juce::jmax (newBlockSize, 32), false, true, true);
+        dryCopy.setSize (2, juce::jmax (newBlockSize, 32), false, true, true);
+        if (netOut != nullptr && netActive.load())
+            netOut->prepare (sampleRate, netChannels, networkLatency (newBlockSize));   // new sample rate: a new session
         planTooSmall = plan == nullptr || plan->maxBlock < newBlockSize;
 
         if (plan != nullptr)
@@ -361,6 +386,10 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
     if (transport != nullptr) transport->beginBlock (getSampleRate());
     inputStage.processBlock (stereo, midi);
+    const bool sendingDry = netActive.load (std::memory_order_relaxed) && netChannels == 4 && n <= dryCopy.getNumSamples();
+    if (sendingDry)
+        for (int ch = 0; ch < 2; ++ch)
+            dryCopy.copyFrom (ch, 0, stereo, ch, 0, n);
 
     keyboardState.processNextMidiBuffer (midi, 0, n, true);
 
@@ -368,13 +397,8 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
         const juce::ScopedLock sl (planLock);
         if (plan != nullptr && plan->maxBlock >= n)
         {
-            // An instrument that's on takes over: fade the guitar out (after the tuner has heard it).
-            bool instrumentOn = false;
-            if (muteGuitarForInstruments.load (std::memory_order_relaxed))
-                for (auto* slot : plan->instruments)
-                    if (! slot->bypassed.load (std::memory_order_relaxed) && ! slot->crashed.load (std::memory_order_relaxed))
-                        { instrumentOn = true; break; }
-            guitarMuted.store (instrumentOn, std::memory_order_relaxed);
+            // INPUT: INSTRUMENT fades the guitar out (after the tuner has heard it).
+            const bool instrumentOn = instrumentInput.load (std::memory_order_relaxed);
 
             const float target = instrumentOn ? 0.0f : 1.0f;
             if (guitarGain != target || target < 1.0f)
@@ -414,6 +438,19 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
     if (transport != nullptr) transport->endBlock (stereo, n);     // the click goes through the master out (and MUTE)
     outputStage.processBlock (stereo, midi);
+
+    // Hawthorne Link: what you hear, to Hawthorne on another PC.
+    if (netActive.load (std::memory_order_relaxed))
+    {
+        const juce::ScopedLock sl (planLock);
+        if (netActive.load (std::memory_order_relaxed))
+        {
+            const float* chans[4] = { stereo.getReadPointer (0), stereo.getReadPointer (1),
+                                      sendingDry ? dryCopy.getReadPointer (0) : nullptr,
+                                      sendingDry ? dryCopy.getReadPointer (1) : nullptr };
+            netOut->push (chans, netChannels, n);
+        }
+    }
 
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
     {
