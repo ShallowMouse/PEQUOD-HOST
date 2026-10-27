@@ -8,11 +8,20 @@ versions load into them.
 
 Build (Windows, before CMake; the workflow does this):
 
-    cargo build --release -p pequod_engine --target x86_64-pc-windows-msvc
+    cargo rustc --release -p pequod_engine --lib --target x86_64-pc-windows-msvc -- --print native-static-libs
 
 with `RUSTFLAGS=-C target-feature=+crt-static` (the host uses the static C
 runtime). CMake picks up
-`engine/target/x86_64-pc-windows-msvc/release/pequod_engine.lib`.
+`engine/target/x86_64-pc-windows-msvc/release/pequod_engine.lib`, and the
+system libraries it needs from `pequod_engine.lib.libs` (the workflow saves
+rustc's `native-static-libs` line there; without it CMake uses a fixed list).
+
+The host's panels (`Source/PequodPanel.cpp`) are a port of
+`vintage/src/ui.rs`: change one, change the other. They use the same fonts
+as the VST3 panels (egui's Ubuntu Light and Hack, in `Resources/Fonts`).
+
+Tests: `cargo test --release -p pequod_engine` runs every plugin through the
+C interface (audio, state round trip, the amps' IR loader).
 
 - `vintage/` is the shared framework (DSP, panels, the plugin macro).
   `vintage/src/native.rs` is the engine side of every plugin.

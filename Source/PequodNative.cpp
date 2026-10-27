@@ -165,13 +165,14 @@ namespace
         const Info::Param p;
     };
 
-    juce::AudioProcessor::BusesProperties busesFor (const Info& i)
-    {
-        juce::AudioProcessor::BusesProperties b;
-        if (! i.instrument)
-            b = b.withInput ("Input", juce::AudioChannelSet::stereo(), true);
-        return b.withOutput ("Output", juce::AudioChannelSet::stereo(), true);
-    }
+}
+
+juce::AudioProcessor::BusesProperties Instance::busesFor (const Info& i)
+{
+    BusesProperties b;
+    if (! i.instrument)
+        b = b.withInput ("Input", juce::AudioChannelSet::stereo(), true);
+    return b.withOutput ("Output", juce::AudioChannelSet::stereo(), true);
 }
 
 Instance::Instance (const Info& i)

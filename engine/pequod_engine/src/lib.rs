@@ -470,6 +470,61 @@ pub unsafe extern "C" fn pq_set_state(h: *const Handle, data: *const u8, len: i3
     guard(0, || h.inst.load_state(d) as i32)
 }
 
+/// A normalized value in plain units (dB, Hz, metres...).
+/// # Safety
+/// `h` must be a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn pq_plain(h: *const Handle, i: i32, norm: f32) -> f32 {
+    match h.as_ref() {
+        Some(h) => guard(0.0, || h.inst.plain(i as usize, norm)),
+        None => 0.0,
+    }
+}
+
+/// 1 if the plugin has an impulse-response loader (the amps).
+/// # Safety
+/// `h` live.
+#[no_mangle]
+pub unsafe extern "C" fn pq_has_ir(h: *const Handle) -> i32 {
+    h.as_ref().map(|h| guard(0, || h.inst.has_ir() as i32)).unwrap_or(0)
+}
+
+/// Load a WAV impulse response (a file path, UTF-8). Returns 1 on success;
+/// either way `pq_ir_status` then says what happened. Not from the audio thread.
+/// # Safety
+/// `h` live; `path` a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn pq_ir_load(h: *const Handle, path: *const c_char) -> i32 {
+    let (Some(h), false) = (h.as_ref(), path.is_null()) else { return 0 };
+    let p = CStr::from_ptr(path).to_string_lossy().to_string();
+    guard(0, || h.inst.load_ir(&p) as i32)
+}
+
+/// # Safety
+/// `h` live.
+#[no_mangle]
+pub unsafe extern "C" fn pq_ir_unload(h: *const Handle) {
+    if let Some(h) = h.as_ref() {
+        guard((), || h.inst.unload_ir());
+    }
+}
+
+/// The loader's text (file name and length, or an error; empty when none)
+/// into `buf`; returns its length, and sets `*loaded` to 1 when an IR is in use.
+/// # Safety
+/// `h` live; `buf` has room for `len` bytes; `loaded` may be null.
+#[no_mangle]
+pub unsafe extern "C" fn pq_ir_status(h: *const Handle, buf: *mut c_char, len: i32, loaded: *mut i32) -> i32 {
+    let Some(h) = h.as_ref() else { return 0 };
+    guard(0, || {
+        let (s, l) = h.inst.ir_status();
+        if !loaded.is_null() {
+            *loaded = l as i32;
+        }
+        copy_out(&s, buf, len)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,5 +558,78 @@ mod tests {
                 pq_destroy(h);
             }
         }
+    }
+
+    /// The amps load an impulse response, report it, keep it in their state and unload it.
+    #[test]
+    fn amps_load_impulse_responses() {
+        // a short decaying-noise IR as a 16-bit mono WAV
+        let n = 2400u32;
+        let mut wav = Vec::new();
+        let data_len = n * 2;
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&48000u32.to_le_bytes());
+        wav.extend_from_slice(&96000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        let mut seed = 1u32;
+        for k in 0..n {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            let noise = (seed >> 16) as f32 / 32768.0 - 1.0;
+            let v = noise * (-(k as f32) / 300.0).exp();
+            wav.extend_from_slice(&((v * 20000.0) as i16).to_le_bytes());
+        }
+        let path = std::env::temp_dir().join("pequod_engine_test_ir.wav");
+        std::fs::write(&path, &wav).unwrap();
+        let cpath = CString::new(path.to_string_lossy().to_string()).unwrap();
+
+        let mut amps = 0;
+        for i in 0..pq_count() {
+            let h = pq_create(i);
+            unsafe {
+                if pq_has_ir(h) == 0 {
+                    pq_destroy(h);
+                    continue;
+                }
+                amps += 1;
+                pq_prepare(h, 44100.0, 2, 256);
+                assert_eq!(pq_ir_load(h, cpath.as_ptr()), 1);
+                let mut buf = vec![0 as c_char; 256];
+                let mut loaded = 0;
+                let len = pq_ir_status(h, buf.as_mut_ptr(), 256, &mut loaded);
+                let status = CStr::from_ptr(buf.as_ptr()).to_string_lossy().to_string();
+                assert!(len > 0 && loaded == 1 && status.contains("pequod_engine_test_ir"), "{status}");
+                let mut l = vec![0.1f32; 256];
+                let mut r = vec![0.1f32; 256];
+                let ptrs = [l.as_mut_ptr(), r.as_mut_ptr()];
+                pq_process(h, ptrs.as_ptr(), 2, 256, 120.0, 0.0, 0);
+                assert!(l.iter().all(|v| v.is_finite()));
+                // the path travels in the state, as "ir-path" (the VST3's key)
+                let slen = pq_get_state(h, std::ptr::null_mut(), 0);
+                let mut sb = vec![0 as c_char; slen as usize + 1];
+                pq_get_state(h, sb.as_mut_ptr(), slen + 1);
+                let st = CStr::from_ptr(sb.as_ptr()).to_bytes().to_vec();
+                assert!(String::from_utf8_lossy(&st).contains("ir-path"));
+                let h2 = pq_create(i);
+                pq_prepare(h2, 48000.0, 2, 256);
+                assert_eq!(pq_set_state(h2, st.as_ptr(), st.len() as i32), 1);
+                let mut loaded2 = 0;
+                pq_ir_status(h2, buf.as_mut_ptr(), 256, &mut loaded2);
+                assert_eq!(loaded2, 1);
+                pq_ir_unload(h2);
+                pq_ir_status(h2, buf.as_mut_ptr(), 256, &mut loaded2);
+                pq_destroy(h2);
+                pq_destroy(h);
+            }
+        }
+        assert!(amps > 0);
+        let _ = std::fs::remove_file(path);
     }
 }

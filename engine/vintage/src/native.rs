@@ -6,6 +6,7 @@
 //! `PluginState` JSON), so a rack saved with a VST3 PEQUOD plugin loads into
 //! the native one and back.
 
+use crate::amp::ir::IrShared;
 use crate::plugin::{Midi, TimedMidi, VintageDsp, VintageParams};
 use crate::ui::{Item, MeterKind, Panel};
 use nih_plug::prelude::{AtomicF32, ParamPtr, PluginState};
@@ -14,6 +15,7 @@ use std::cell::UnsafeCell;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, RwLock};
 
 /// One plugin as the engine lists it.
 pub struct Descriptor {
@@ -53,6 +55,8 @@ pub trait Instance: Send + Sync {
     fn param_from_text(&self, i: usize, text: &str) -> Option<f32>;
     /// Plain value (as in a preset) to normalized.
     fn normalize(&self, i: usize, plain: f32) -> f32;
+    /// Normalized to plain (display units: dB, Hz, metres...).
+    fn plain(&self, i: usize, norm: f32) -> f32;
     /// Meter values since the last call (the maximum of each), then cleared.
     fn take_meters(&self, out: &mut [f32]) -> usize;
     fn save_state(&self) -> String;
@@ -70,7 +74,26 @@ pub trait Instance: Send + Sync {
     /// # Safety
     /// Audio side.
     unsafe fn process(&self, chans: &mut [&mut [f32]], tempo: Option<f64>, beats: Option<f64>, playing: bool);
+
+    /// Plugins with an impulse-response loader (the amps).
+    fn has_ir(&self) -> bool {
+        false
+    }
+    /// Load an IR file (any thread but the audio one); false if it failed.
+    fn load_ir(&self, _path: &str) -> bool {
+        false
+    }
+    fn unload_ir(&self) {}
+    /// What the loader shows (file name and length, or an error) and whether an IR is in use.
+    fn ir_status(&self) -> (String, bool) {
+        (String::new(), false)
+    }
 }
+
+/// nih-plug persist keys the VST3 versions use, carried in the state so the
+/// two stay interchangeable.
+const GUI_VALUES: &str = "gui-values";
+const IR_PATH: &str = "ir-path";
 
 struct Ptr(ParamPtr);
 // SAFETY: the pointers point into the boxed params, which their owner never
@@ -92,6 +115,9 @@ pub struct NativeImpl<P: VintageParams, D: VintageDsp> {
     norms: Vec<AtomicF32>,
     meters: Vec<AtomicF32>,
     audio: UnsafeCell<Audio<D>>,
+    has_ir: bool,
+    ir: Arc<IrShared>,
+    ir_path: RwLock<String>,
 }
 
 // SAFETY: see `Instance`: the audio cell is only touched through the unsafe
@@ -122,6 +148,7 @@ impl<P: VintageParams, D: VintageDsp> NativeImpl<P, D> {
             .collect();
         let norms = info.iter().map(|i| AtomicF32::new(i.default)).collect();
         let n = ptrs.len();
+        let has_ir = params.ir_path().is_some();
         Self {
             _params: params,
             ptrs: ptrs.into_iter().map(Ptr).collect(),
@@ -129,6 +156,9 @@ impl<P: VintageParams, D: VintageDsp> NativeImpl<P, D> {
             norms,
             meters: (0..D::METERS.max(1)).map(|_| AtomicF32::new(0.0)).collect(),
             audio: UnsafeCell::new(Audio { dsp: None, plain: vec![0.0; n], block: vec![0.0; D::METERS.max(1)], midi: Vec::with_capacity(512) }),
+            has_ir,
+            ir: Arc::new(IrShared::default()),
+            ir_path: RwLock::new(String::new()),
         }
     }
 
@@ -157,7 +187,8 @@ impl<P: VintageParams, D: VintageDsp> Instance for NativeImpl<P, D> {
             // stepped parameters land exactly on a step
             let n = norm.clamp(0.0, 1.0);
             let n = match self.info[i].steps {
-                0 => n,
+                // continuous ones snap to their step size (if any), as in the saved state
+                0 => self.ptrs.get(i).map(|p| unsafe { p.0.preview_normalized(p.0.preview_plain(n)) }).unwrap_or(n),
                 s => (n * s as f32).round() / s as f32,
             };
             v.store(n, Ordering::Relaxed);
@@ -174,6 +205,9 @@ impl<P: VintageParams, D: VintageDsp> Instance for NativeImpl<P, D> {
     }
     fn normalize(&self, i: usize, plain: f32) -> f32 {
         self.ptrs.get(i).map(|p| unsafe { p.0.preview_normalized(plain) }).unwrap_or(0.0)
+    }
+    fn plain(&self, i: usize, norm: f32) -> f32 {
+        self.ptrs.get(i).map(|p| unsafe { p.0.preview_plain(norm) }).unwrap_or(0.0)
     }
     fn take_meters(&self, out: &mut [f32]) -> usize {
         let n = out.len().min(D::METERS);
@@ -199,7 +233,14 @@ impl<P: VintageParams, D: VintageDsp> Instance for NativeImpl<P, D> {
             };
             params.insert(self.info[i].id.clone(), v);
         }
-        let st = PluginState { version: env!("CARGO_PKG_VERSION").to_string(), params, fields: BTreeMap::new() };
+        let mut fields = BTreeMap::new();
+        let norms: Vec<f32> = self.norms.iter().map(|n| n.load(Ordering::Relaxed)).collect();
+        fields.insert(GUI_VALUES.to_string(), serde_json::to_string(&norms).unwrap_or_default());
+        if self.has_ir {
+            let path = self.ir_path.read().map(|p| p.clone()).unwrap_or_default();
+            fields.insert(IR_PATH.to_string(), serde_json::to_string(&path).unwrap_or_default());
+        }
+        let st = PluginState { version: env!("CARGO_PKG_VERSION").to_string(), params, fields };
         serde_json::to_string(&st).unwrap_or_default()
     }
     fn load_state(&self, data: &[u8]) -> bool {
@@ -228,11 +269,36 @@ impl<P: VintageParams, D: VintageDsp> Instance for NativeImpl<P, D> {
             };
             self.norms[i].store(norm.clamp(0.0, 1.0), Ordering::Relaxed);
         }
+        // values set on the VST3 panel that the host never stored win, as in the VST3
+        if let Some(saved) = st.fields.get(GUI_VALUES).and_then(|f| serde_json::from_str::<Vec<f32>>(f).ok()) {
+            if saved.len() == self.norms.len() {
+                for (i, v) in saved.iter().enumerate() {
+                    self.set_param(i, *v);
+                }
+            }
+        }
+        if self.has_ir {
+            let path = st.fields.get(IR_PATH).and_then(|f| serde_json::from_str::<String>(f).ok()).unwrap_or_default();
+            if path.is_empty() {
+                self.unload_ir();
+            } else {
+                self.load_ir(&path);
+            }
+        }
         true
     }
     unsafe fn prepare(&self, sample_rate: f32, channels: usize, _max_block: usize) -> u32 {
         let a = &mut *self.audio.get();
         let mut d = D::new(sample_rate, channels.max(1));
+        self.ir.sample_rate.store(sample_rate, Ordering::Relaxed);
+        d.attach_ir(self.ir.clone());
+        // the IR is resampled at load, so load it again at this rate
+        if self.has_ir {
+            let path = self.ir_path.read().map(|p| p.clone()).unwrap_or_default();
+            if !path.is_empty() {
+                self.ir.load_file(std::path::Path::new(&path));
+            }
+        }
         self.update_plain(a);
         d.set_params(&a.plain);
         d.reset();
@@ -300,6 +366,34 @@ impl<P: VintageParams, D: VintageDsp> Instance for NativeImpl<P, D> {
             }
         }
     }
+
+    fn has_ir(&self) -> bool {
+        self.has_ir
+    }
+    fn load_ir(&self, path: &str) -> bool {
+        if !self.has_ir {
+            return false;
+        }
+        let ok = self.ir.load_file(std::path::Path::new(path));
+        if ok {
+            if let Ok(mut p) = self.ir_path.write() {
+                *p = path.to_string();
+            }
+        }
+        ok
+    }
+    fn unload_ir(&self) {
+        self.ir.unload();
+        if let Ok(mut p) = self.ir_path.write() {
+            p.clear();
+        }
+    }
+    fn ir_status(&self) -> (String, bool) {
+        self.ir.collect_garbage();
+        let status = self.ir.status.read().map(|s| s.clone()).unwrap_or_default();
+        let loaded = self.ir.loaded.load(Ordering::Relaxed) || !status.is_empty() && !status.starts_with("IR not");
+        (status, loaded)
+    }
 }
 
 // ------------------------------------------------------------- panel JSON --
@@ -324,6 +418,14 @@ pub fn esc(s: &str) -> String {
 
 fn strs(v: &[&str]) -> String {
     format!("[{}]", v.iter().map(|s| esc(s)).collect::<Vec<_>>().join(","))
+}
+
+fn align_of(a: nih_plug_egui::egui::Align) -> i32 {
+    match a {
+        nih_plug_egui::egui::Align::Min => -1,
+        nih_plug_egui::egui::Align::Center => 0,
+        nih_plug_egui::egui::Align::Max => 1,
+    }
 }
 
 fn num(x: f32) -> String {
@@ -375,7 +477,15 @@ pub fn panel_json(p: &Panel) -> String {
                 format!("{{\"type\":\"rotor\",\"horn\":{horn},\"drum\":{drum},\"x\":{},\"y\":{},\"r\":{}}}", num(*x), num(*y), num(*r))
             }
             Item::Divider { y } => format!("{{\"type\":\"divider\",\"y\":{}}}", num(*y)),
-            Item::Text { x, y, text, size, .. } => format!("{{\"type\":\"text\",\"x\":{},\"y\":{},\"text\":{},\"size\":{}}}", num(*x), num(*y), esc(text), num(*size)),
+            Item::Text { x, y, text, size, align } => format!(
+                "{{\"type\":\"text\",\"x\":{},\"y\":{},\"text\":{},\"size\":{},\"align\":[{},{}]}}",
+                num(*x),
+                num(*y),
+                esc(text),
+                num(*size),
+                align_of(align.x()),
+                align_of(align.y())
+            ),
             Item::RadioList { p, x, y, w, row_h, names, tip } => format!(
                 "{{\"type\":\"radio\",\"p\":{p},\"x\":{},\"y\":{},\"w\":{},\"row_h\":{},\"names\":{},\"tip\":{}}}",
                 num(*x),
@@ -388,17 +498,32 @@ pub fn panel_json(p: &Panel) -> String {
             Item::Caption { p, x, y, w, size, texts } => {
                 format!("{{\"type\":\"caption\",\"p\":{p},\"x\":{},\"y\":{},\"w\":{},\"size\":{},\"texts\":{}}}", num(*x), num(*y), num(*w), num(*size), strs(texts))
             }
-            Item::RoomPlan { x, y, w, h, room, distance, spacing, .. } => format!(
-                "{{\"type\":\"roomplan\",\"x\":{},\"y\":{},\"w\":{},\"h\":{},\"room\":{room},\"distance\":{distance},\"spacing\":{spacing}}}",
+            Item::RoomPlan { x, y, w, h, room, distance, spacing, plans } => format!(
+                "{{\"type\":\"roomplan\",\"x\":{},\"y\":{},\"w\":{},\"h\":{},\"room\":{room},\"distance\":{distance},\"spacing\":{spacing},\"plans\":[{}]}}",
                 num(*x),
                 num(*y),
                 num(*w),
-                num(*h)
+                num(*h),
+                plans
+                    .iter()
+                    .map(|pl| format!(
+                        "{{\"length\":{},\"width\":{},\"src\":[{},{}],\"open_air\":{},\"far_wall\":{}}}",
+                        num(pl.length),
+                        num(pl.width),
+                        num(pl.src.0),
+                        num(pl.src.1),
+                        pl.open_air,
+                        esc(pl.far_wall)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(",")
             ),
             Item::Polar { x, y, r, pattern, angle } => {
                 format!("{{\"type\":\"polar\",\"x\":{},\"y\":{},\"r\":{},\"pattern\":{pattern},\"angle\":{angle}}}", num(*x), num(*y), num(*r))
             }
-            Item::IrLoader { x, y, w, .. } => format!("{{\"type\":\"irloader\",\"x\":{},\"y\":{},\"w\":{}}}", num(*x), num(*y), num(*w)),
+            Item::IrLoader { x, y, w, cab, ir_pos } => {
+                format!("{{\"type\":\"irloader\",\"x\":{},\"y\":{},\"w\":{},\"cab\":{cab},\"ir_pos\":{ir_pos}}}", num(*x), num(*y), num(*w))
+            }
             Item::Tuner { freq, level, reference, x, y, w, h } => format!(
                 "{{\"type\":\"tuner\",\"freq\":{freq},\"level\":{level},\"reference\":{reference},\"x\":{},\"y\":{},\"w\":{},\"h\":{}}}",
                 num(*x),

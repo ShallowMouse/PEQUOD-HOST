@@ -69,6 +69,19 @@ namespace PequodNative
         /** Meter values since the last call (the maximum of each). */
         int takeMeters (float* out, int max) const { return pq_meters (h, out, max); }
         float normalise (int param, float plain) const { return pq_normalize (h, param, plain); }
+        float plain (int param, float normalised) const { return pq_plain (h, param, normalised); }
+
+        bool hasIr() const { return pq_has_ir (h) != 0; }
+        bool loadIr (const juce::File& f) { return pq_ir_load (h, f.getFullPathName().toRawUTF8()) != 0; }
+        void unloadIr() { pq_ir_unload (h); }
+        juce::String irStatus (bool& loaded) const
+        {
+            char buf[512] = {};
+            int32_t l = 0;
+            pq_ir_status (h, buf, (int32_t) sizeof (buf), &l);
+            loaded = l != 0;
+            return juce::String::fromUTF8 (buf);
+        }
 
         // AudioPluginInstance
         void fillInPluginDescription (juce::PluginDescription& d) const override { d = describe (inf); }
@@ -93,6 +106,8 @@ namespace PequodNative
         void setStateInformation (const void*, int) override;
 
     private:
+        static BusesProperties busesFor (const Info&);
+
         const Info& inf;
         PqHandle* h = nullptr;
         std::vector<float*> ptrs;

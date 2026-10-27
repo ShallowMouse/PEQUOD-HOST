@@ -27,6 +27,7 @@ extern "C"
     int32_t pq_param_text (const PqHandle*, int32_t param, float normalised, char* buffer, int32_t length);
     int32_t pq_param_from_text (const PqHandle*, int32_t param, const char* text, float* normalisedOut);
     float   pq_normalize (const PqHandle*, int32_t param, float plain);
+    float   pq_plain (const PqHandle*, int32_t param, float normalised);   // display units: dB, Hz, metres...
 
     uint32_t pq_prepare (const PqHandle*, double sampleRate, int32_t channels, int32_t maxBlock);
     void     pq_reset (const PqHandle*);
@@ -39,4 +40,11 @@ extern "C"
 
     int32_t pq_get_state (const PqHandle*, char* buffer, int32_t length);
     int32_t pq_set_state (const PqHandle*, const uint8_t* data, int32_t length);
+
+    /** Impulse-response loader (the amps). Load and unload from the message thread. */
+    int32_t pq_has_ir (const PqHandle*);
+    int32_t pq_ir_load (const PqHandle*, const char* pathUtf8);
+    void    pq_ir_unload (const PqHandle*);
+    /** The loader's text (file name and length, or an error); *loaded = 1 when an IR is in use. */
+    int32_t pq_ir_status (const PqHandle*, char* buffer, int32_t length, int32_t* loaded);
 }
