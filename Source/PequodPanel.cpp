@@ -204,6 +204,9 @@ PequodPanel::PequodPanel (PequodNative::Instance& p)
 PequodPanel::~PequodPanel()
 {
     stopTimer();
+    // a hosted plugin's editor tells its processor it's gone (as JUCE's VST3 editors do),
+    // otherwise getActiveEditor() keeps pointing at it and the panel can't be opened again
+    processor.editorBeingDeleted (this);
 }
 
 //==============================================================================
