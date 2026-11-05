@@ -4,7 +4,7 @@
 
 namespace
 {
-    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner", "stompSlot", "presetSelect", "tapTempo", "tempo", "click", "instrument" };
+    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner", "stompSlot", "presetSelect", "tapTempo", "tempo", "click", "instrument", "modOn", "modTrigger", "modRate", "modAmount" };
     const char* sourceNames[] = { "cc", "note", "osc", "ctrl" };
 
     template <typename Enum>
@@ -163,6 +163,13 @@ void ControlSurface::timerCallback()
         };
         take (scope.startIndex1, scope.blockSize1);
         take (scope.startIndex2, scope.blockSize2);
+    }
+
+    // Modifier learn: the first knob touched goes to the armed modifier.
+    if (engine.getModifierLearn() >= 0 && ! latest.empty())
+    {
+        const auto& ev = latest.begin()->second;
+        engine.modifierParamTouched (ev.slotUid, ev.index, ev.value);
     }
 
     if (oscOutOk && ! latest.empty())
@@ -339,6 +346,18 @@ bool ControlSurface::handleFixedOsc (const juce::OSCMessage& msg, float value)
     if (parts[1] == "tap")  { if (msg.isEmpty() || press) { engine.transport.tap(); if (onTempoTapped) onTempoTapped(); } return true; }
     if (parts[1] == "tempo" && ! msg.isEmpty()) { engine.transport.setBpm (argAsFloat (msg, 120.0f)); return true; }
     if (parts[1] == "click") { engine.transport.clickOn = msg.isEmpty() ? ! engine.transport.clickOn.load() : press; return true; }
+    // /pequod/mod/N/on|trigger|rate|amount
+    if (parts[1] == "mod" && parts.size() >= 4)
+    {
+        const int i = parts[2].getIntValue() - 1;
+        if (! juce::isPositiveAndBelow (i, engine.getNumModifiers())) return true;
+        auto& mod = engine.modifier (i);
+        if (parts[3] == "on")      mod.on = msg.isEmpty() ? ! mod.on.load() : press;
+        else if (parts[3] == "trigger") { if (msg.isEmpty() || press) ++mod.pressCount; mod.held = ! msg.isEmpty() && press; }
+        else if (parts[3] == "rate" && ! msg.isEmpty())   setModifierRate (mod, argAsFloat (msg, 0.5f));
+        else if (parts[3] == "amount" && ! msg.isEmpty()) mod.amount = juce::jlimit (0.0f, 1.0f, argAsFloat (msg, 1.0f));
+        return true;
+    }
     if (parts[1] == "instrument")
     {
         auto& in = engine.getRack().instrumentInput;
@@ -557,6 +576,30 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
             engine.markModified();
             break;
         }
+        case Mapping::Target::modOn:
+        case Mapping::Target::modTrigger:
+        case Mapping::Target::modRate:
+        case Mapping::Target::modAmount:
+        {
+            const int i = m.paramIndex - 1;
+            if (! juce::isPositiveAndBelow (i, engine.getNumModifiers())) break;
+            auto& mod = engine.modifier (i);
+            if (m.target == Mapping::Target::modOn)
+            {
+                if (m.toggle) { if (risingEdge) mod.on = ! mod.on.load(); }
+                else          mod.on = isPress;
+            }
+            else if (m.target == Mapping::Target::modTrigger)
+            {
+                if (risingEdge) ++mod.pressCount;
+                mod.held = isPress;
+            }
+            else if (m.target == Mapping::Target::modAmount)
+                mod.amount = juce::jlimit (0.0f, 1.0f, value);
+            else
+                setModifierRate (mod, value);
+            break;
+        }
         case Mapping::Target::inputGain:  engine.getInputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::outputGain: engine.getOutputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::presetNext: if (risingEdge && onPresetNext) onPresetNext(); break;
@@ -581,12 +624,13 @@ void ControlSurface::armLearn()
     sendChangeMessage();
 }
 
-void ControlSurface::armLearnFor (Mapping::Target target, int uid)
+void ControlSurface::armLearnFor (Mapping::Target target, int uid, int paramIndex)
 {
     pending = {};
     pendingHasControllerSource = false;
     pending.target = target;
     pending.slotUid = uid;
+    pending.paramIndex = paramIndex;
     learnState = LearnState::waitingForSource;
     sendChangeMessage();
 }
@@ -881,6 +925,20 @@ bool ControlSurface::handleControllerEvent (const juce::String& unit, int contro
                 case Mapping::Target::tempo:
                     engine.transport.setBpm (engine.transport.bpm.load() + (double) delta);
                     break;
+                case Mapping::Target::modRate:
+                case Mapping::Target::modAmount:
+                {
+                    const int i = m.paramIndex - 1;
+                    if (! juce::isPositiveAndBelow (i, engine.getNumModifiers())) break;
+                    auto& mod = engine.modifier (i);
+                    if (m.target == Mapping::Target::modAmount)
+                        mod.amount = juce::jlimit (0.0f, 1.0f, mod.amount.load() + 0.02f * (float) delta);
+                    else if (mod.sync || mod.type.load() == (int) Modifiers::Type::sequencer)
+                        mod.division = juce::jlimit (0, (int) Modifiers::divisions().size() - 1, mod.division.load() + delta);
+                    else
+                        mod.rateHz = (float) Modifiers::rateFromNorm (Modifiers::normFromRate (mod.rateHz.load()) + 0.01 * delta);
+                    break;
+                }
                 default:
                     apply (m, 1.0f, true); apply (m, 0.0f, false);
                     break;
@@ -980,6 +1038,16 @@ juce::String ControlSurface::describeTarget (const Mapping& m) const
         case Mapping::Target::tempo:        return "TEMPO";
         case Mapping::Target::click:        return "CLICK on/off";
         case Mapping::Target::instrumentInput: return "INPUT guitar / instrument";
+        case Mapping::Target::modOn:
+        case Mapping::Target::modTrigger:
+        case Mapping::Target::modRate:
+        case Mapping::Target::modAmount:
+        {
+            const int i = m.paramIndex - 1;
+            const auto name = juce::isPositiveAndBelow (i, engine.getNumModifiers()) ? engine.modifierName (i) : "Modifier " + juce::String (m.paramIndex);
+            return name + (m.target == Mapping::Target::modOn ? " ON/OFF" : m.target == Mapping::Target::modTrigger ? " TRIGGER"
+                         : m.target == Mapping::Target::modRate ? " RATE" : " AMOUNT");
+        }
     }
     return {};
 }
@@ -1030,7 +1098,7 @@ static juce::XmlElement* mappingToXml (const Mapping& m, int targetRef)
 static Mapping mappingFromXml (const juce::XmlElement& x)
 {
     Mapping m;
-    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 17, Mapping::Target::param);
+    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 21, Mapping::Target::param);
     m.paramIndex = x.getIntAttribute ("param", -1);
     m.source = enumFromName (x.getStringAttribute ("source"), sourceNames, 4, Mapping::Source::midiCC);
     m.midiChannel = x.getIntAttribute ("ch");
@@ -1191,4 +1259,14 @@ void ControlSurface::loadGlobalXml (const juce::XmlElement* x)
     resolveGlobalMappings();
     setOscInputPort (oscInPort);
     setOscOutput (oscOutHost, oscOutPort);
+}
+
+void ControlSurface::setModifierRate (Modifiers::Slot& mod, float value)
+{
+    // 0 = slowest, 1 = fastest: a tempo division when synced (and for step sequencers), else 0.05 - 20 Hz.
+    value = juce::jlimit (0.0f, 1.0f, value);
+    if (mod.sync || mod.type.load() == (int) Modifiers::Type::sequencer)
+        mod.division = juce::roundToInt (value * (float) ((int) Modifiers::divisions().size() - 1));
+    else
+        mod.rateHz = (float) Modifiers::rateFromNorm (value);
 }

@@ -1,6 +1,7 @@
 #include "HostEngine.h"
 #include "CrashGuard.h"
 #include "PequodNative.h"
+#include "Modifiers.h"
 
 //==============================================================================
 struct PluginSlot::Listener : public juce::AudioProcessorParameter::Listener
@@ -255,6 +256,31 @@ void HostEngine::rewire()
     for (auto& sl : getFlatSlots())
         if (isInstrument (*sl))
             plan->instruments.push_back (sl.get());
+
+    // Modifiers and the knobs they move (plugins found by their preset id)
+    {
+        auto slots = getFlatSlots();
+        for (auto& m : modifiers)
+        {
+            auto* mod = &rack->modBank[m.bank];
+            plan->modifiers.push_back (mod);
+            for (auto& a : m.assignments)
+                for (auto& sl : slots)
+                    if (sl->stableId == a->slotId && sl->instance() != nullptr)
+                    {
+                        auto& params = sl->instance()->getParameters();
+                        if (juce::isPositiveAndBelow (a->paramIndex, params.size()))
+                        {
+                            RenderPlan::ModTarget t;
+                            t.param = params[a->paramIndex];
+                            t.mod = mod;
+                            t.assignment = a;
+                            plan->modTargets.push_back (std::move (t));
+                        }
+                        break;
+                    }
+        }
+    }
 
     plan->pluginLatency = computeChainLatency();
     lastPlanLatency = plan->pluginLatency;
@@ -614,6 +640,7 @@ void HostEngine::clearRack()
 {
     auto old = std::move (items);
     items.clear();
+    clearModifiers();
     rewire();
 
     for (auto& item : old)
@@ -798,6 +825,8 @@ std::unique_ptr<juce::XmlElement> HostEngine::createRackXml() const
     root->setAttribute ("inputMode", inputStage->inputMode.load());
     root->setAttribute ("bpm", transport.bpm.load());
     root->setAttribute ("input", rack->instrumentInput.load() ? "instrument" : "guitar");
+    if (! modifiers.empty())
+        root->addChildElement (modifiersToXml().release());
 
     for (auto& item : items)
     {
@@ -1007,6 +1036,9 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
     if (root.hasAttribute ("bpm")) transport.setBpm (root.getDoubleAttribute ("bpm", 120.0));   // older presets keep the current tempo
     inputStage->inputMode = root.getIntAttribute ("inputMode", (int) GainMeterProcessor::InputMode::Left);
     rack->instrumentInput = root.getStringAttribute ("input") == "instrument";
+    clearModifiers();
+    if (auto* xm = root.getChildByName ("MODIFIERS"))
+        modifiersFromXml (*xm);
 
     items = std::move (newItems);
     rewire();
@@ -1021,4 +1053,240 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
 
     changed();
     return errors.isEmpty();
+}
+
+//==============================================================================
+juce::String HostEngine::modifierName (int i) const
+{
+    if (! juce::isPositiveAndBelow (i, (int) modifiers.size())) return {};
+    const auto type = rack->modBank[modifiers[(size_t) i].bank].type.load();
+    int number = 1;
+    for (int k = 0; k < i; ++k)
+        if (rack->modBank[modifiers[(size_t) k].bank].type.load() == type) ++number;
+    juce::String base;
+    switch ((Modifiers::Type) type)
+    {
+        case Modifiers::Type::lfo:       base = "LFO"; break;
+        case Modifiers::Type::follower:  base = "FOLLOWER"; break;
+        case Modifiers::Type::envelope:  base = "ENVELOPE"; break;
+        case Modifiers::Type::sequencer: base = "STEPS"; break;
+    }
+    return base + " " + juce::String (number);
+}
+
+int HostEngine::addModifier (Modifiers::Type type)
+{
+    for (int b = 0; b < Modifiers::maxModifiers; ++b)
+    {
+        bool used = false;
+        for (auto& m : modifiers) used = used || m.bank == b;
+        if (used) continue;
+
+        auto& slot = rack->modBank[b];
+        slot.resetSettings();
+        if (type == Modifiers::Type::envelope) slot.trigger = Modifiers::Slot::triggerPicking;
+        slot.type = (int) type;
+        ModifierInfo info;
+        info.bank = b;
+        modifiers.push_back (info);
+        rewire();
+        changed();
+        if (onModifiersChanged) onModifiersChanged();
+        return (int) modifiers.size() - 1;
+    }
+    return -1;
+}
+
+void HostEngine::removeModifier (int i)
+{
+    if (! juce::isPositiveAndBelow (i, (int) modifiers.size())) return;
+    aboutToEdit();
+    const int bank = modifiers[(size_t) i].bank;
+    modifiers.erase (modifiers.begin() + i);
+    rewire();                                   // the audio thread stops using it...
+    rack->modBank[bank].type = 0;               // ...then the slot is free
+    if (modLearn.load() == i) modLearn = -1;
+    changed();
+    if (onModifiersChanged) onModifiersChanged();
+}
+
+void HostEngine::moveModifier (int from, int to)
+{
+    if (! juce::isPositiveAndBelow (from, (int) modifiers.size()) || ! juce::isPositiveAndBelow (to, (int) modifiers.size()) || from == to) return;
+    aboutToEdit();
+    auto m = modifiers[(size_t) from];
+    modifiers.erase (modifiers.begin() + from);
+    modifiers.insert (modifiers.begin() + to, m);
+    rewire();
+    changed();
+    if (onModifiersChanged) onModifiersChanged();
+}
+
+void HostEngine::removeModAssignment (int i, int a)
+{
+    if (! juce::isPositiveAndBelow (i, (int) modifiers.size())) return;
+    auto& list = modifiers[(size_t) i].assignments;
+    if (! juce::isPositiveAndBelow (a, (int) list.size())) return;
+    // Put the knob back where it started.
+    auto assignment = list[(size_t) a];
+    list.erase (list.begin() + a);
+    rewire();
+    for (auto& sl : getFlatSlots())
+        if (sl->stableId == assignment->slotId && sl->instance() != nullptr)
+            if (auto* p = sl->instance()->getParameters()[assignment->paramIndex])
+                p->setValueNotifyingHost (assignment->from.load());
+    changed();
+    if (onModifiersChanged) onModifiersChanged();
+}
+
+void HostEngine::modifierParamTouched (int slotUid, int paramIndex, float value)
+{
+    const int i = modLearn.load();
+    if (! juce::isPositiveAndBelow (i, (int) modifiers.size())) return;
+    auto slot = findSlot (slotUid);
+    if (slot == nullptr) return;
+    modLearn = -1;
+
+    auto& list = modifiers[(size_t) i].assignments;
+    for (auto& a : list)
+        if (a->slotId == slot->stableId && a->paramIndex == paramIndex)
+        {
+            changed();
+            if (onModifiersChanged) onModifiersChanged();
+            return;                                         // already moved by this modifier
+        }
+
+    // From where the knob is now, sweeping halfway across its range.
+    auto a = std::make_shared<Modifiers::Assignment>();
+    a->slotId = slot->stableId;
+    a->paramIndex = paramIndex;
+    a->from = value;
+    a->to = value < 0.5f ? juce::jmin (1.0f, value + 0.5f) : juce::jmax (0.0f, value - 0.5f);
+    list.push_back (a);
+    rewire();
+    markModified();
+    changed();
+    if (onModifiersChanged) onModifiersChanged();
+}
+
+juce::String HostEngine::describeAssignment (const Modifiers::Assignment& a) const
+{
+    for (auto& sl : getFlatSlots())
+        if (sl->stableId == a.slotId && sl->instance() != nullptr)
+        {
+            auto* p = sl->instance()->getParameters()[a.paramIndex];
+            return sl->description.name + "  " + (p != nullptr ? p->getName (40) : juce::String ("?"));
+        }
+    return "(effect not in this preset)";
+}
+
+void HostEngine::clearModifiers()
+{
+    std::vector<int> banks;
+    for (auto& m : modifiers) banks.push_back (m.bank);
+    modifiers.clear();
+    modLearn = -1;
+    rewire();
+    for (auto b : banks) rack->modBank[b].type = 0;
+    if (onModifiersChanged) onModifiersChanged();
+}
+
+std::unique_ptr<juce::XmlElement> HostEngine::modifiersToXml() const
+{
+    auto x = std::make_unique<juce::XmlElement> ("MODIFIERS");
+    for (auto& m : modifiers)
+    {
+        auto& s = rack->modBank[m.bank];
+        auto* xm = x->createNewChildElement ("MOD");
+        xm->setAttribute ("type", s.type.load());
+        xm->setAttribute ("on", s.on.load());
+        xm->setAttribute ("amount", s.amount.load());
+        xm->setAttribute ("invert", s.invert.load());
+        xm->setAttribute ("shape", s.shape.load());
+        xm->setAttribute ("sync", s.sync.load());
+        xm->setAttribute ("division", s.division.load());
+        xm->setAttribute ("rate", s.rateHz.load());
+        xm->setAttribute ("phase", s.phase.load());
+        xm->setAttribute ("sens", s.sensitivity.load());
+        xm->setAttribute ("attack", s.attackMs.load());
+        xm->setAttribute ("release", s.releaseMs.load());
+        xm->setAttribute ("trigger", s.trigger.load());
+        xm->setAttribute ("hold", s.holdMode.load());
+        xm->setAttribute ("a", s.aMs.load());
+        xm->setAttribute ("d", s.dMs.load());
+        xm->setAttribute ("s", s.sustain.load());
+        xm->setAttribute ("r", s.rMs.load());
+        xm->setAttribute ("pick", s.pickThresholdDb.load());
+        juce::StringArray steps;
+        for (int k = 0; k < Modifiers::maxSteps; ++k) steps.add (juce::String (s.steps[k].load(), 3));
+        xm->setAttribute ("steps", steps.joinIntoString (" "));
+        xm->setAttribute ("length", s.length.load());
+        xm->setAttribute ("glide", s.glide.load());
+        for (auto& a : m.assignments)
+        {
+            auto* xa = xm->createNewChildElement ("TO");
+            xa->setAttribute ("slot", a->slotId);
+            xa->setAttribute ("param", a->paramIndex);
+            xa->setAttribute ("from", a->from.load());
+            xa->setAttribute ("to", a->to.load());
+        }
+    }
+    return x;
+}
+
+void HostEngine::modifiersFromXml (const juce::XmlElement& x)
+{
+    for (auto* xm : x.getChildWithTagNameIterator ("MOD"))
+    {
+        const int type = xm->getIntAttribute ("type");
+        if (type < 1 || type > 4) continue;
+        int bank = -1;
+        for (int b = 0; b < Modifiers::maxModifiers && bank < 0; ++b)
+        {
+            bool used = false;
+            for (auto& m : modifiers) used = used || m.bank == b;
+            if (! used) bank = b;
+        }
+        if (bank < 0) break;
+
+        auto& s = rack->modBank[bank];
+        s.resetSettings();
+        s.on = xm->getBoolAttribute ("on", true);
+        s.amount = (float) xm->getDoubleAttribute ("amount", 1.0);
+        s.invert = xm->getBoolAttribute ("invert", false);
+        s.shape = xm->getIntAttribute ("shape", 0);
+        s.sync = xm->getBoolAttribute ("sync", true);
+        s.division = xm->getIntAttribute ("division", Modifiers::defaultDivision());
+        s.rateHz = (float) xm->getDoubleAttribute ("rate", 1.0);
+        s.phase = (float) xm->getDoubleAttribute ("phase", 0.0);
+        s.sensitivity = (float) xm->getDoubleAttribute ("sens", 20.0);
+        s.attackMs = (float) xm->getDoubleAttribute ("attack", 10.0);
+        s.releaseMs = (float) xm->getDoubleAttribute ("release", 150.0);
+        s.trigger = xm->getIntAttribute ("trigger", 0);
+        s.holdMode = xm->getBoolAttribute ("hold", false);
+        s.aMs = (float) xm->getDoubleAttribute ("a", 5.0);
+        s.dMs = (float) xm->getDoubleAttribute ("d", 300.0);
+        s.sustain = (float) xm->getDoubleAttribute ("s", 0.0);
+        s.rMs = (float) xm->getDoubleAttribute ("r", 400.0);
+        s.pickThresholdDb = (float) xm->getDoubleAttribute ("pick", -40.0);
+        auto steps = juce::StringArray::fromTokens (xm->getStringAttribute ("steps"), " ", {});
+        for (int k = 0; k < juce::jmin (steps.size(), Modifiers::maxSteps); ++k) s.steps[k] = steps[k].getFloatValue();
+        s.length = xm->getIntAttribute ("length", 8);
+        s.glide = (float) xm->getDoubleAttribute ("glide", 0.0);
+        s.type = type;
+
+        ModifierInfo info;
+        info.bank = bank;
+        for (auto* xa : xm->getChildWithTagNameIterator ("TO"))
+        {
+            auto a = std::make_shared<Modifiers::Assignment>();
+            a->slotId = xa->getStringAttribute ("slot");
+            a->paramIndex = xa->getIntAttribute ("param", -1);
+            a->from = (float) xa->getDoubleAttribute ("from", 0.0);
+            a->to = (float) xa->getDoubleAttribute ("to", 1.0);
+            info.assignments.push_back (a);
+        }
+        modifiers.push_back (info);
+    }
+    if (onModifiersChanged) onModifiersChanged();
 }

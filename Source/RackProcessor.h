@@ -2,6 +2,7 @@
 
 #include "WorkerPool.h"
 #include "HawthorneLink/NetSender.h"
+#include "Modifiers.h"
 
 class GainMeterProcessor;
 class Transport;
@@ -94,6 +95,18 @@ struct RenderPlan
     int pluginLatency = 0;                   // summed latency of the chain (longest lane in splits)
     std::vector<PluginSlot*> instruments;    // VSTis in the rack: while one is on, the guitar is muted
 
+    // Modifiers: which slots run, and the knobs they move
+    struct ModTarget
+    {
+        juce::AudioProcessorParameter* param = nullptr;
+        Modifiers::Slot* mod = nullptr;
+        std::shared_ptr<Modifiers::Assignment> assignment;
+        float last = -1.0f;
+        bool active = false;
+    };
+    std::vector<Modifiers::Slot*> modifiers;
+    std::vector<ModTarget> modTargets;
+
     // Pipeline buffers: one per stage, rotated every block.
     std::vector<juce::AudioBuffer<float>> stageAudio;
     std::vector<juce::MidiBuffer> stageMidi;
@@ -132,6 +145,9 @@ public:
     /** The interface's input latency (set by the engine): with the buffer and the plugins, Hawthorne shows the delay. */
     std::atomic<int> netInputLatency { 0 };
     bool isNetworkOutputOn() const noexcept { return netActive.load(); }
+
+    /** The modifiers' settings and running state (HostEngine says which are in use). */
+    Modifiers::Slot modBank[Modifiers::maxModifiers];
 
     /** The master tempo every plugin sees (and the click). */
     Transport* transport = nullptr;
@@ -192,6 +208,8 @@ private:
     int netChannels = 2;
     juce::AudioBuffer<float> dryCopy;
     int networkLatency (int blockSize) const;            // call with planLock held
+    int notesHeld = 0;
+    void runModifiers (RenderPlan&, const juce::AudioBuffer<float>& input, const juce::MidiBuffer&, int n);
 
     void processPlan (RenderPlan&, juce::AudioBuffer<float>& stereo, juce::MidiBuffer& midi, int n) noexcept;
 

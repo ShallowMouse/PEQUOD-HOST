@@ -129,6 +129,61 @@ void RackProcessor::setNetworkOutput (bool on, bool sendDry)
     }
 }
 
+void RackProcessor::runModifiers (RenderPlan& p, const juce::AudioBuffer<float>& input, const juce::MidiBuffer& midi, int n)
+{
+    if (p.modifiers.empty()) return;
+
+    Modifiers::BlockInfo b;
+    b.sampleRate = getSampleRate() > 0 ? getSampleRate() : 48000.0;
+    b.numSamples = n;
+    if (transport != nullptr)
+    {
+        if (auto pos = transport->getPosition())
+            b.ppq = pos->getPpqPosition().orFallback (0.0);
+        b.beatsPerBar = transport->beatsPerBar.load();
+    }
+    // The guitar's level (RMS of both sides), before the rack.
+    double sum = 0.0;
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        auto* d = input.getReadPointer (ch);
+        for (int i = 0; i < n; ++i) sum += (double) d[i] * d[i];
+    }
+    b.inputLevelDb = (float) juce::Decibels::gainToDecibels (std::sqrt (sum / juce::jmax (1, 2 * n)), -100.0);
+    for (const auto m : midi)
+    {
+        const auto msg = m.getMessage();
+        if (msg.isNoteOn()) { ++b.noteOns; ++notesHeld; }
+        else if (msg.isNoteOff()) { ++b.noteOffs; notesHeld = juce::jmax (0, notesHeld - 1); }
+        else if (msg.isAllNotesOff() || msg.isAllSoundOff()) notesHeld = 0;
+    }
+    b.notesHeld = notesHeld > 0;
+
+    for (auto* m : p.modifiers)
+        Modifiers::process (*m, b);
+
+    // Move the knobs. Off: back to FROM once.
+    for (auto& t : p.modTargets)
+    {
+        const bool on = t.mod->on.load (std::memory_order_relaxed);
+        const float from = t.assignment->from.load (std::memory_order_relaxed);
+        const float to = t.assignment->to.load (std::memory_order_relaxed);
+        float v;
+        if (on)
+            v = from + (to - from) * t.mod->lastOut * t.mod->amount.load (std::memory_order_relaxed);
+        else if (t.active || t.last < 0.0f)
+            v = from;
+        else
+            continue;
+        t.active = on;
+        if (std::abs (v - t.last) > 1.0e-4f)
+        {
+            t.param->setValue (juce::jlimit (0.0f, 1.0f, v));
+            t.last = v;
+        }
+    }
+}
+
 int RackProcessor::networkLatency (int blockSize) const
 {
     // What Hawthorne shows as the delay: into the interface, one buffer, the plugins (and the multi-core pipeline).
@@ -414,6 +469,7 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
                 }
             }
 
+            runModifiers (*plan, stereo, midi, n);
             processPlan (*plan, stereo, midi, n);
         }
     }

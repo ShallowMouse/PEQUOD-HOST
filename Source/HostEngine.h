@@ -319,6 +319,28 @@ public:
     /** The preset has unsaved edits (that aren't rack changes, e.g. this-preset footswitch settings). */
     void markModified() noexcept { ++changeCounter; }
 
+    //== Modifiers (saved with the preset)
+    struct ModifierInfo
+    {
+        int bank = -1;                                                    // slot in RackProcessor::modBank
+        std::vector<std::shared_ptr<Modifiers::Assignment>> assignments;
+    };
+    int getNumModifiers() const noexcept { return (int) modifiers.size(); }
+    Modifiers::Slot& modifier (int i) { return rack->modBank[modifiers[(size_t) i].bank]; }
+    const ModifierInfo& modifierInfo (int i) const { return modifiers[(size_t) i]; }
+    juce::String modifierName (int i) const;                              // "LFO 2"
+    int addModifier (Modifiers::Type);                                    // -1 if all are in use
+    void removeModifier (int i);
+    void moveModifier (int from, int to);
+    void removeModAssignment (int i, int assignment);
+    /** Learn: the next plugin knob touched is given to modifier i (-1 = stop). */
+    void armModifierLearn (int i) { modLearn = i; changed(); }
+    int getModifierLearn() const noexcept { return modLearn.load(); }
+    void modifierParamTouched (int slotUid, int paramIndex, float value);  // message thread
+    /** Plugin + knob name of an assignment ("DELAY  FEEDBACK"). */
+    juce::String describeAssignment (const Modifiers::Assignment&) const;
+    std::function<void()> onModifiersChanged;
+
     /** Call after structural changes: the pipeline is re-balanced once CPU use has been measured. */
     void scheduleRebalance() { rebalanceAt = juce::Time::getMillisecondCounterHiRes() + 3000.0; }
 
@@ -336,6 +358,11 @@ private:
 
     std::vector<RackItem> items;
     int nextUid = 1;
+    std::vector<ModifierInfo> modifiers;
+    std::atomic<int> modLearn { -1 };
+    void clearModifiers();
+    std::unique_ptr<juce::XmlElement> modifiersToXml() const;
+    void modifiersFromXml (const juce::XmlElement&);
     ParamObserver* observer = nullptr;
 
     std::shared_ptr<PluginSlot> createSlot (const juce::PluginDescription&, juce::String& error);

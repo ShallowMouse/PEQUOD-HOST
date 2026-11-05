@@ -559,6 +559,16 @@ juce::String ControllerManager::shortLabelOf (const Mapping& mapping, int code) 
             case Mapping::Target::tempo:        return "TEMPO";
             case Mapping::Target::click:        return "CLICK";
             case Mapping::Target::instrumentInput: return "INST";
+            case Mapping::Target::modOn: case Mapping::Target::modTrigger:
+            case Mapping::Target::modRate: case Mapping::Target::modAmount:
+            {
+                const int i = m->paramIndex - 1;
+                auto name = juce::isPositiveAndBelow (i, engine.getNumModifiers()) ? engine.modifierName (i) : "MOD " + juce::String (m->paramIndex);
+                if (m->target == Mapping::Target::modTrigger) return shortName ("FIRE " + name, 11);
+                if (m->target == Mapping::Target::modRate)    return shortName (name + " RATE", 11);
+                if (m->target == Mapping::Target::modAmount)  return shortName (name + " AMT", 11);
+                return shortName (name, 11);
+            }
             case Mapping::Target::splitMix:     return "SPLIT " + juce::String (engine.getSplitNumber (m->slotUid));
             case Mapping::Target::inputGain:    return "IN";
             case Mapping::Target::outputGain:   return "VOLUME";
@@ -702,6 +712,19 @@ bool ControllerManager::mappingIsOn (const Mapping& m) const
         case Mapping::Target::click:        return engine.transport.clickOn.load();
         case Mapping::Target::instrumentInput: return engine.getRack().instrumentInput.load();
         case Mapping::Target::tempo:        return false;
+        case Mapping::Target::modOn:
+        {
+            const int i = m.paramIndex - 1;
+            return juce::isPositiveAndBelow (i, engine.getNumModifiers()) && engine.modifier (i).on.load();
+        }
+        case Mapping::Target::modTrigger:
+        {
+            // the light follows the envelope
+            const int i = m.paramIndex - 1;
+            return juce::isPositiveAndBelow (i, engine.getNumModifiers()) && engine.modifier (i).out.load() > 0.1f;
+        }
+        case Mapping::Target::modRate: case Mapping::Target::modAmount:
+            return false;
         case Mapping::Target::presetNext: case Mapping::Target::presetPrev:
         case Mapping::Target::bankNext:   case Mapping::Target::bankPrev:
         case Mapping::Target::inputGain:  case Mapping::Target::outputGain:
@@ -738,7 +761,9 @@ void ControllerManager::assign (const juce::String& uid, int code, int lay, Mapp
     m.ctrlControl = code;
     m.ctrlLayer = lay;
     m.target = target;
-    if (target == Mapping::Target::stompSlot || target == Mapping::Target::presetSelect) m.paramIndex = uidOrIndex;
+    if (target == Mapping::Target::stompSlot || target == Mapping::Target::presetSelect
+         || target == Mapping::Target::modOn || target == Mapping::Target::modTrigger
+         || target == Mapping::Target::modRate || target == Mapping::Target::modAmount) m.paramIndex = uidOrIndex;
     else m.slotUid = uidOrIndex;
 
     if (like != nullptr)
@@ -1080,6 +1105,12 @@ juce::String ControllerManager::flashFor (const Mapping& m, bool afterPress) con
             return {};
         case Mapping::Target::instrumentInput:
             return engine.getRack().instrumentInput.load() ? "INSTRUMENT" : "GUITAR";
+        case Mapping::Target::modOn:
+        {
+            const int i = m.paramIndex - 1;
+            if (! juce::isPositiveAndBelow (i, engine.getNumModifiers())) return "NO MODIFIER " + juce::String (m.paramIndex);
+            return engine.modifierName (i) + (engine.modifier (i).on.load() ? " ON" : " OFF");
+        }
         default:
             return {};
     }

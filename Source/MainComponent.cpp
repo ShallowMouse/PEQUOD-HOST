@@ -116,6 +116,10 @@ MainComponent::MainComponent()
     header.onStatus = [this] (const juce::String& t) { setStatus (t); };
     header.onLevelTargetChanged = [this] { saveSettings(); };
     engine.onBeforeEdit = [this] { pushUndo(); };
+    addAndMakeVisible (modifierRow);
+    modifierRow.onHeightChanged = [this] { resized(); };
+    engine.onModifiersChanged = [this] { modifierRow.rebuild(); };
+    modifierRow.setExpanded (settings->getBoolValue ("modifiersShown", true));
     for (auto* b : { &undoButton, &redoButton })
     {
         b->setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
@@ -291,6 +295,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    engine.onModifiersChanged = nullptr;
     control.onGlobalSettingsChanged = nullptr;
     controllerWindow.reset();
     saveSettings();
@@ -334,6 +339,7 @@ void MainComponent::saveSettings()
     s->setValue ("networkName", engine.networkOut.getName());
     s->setValue ("networkDry", engine.isNetworkSendingDry());
     s->setValue ("keyboardShown", keyboard != nullptr && keyboard->isVisible());
+    s->setValue ("modifiersShown", modifierRow.isExpanded());
     if (! std::isnan (engine.loudnessReference)) s->setValue ("loudnessTarget", engine.loudnessReference);
     s->setValue ("pedalboardView", rack.isPedalboard());
     s->setValue ("sessionModified", engine.getChangeCounter() != savedChangeCounter);
@@ -377,6 +383,7 @@ void MainComponent::resized()
         keyboard->setBounds (k);
         keyboard->setKeyWidth (juce::jlimit (16.0f, 34.0f, (float) k.getWidth() / 36.0f));   // about three octaves
     }
+    modifierRow.setBounds (r.removeFromTop (modifierRow.getIdealHeight()));
     rack.setBounds (r);
 }
 

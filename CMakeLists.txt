@@ -69,6 +69,8 @@ target_sources(PequodHost PRIVATE
     Source/ScreenLayout.cpp
     Source/ScreenEditor.cpp
     Source/HawthorneLink/NetSender.cpp
+    Source/Modifiers.cpp
+    Source/ModifierRow.cpp
     Source/PequodNative.cpp
     Source/PequodPanel.cpp)
 

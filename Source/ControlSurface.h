@@ -9,7 +9,8 @@ struct Mapping
     enum class Target { param, bypass, splitMix, inputGain, outputGain, presetNext, presetPrev, mute, bankNext, bankPrev, tuner,
                         stompSlot,      // on/off of the Nth effect in whatever preset is loaded (paramIndex = N, 1-based)
                         presetSelect,   // load preset N of the current bank (paramIndex = N, 1-based)
-                        tapTempo, tempo, click, instrumentInput };
+                        tapTempo, tempo, click, instrumentInput,
+                        modOn, modTrigger, modRate, modAmount };   // modifier N (paramIndex = N, 1-based)
     enum class Source { midiCC, midiNote, osc, controller };
 
     // Controller sources: unit uid + control (0-3 switch, 100 pedal, 200 encoder turn, 201 encoder press) + layer
@@ -44,7 +45,10 @@ struct Mapping
                                          || target == Target::bankNext || target == Target::bankPrev || target == Target::tuner
                                          || target == Target::stompSlot || target == Target::presetSelect
                                          || target == Target::tapTempo || target == Target::click
-                                         || target == Target::instrumentInput; }
+                                         || target == Target::instrumentInput
+                                         || target == Target::modOn || target == Target::modTrigger; }
+    bool isModifierTarget() const { return target == Target::modOn || target == Target::modTrigger
+                                         || target == Target::modRate || target == Target::modAmount; }
 
     bool isController() const { return source == Source::controller; }
     bool isControllerButton() const { return isController() && (ctrlControl < ctrlPedal || ctrlControl == ctrlEncoderPress); }
@@ -99,7 +103,7 @@ public:
     enum class LearnState { off, waitingForTarget, waitingForSource };
     LearnState getLearnState() const { return learnState.load(); }
     void armLearn();                                   // touch a plugin control, then move a MIDI/OSC control
-    void armLearnFor (Mapping::Target, int uid = 0);   // learn a source for a fixed target
+    void armLearnFor (Mapping::Target, int uid = 0, int paramIndex = -1);   // learn a source for a fixed target
     void cancelLearn();
     juce::String getLearnStatusText() const;
 
@@ -136,6 +140,7 @@ public:
     std::function<void()> onTempoTapped;
     std::function<void()> onGlobalSettingsChanged;     // something saved in PEQUOD's settings changed
     void markPresetModified() { engine.markModified(); }
+    static void setModifierRate (Modifiers::Slot&, float value);
     static juce::String controllerKey (const juce::String& unit, int control, int layer) { return scopeKey (unit, control, layer); }
     void setControllerLedColour (const juce::String& unit, int control, int layer, juce::uint32 colour);
     std::function<juce::String (const Mapping&)> controllerSourceName;

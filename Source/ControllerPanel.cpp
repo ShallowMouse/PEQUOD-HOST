@@ -1311,6 +1311,17 @@ private:
             menu.addSectionHeader ("TEMPO");
             menu.addItem ("Tap tempo  (its light flashes in time)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tapTempo, 0, rep.get()); done(); });
             menu.addItem ("Metronome click on/off",                 [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::click, 0, rep.get()); done(); });
+            menu.addSectionHeader ("MODIFIERS (THIS PRESET'S)");
+            if (engine.getNumModifiers() == 0)
+                menu.addItem ("(add a modifier above the rack first)", false, false, [] {});
+            for (int k = 0; k < engine.getNumModifiers(); ++k)
+            {
+                const int n = k + 1;
+                const auto name = engine.modifierName (k);
+                menu.addItem (name + " on/off", [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::modOn, n, rep.get()); done(); });
+                if (engine.modifier (k).type.load() == (int) Modifiers::Type::envelope)
+                    menu.addItem ("Fire " + name + "  (hold it in HOLD mode)", [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::modTrigger, n, rep.get()); done(); });
+            }
         }
         else
         {
@@ -1332,6 +1343,16 @@ private:
             menu.addItem (turn ? "Tempo  (each click = 1 BPM)" : "Tempo  (40 - 240 BPM)",
                           [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tempo, 0, rep.get()); done(); });
             if (! splits.empty()) menu.addSubMenu ("Split mix", splitMenu);
+            for (int k = 0; k < engine.getNumModifiers(); ++k)
+            {
+                const int n = k + 1;
+                const auto name = engine.modifierName (k);
+                if (k == 0) menu.addSectionHeader ("MODIFIERS (THIS PRESET'S)");
+                const auto type = engine.modifier (k).type.load();
+                if (type == (int) Modifiers::Type::lfo || type == (int) Modifiers::Type::sequencer)
+                    menu.addItem (name + " rate", [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::modRate, n, rep.get()); done(); });
+                menu.addItem (name + " amount", [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::modAmount, n, rep.get()); done(); });
+            }
         }
         if (rep == nullptr)       // adding: MIDI to other gear and layer changes too, alongside PEQUOD functions
         {
