@@ -138,6 +138,11 @@ private:
     int measuring = 0;                   // 1 = setting the target, 2 = matching this preset
     double measureStart = 0;
     void addOutputMenu (juce::PopupMenu&);
+public:
+    /** "Match levels between presets" items (on the PRESET OUT knob). */
+    void addLevelMatchMenu (juce::PopupMenu&);
+    std::function<void (int secondsLeft)> onMeasuring;   // -1 = done
+private:
     void startLevelMatch (int mode);
     void updateLevelMatch();
 

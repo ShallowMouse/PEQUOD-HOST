@@ -659,6 +659,11 @@ void HostEngine::clearRack()
     auto old = std::move (items);
     items.clear();
     clearModifiers();
+    scenes.clear();
+    currentScene = -1;
+    inputStage->presetDb = 0.0f;
+    outputStage->presetDb = 0.0f;
+    if (onScenesChanged) onScenesChanged();
     rewire();
 
     for (auto& item : old)
@@ -838,8 +843,11 @@ std::unique_ptr<juce::XmlElement> HostEngine::createRackXml() const
     auto root = std::make_unique<juce::XmlElement> ("PEQUODRACK");
     root->setAttribute ("version", 1);
     root->setAttribute ("name", currentPresetName);
-    root->setAttribute ("inGain", inputStage->gainDb.load());
-    root->setAttribute ("outGain", outputStage->gainDb.load());
+    // the preset's own levels (the master levels aren't saved with presets)
+    root->setAttribute ("inGain", inputStage->presetDb.load());
+    root->setAttribute ("outGain", outputStage->presetDb.load());
+    if (! scenes.empty())
+        root->addChildElement (scenesToXml().release());
     root->setAttribute ("inputMode", inputStage->inputMode.load());
     root->setAttribute ("bpm", transport.bpm.load());
     root->setAttribute ("input", rack->instrumentInput.load() ? "instrument" : "guitar");
@@ -1049,14 +1057,19 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
             attachListener (*p.slot);
 
     currentPresetName = root.getStringAttribute ("name", "Untitled");
-    inputStage->gainDb  = (float) root.getDoubleAttribute ("inGain", 0.0);
-    outputStage->gainDb = (float) root.getDoubleAttribute ("outGain", 0.0);
+    inputStage->presetDb  = (float) root.getDoubleAttribute ("inGain", 0.0);
+    outputStage->presetDb = (float) root.getDoubleAttribute ("outGain", 0.0);
     if (root.hasAttribute ("bpm")) transport.setBpm (root.getDoubleAttribute ("bpm", 120.0));   // older presets keep the current tempo
     inputStage->inputMode = root.getIntAttribute ("inputMode", (int) GainMeterProcessor::InputMode::Left);
     rack->instrumentInput = root.getStringAttribute ("input") == "instrument";
     clearModifiers();
     if (auto* xm = root.getChildByName ("MODIFIERS"))
         modifiersFromXml (*xm);
+    scenes.clear();
+    currentScene = -1;
+    if (auto* xs = root.getChildByName ("SCENES"))
+        scenesFromXml (*xs);
+    if (onScenesChanged) onScenesChanged();
 
     items = std::move (newItems);
     rewire();
@@ -1367,4 +1380,207 @@ void HostEngine::modifiersFromXml (const juce::XmlElement& x)
         modifiers.push_back (info);
     }
     if (onModifiersChanged) onModifiersChanged();
+}
+
+//==============================================================================
+HostEngine::Scene HostEngine::captureScene (const juce::String& name) const
+{
+    Scene sc;
+    sc.name = name;
+    for (auto& sl : getFlatSlots())
+    {
+        Scene::SlotState st;
+        st.bypass = sl->bypassed.load();
+        if (auto* inst = sl->instance())
+            for (auto* p : inst->getParameters())
+                st.params.push_back (p->getValue());
+        sc.slots[sl->stableId] = std::move (st);
+    }
+    for (auto& item : items)
+        if (item.type == RackItem::Type::split)
+            sc.splitMix[item.stableId] = item.mix;
+    for (auto& m : modifiers)
+        sc.modifiersOn[m.id] = rack->modBank[m.bank].on.load();
+    sc.presetIn = inputStage->presetDb.load();
+    sc.presetOut = outputStage->presetDb.load();
+    return sc;
+}
+
+void HostEngine::applyScene (const Scene& sc)
+{
+    // Only what differs is changed, so knobs that are the same don't jump.
+    for (auto& sl : getFlatSlots())
+    {
+        auto it = sc.slots.find (sl->stableId);
+        if (it == sc.slots.end()) continue;          // added after the scene was made: left as it is
+        sl->bypassed = it->second.bypass;
+        if (auto* inst = sl->instance())
+        {
+            auto& params = inst->getParameters();
+            for (int k = 0; k < juce::jmin (params.size(), (int) it->second.params.size()); ++k)
+            {
+                const float v = it->second.params[(size_t) k];
+                if (std::abs (params[k]->getValue() - v) > 1.0e-6f)
+                    params[k]->setValueNotifyingHost (v);
+            }
+        }
+    }
+    for (auto& item : items)
+        if (item.type == RackItem::Type::split)
+        {
+            auto it = sc.splitMix.find (item.stableId);
+            if (it != sc.splitMix.end())
+            {
+                item.mix = it->second;
+                if (item.state != nullptr) item.state->mix = it->second;
+            }
+        }
+    for (auto& m : modifiers)
+    {
+        auto it = sc.modifiersOn.find (m.id);
+        if (it != sc.modifiersOn.end()) rack->modBank[m.bank].on = it->second;
+    }
+    inputStage->presetDb = sc.presetIn;
+    outputStage->presetDb = sc.presetOut;
+}
+
+int HostEngine::addScene()
+{
+    if ((int) scenes.size() >= maxScenes) return -1;
+    aboutToEdit();
+    if (scenes.empty())
+    {
+        scenes.push_back (captureScene ("SCENE 1"));
+        currentScene = 0;
+    }
+    else if (juce::isPositiveAndBelow (currentScene, (int) scenes.size()))
+    {
+        const auto name = scenes[(size_t) currentScene].name;
+        scenes[(size_t) currentScene] = captureScene (name);        // keep what was changed
+    }
+    // the new one starts as a copy of how it sounds now
+    scenes.push_back (captureScene ("SCENE " + juce::String ((int) scenes.size() + 1)));
+    currentScene = (int) scenes.size() - 1;
+    markModified();
+    changed();
+    if (onScenesChanged) onScenesChanged();
+    return currentScene;
+}
+
+void HostEngine::selectScene (int i)
+{
+    if (! juce::isPositiveAndBelow (i, (int) scenes.size()) || i == currentScene) return;
+    if (juce::isPositiveAndBelow (currentScene, (int) scenes.size()))
+    {
+        const auto name = scenes[(size_t) currentScene].name;
+        scenes[(size_t) currentScene] = captureScene (name);        // changes made in it stay with it
+    }
+    currentScene = i;
+    applyScene (scenes[(size_t) i]);
+    changed();
+    if (onScenesChanged) onScenesChanged();
+}
+
+void HostEngine::renameScene (int i, const juce::String& name)
+{
+    if (! juce::isPositiveAndBelow (i, (int) scenes.size())) return;
+    scenes[(size_t) i].name = name.trim().toUpperCase().substring (0, 20);
+    markModified();
+    changed();
+    if (onScenesChanged) onScenesChanged();
+}
+
+void HostEngine::removeScene (int i)
+{
+    if (! juce::isPositiveAndBelow (i, (int) scenes.size())) return;
+    aboutToEdit();
+    const bool wasCurrent = i == currentScene;
+    scenes.erase (scenes.begin() + i);
+    if (scenes.empty()) currentScene = -1;
+    else if (wasCurrent) { currentScene = juce::jmin (i, (int) scenes.size() - 1); applyScene (scenes[(size_t) currentScene]); }
+    else if (currentScene > i) --currentScene;
+    markModified();
+    changed();
+    if (onScenesChanged) onScenesChanged();
+}
+
+void HostEngine::moveScene (int from, int to)
+{
+    if (! juce::isPositiveAndBelow (from, (int) scenes.size()) || ! juce::isPositiveAndBelow (to, (int) scenes.size()) || from == to) return;
+    auto sc = scenes[(size_t) from];
+    scenes.erase (scenes.begin() + from);
+    scenes.insert (scenes.begin() + to, sc);
+    if (currentScene == from) currentScene = to;
+    else if (from < currentScene && to >= currentScene) --currentScene;
+    else if (from > currentScene && to <= currentScene) ++currentScene;
+    markModified();
+    changed();
+    if (onScenesChanged) onScenesChanged();
+}
+
+std::unique_ptr<juce::XmlElement> HostEngine::scenesToXml() const
+{
+    auto x = std::make_unique<juce::XmlElement> ("SCENES");
+    x->setAttribute ("current", currentScene);
+    for (int i = 0; i < (int) scenes.size(); ++i)
+    {
+        // the chosen scene is saved as it is now (including changes not yet stored in it)
+        const Scene sc = i == currentScene ? captureScene (scenes[(size_t) i].name) : scenes[(size_t) i];
+        auto* xs = x->createNewChildElement ("SCENE");
+        xs->setAttribute ("name", sc.name);
+        xs->setAttribute ("in", sc.presetIn);
+        xs->setAttribute ("out", sc.presetOut);
+        for (auto& [id, st] : sc.slots)
+        {
+            auto* e = xs->createNewChildElement ("SLOT");
+            e->setAttribute ("id", id);
+            e->setAttribute ("bypass", st.bypass);
+            juce::MemoryBlock mb (st.params.data(), st.params.size() * sizeof (float));
+            e->setAttribute ("params", mb.toBase64Encoding());
+        }
+        for (auto& [id, mix] : sc.splitMix)
+        {
+            auto* e = xs->createNewChildElement ("SPLIT");
+            e->setAttribute ("id", id);
+            e->setAttribute ("mix", mix);
+        }
+        for (auto& [id, on] : sc.modifiersOn)
+        {
+            auto* e = xs->createNewChildElement ("MOD");
+            e->setAttribute ("id", id);
+            e->setAttribute ("on", on);
+        }
+    }
+    return x;
+}
+
+void HostEngine::scenesFromXml (const juce::XmlElement& x)
+{
+    for (auto* xs : x.getChildWithTagNameIterator ("SCENE"))
+    {
+        if ((int) scenes.size() >= maxScenes) break;
+        Scene sc;
+        sc.name = xs->getStringAttribute ("name", "SCENE " + juce::String ((int) scenes.size() + 1));
+        sc.presetIn = (float) xs->getDoubleAttribute ("in", 0.0);
+        sc.presetOut = (float) xs->getDoubleAttribute ("out", 0.0);
+        for (auto* e : xs->getChildWithTagNameIterator ("SLOT"))
+        {
+            Scene::SlotState st;
+            st.bypass = e->getBoolAttribute ("bypass", false);
+            juce::MemoryBlock mb;
+            if (mb.fromBase64Encoding (e->getStringAttribute ("params")))
+            {
+                st.params.resize (mb.getSize() / sizeof (float));
+                std::memcpy (st.params.data(), mb.getData(), st.params.size() * sizeof (float));
+            }
+            sc.slots[e->getStringAttribute ("id")] = std::move (st);
+        }
+        for (auto* e : xs->getChildWithTagNameIterator ("SPLIT"))
+            sc.splitMix[e->getStringAttribute ("id")] = (float) e->getDoubleAttribute ("mix", 0.5);
+        for (auto* e : xs->getChildWithTagNameIterator ("MOD"))
+            sc.modifiersOn[e->getStringAttribute ("id")] = e->getBoolAttribute ("on", true);
+        scenes.push_back (std::move (sc));
+    }
+    // The plugins were saved as the chosen scene sounded, so nothing needs applying.
+    currentScene = scenes.empty() ? -1 : juce::jlimit (0, (int) scenes.size() - 1, x.getIntAttribute ("current", 0));
 }

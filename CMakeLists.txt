@@ -71,6 +71,7 @@ target_sources(PequodHost PRIVATE
     Source/HawthorneLink/NetSender.cpp
     Source/Modifiers.cpp
     Source/ModifierRow.cpp
+    Source/SceneBar.cpp
     Source/PequodNative.cpp
     Source/PequodPanel.cpp)
 

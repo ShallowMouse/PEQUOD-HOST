@@ -251,7 +251,8 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
     outMeter.onClearClip = [this] { engine.getOutputStage()->clipped = false; };
     outMeter.setTooltip ("Output level. The light on top turns red if the output hit 0 dB (click to clear); "
                          "mustard while the safety limiter is working.");
-    outKnob.setTooltip ("OUT level, saved with each preset (right-click: learn, match levels, limiter)");
+    outKnob.setTooltip ("MASTER OUT: the overall volume, the same for every preset (right-click: learn, limiter)");
+    inKnob.setTooltip ("MASTER IN: the input level, the same for every preset (right-click: learn)");
     outKnob.addToMenu = [this] (juce::PopupMenu& m) { addOutputMenu (m); };
 
 
@@ -316,8 +317,16 @@ void HeaderBar::setupKnob (LearnableSlider& knob, juce::Label& label, const juce
 void HeaderBar::addOutputMenu (juce::PopupMenu& m)
 {
     auto* out = engine.getOutputStage();
-    const bool hasRef = ! std::isnan (engine.loudnessReference);
+    m.addSeparator();
+    m.addItem ("Safety limiter on the output", true, out->limiterOn.load(), [out]
+    {
+        out->limiterOn = ! out->limiterOn.load();
+    });
+}
 
+void HeaderBar::addLevelMatchMenu (juce::PopupMenu& m)
+{
+    const bool hasRef = ! std::isnan (engine.loudnessReference);
     m.addSeparator();
     m.addSectionHeader ("MATCH LEVELS BETWEEN PRESETS");
     m.addItem ("Use this preset's level as the target (play for " + juce::String ((int) measureSeconds) + " s)",
@@ -326,12 +335,7 @@ void HeaderBar::addOutputMenu (juce::PopupMenu& m)
                       : juce::String ("Match this preset to the target (set a target first)"),
                hasRef && measuring == 0, false, [this] { startLevelMatch (2); });
     if (measuring != 0)
-        m.addItem ("Stop measuring", [this] { measuring = 0; outLabel.setText ("OUT", juce::dontSendNotification); });
-    m.addSeparator();
-    m.addItem ("Safety limiter on the output", true, out->limiterOn.load(), [out]
-    {
-        out->limiterOn = ! out->limiterOn.load();
-    });
+        m.addItem ("Stop measuring", [this] { measuring = 0; if (onMeasuring) onMeasuring (-1); });
 }
 
 void HeaderBar::startLevelMatch (int mode)
@@ -348,12 +352,12 @@ void HeaderBar::updateLevelMatch()
     auto* out = engine.getOutputStage();
     const double elapsed = (juce::Time::getMillisecondCounterHiRes() - measureStart) / 1000.0;
     const int left = juce::jmax (0, (int) std::ceil (measureSeconds - elapsed));
-    outLabel.setText ("PLAY " + juce::String (left), juce::dontSendNotification);
+    if (onMeasuring) onMeasuring (left);
     if (elapsed < measureSeconds) return;
 
     const int mode = measuring;
     measuring = 0;
-    outLabel.setText ("OUT", juce::dontSendNotification);
+    if (onMeasuring) onMeasuring (-1);
 
     if (out->secondsMeasured() < 1.5)
     {
@@ -364,17 +368,17 @@ void HeaderBar::updateLevelMatch()
     const double heard = out->loudnessDb();            // before the OUT level
     if (mode == 1)
     {
-        engine.loudnessReference = heard + out->gainDb.load();
+        engine.loudnessReference = heard + out->presetDb.load();     // the preset OUT, not the master
         if (onLevelTargetChanged) onLevelTargetChanged();
-        if (onStatus) onStatus ("Level target set from this preset. On other presets, right-click OUT > Match.");
+        if (onStatus) onStatus ("Level target set from this preset. On other presets, right-click PRESET OUT > Match.");
     }
     else
     {
-        const float before = out->gainDb.load();
+        const float before = out->presetDb.load();
         const float after = (float) juce::jlimit (-36.0, 12.0, std::round ((engine.loudnessReference - heard) * 10.0) / 10.0);
-        out->gainDb = after;
+        out->presetDb = after;
         engine.markModified();
-        if (onStatus) onStatus ("Level matched: OUT " + juce::String (before, 1) + " dB -> " + juce::String (after, 1)
+        if (onStatus) onStatus ("Level matched: preset OUT " + juce::String (before, 1) + " dB -> " + juce::String (after, 1)
                                 + " dB. Save the preset to keep it.");
     }
 }

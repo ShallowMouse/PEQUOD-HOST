@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <map>
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -18,7 +19,9 @@ public:
         : AudioProcessor (BusesProperties().withInput  ("In",  juce::AudioChannelSet::stereo(), true)
                                            .withOutput ("Out", juce::AudioChannelSet::stereo(), true)) {}
 
-    std::atomic<float> gainDb { 0.0f };
+    std::atomic<float> gainDb { 0.0f };       // master level (the header knobs; PEQUOD remembers it)
+    std::atomic<float> presetDb { 0.0f };     // this preset's level (saved with the preset / scene)
+    float totalDb() const { return juce::jlimit (-60.0f, 24.0f, gainDb.load() + presetDb.load()); }
     std::atomic<int>   inputMode { (int) InputMode::Stereo };
     std::atomic<float> peakL { 0.0f }, peakR { 0.0f };
     std::atomic<bool>  muted { false };
@@ -49,7 +52,7 @@ public:
     {
         const double sr = getSampleRate() > 0 ? getSampleRate() : 48000.0;
         smoothed.reset (sr, 0.02);
-        smoothed.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (gainDb.load()));
+        smoothed.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (totalDb()));
         releaseCoeff = (float) (1.0 - std::exp (-1.0 / (0.08 * sr)));
         kHigh.setCoefficients (juce::IIRCoefficients::makeHighShelf (sr, 1500.0, 0.71, juce::Decibels::decibelsToGain (4.0)));
         kLow.setCoefficients (juce::IIRCoefficients::makeHighPass (sr, 60.0, 0.5));
@@ -105,7 +108,7 @@ public:
             }
         }
 
-        smoothed.setTargetValue (muted.load() ? 0.0f : juce::Decibels::decibelsToGain (gainDb.load(), -60.0f));
+        smoothed.setTargetValue (muted.load() ? 0.0f : juce::Decibels::decibelsToGain (totalDb(), -60.0f));
         float pl = 0.0f, pr = 0.0f;
         for (int i = 0; i < n; ++i)
         {
@@ -319,6 +322,29 @@ public:
     /** The preset has unsaved edits (that aren't rack changes, e.g. this-preset footswitch settings). */
     void markModified() noexcept { ++changeCounter; }
 
+    //== Scenes: up to 8 versions of this preset (effects on/off, knobs, split mixes, preset levels,
+    //   modifiers on/off), switched instantly. Changes made while a scene is chosen belong to it.
+    struct Scene
+    {
+        juce::String name;
+        struct SlotState { bool bypass = false; std::vector<float> params; };
+        std::map<juce::String, SlotState> slots;      // by the plugin's stable id
+        std::map<juce::String, float> splitMix;        // by the split's stable id
+        std::map<juce::String, bool> modifiersOn;      // by the modifier's id
+        float presetIn = 0.0f, presetOut = 0.0f;
+    };
+    static constexpr int maxScenes = 8;
+    int getNumScenes() const noexcept { return (int) scenes.size(); }
+    int getCurrentScene() const noexcept { return currentScene; }
+    juce::String getSceneName (int i) const { return juce::isPositiveAndBelow (i, (int) scenes.size()) ? scenes[(size_t) i].name : juce::String(); }
+    /** Adds a scene that starts as a copy of how things are now (the first one also makes "SCENE 1" of the current sound). */
+    int addScene();
+    void selectScene (int i);
+    void renameScene (int i, const juce::String&);
+    void removeScene (int i);
+    void moveScene (int from, int to);
+    std::function<void()> onScenesChanged;
+
     //== Modifiers (saved with the preset)
     struct ModifierInfo
     {
@@ -363,6 +389,12 @@ private:
     std::vector<RackItem> items;
     int nextUid = 1;
     std::vector<ModifierInfo> modifiers;
+    std::vector<Scene> scenes;
+    int currentScene = -1;
+    Scene captureScene (const juce::String& name) const;
+    void applyScene (const Scene&);
+    std::unique_ptr<juce::XmlElement> scenesToXml() const;
+    void scenesFromXml (const juce::XmlElement&);
     std::atomic<int> modLearn { -1 };
     double modLearnArmedAt = 0;
     void clearModifiers();

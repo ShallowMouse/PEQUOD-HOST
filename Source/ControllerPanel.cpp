@@ -1230,6 +1230,11 @@ private:
             case Mapping::Target::tuner:        return "Tuner";
             case Mapping::Target::inputGain:    return "Input level (IN)";
             case Mapping::Target::outputGain:   return "Master volume (OUT)";
+            case Mapping::Target::presetInGain:  return "This preset's IN level";
+            case Mapping::Target::presetOutGain: return "This preset's volume (OUT)";
+            case Mapping::Target::sceneNext:     return "Next scene";
+            case Mapping::Target::scenePrev:     return "Previous scene";
+            case Mapping::Target::sceneSelect:   return "Scene " + juce::String (m.paramIndex);
             case Mapping::Target::tapTempo:     return "Tap tempo";
             case Mapping::Target::click:        return "Metronome click on/off";
             case Mapping::Target::instrumentInput: return "Input: guitar / instrument";
@@ -1311,6 +1316,19 @@ private:
             menu.addSectionHeader ("TEMPO");
             menu.addItem ("Tap tempo  (its light flashes in time)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tapTempo, 0, rep.get()); done(); });
             menu.addItem ("Metronome click on/off",                 [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::click, 0, rep.get()); done(); });
+            menu.addSectionHeader ("SCENES (THIS PRESET'S)");
+            menu.addItem ("Next scene",     [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::sceneNext, 0, rep.get()); done(); });
+            menu.addItem ("Previous scene", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::scenePrev, 0, rep.get()); done(); });
+            {
+                juce::PopupMenu sceneMenu;
+                for (int k = 1; k <= HostEngine::maxScenes; ++k)
+                {
+                    const auto name = engine.getSceneName (k - 1);
+                    sceneMenu.addItem ("Scene " + juce::String (k) + (name.isNotEmpty() ? "  (" + name + ")" : juce::String()),
+                                       [&m, rep, u, c, lay, k, done] { m.assign (u, c, lay, Mapping::Target::sceneSelect, k, rep.get()); done(); });
+                }
+                menu.addSubMenu ("Scene...", sceneMenu);
+            }
             menu.addSectionHeader ("MODIFIERS (THIS PRESET'S)");
             if (engine.getNumModifiers() == 0)
                 menu.addItem ("(add a modifier above the rack first)", false, false, [] {});
@@ -1340,7 +1358,10 @@ private:
                 menu.addItem ("Step through presets", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::presetNext, 0, rep.get()); done(); });
                 menu.addItem ("Step through banks",   [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::bankNext, 0, rep.get()); done(); });
             }
+            if (turn)
+                menu.addItem ("Step through scenes", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::sceneNext, 0, rep.get()); done(); });
             menu.addItem ("Master volume (OUT)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::outputGain, 0, rep.get()); done(); });
+            menu.addItem ("This preset's volume (preset OUT)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::presetOutGain, 0, rep.get()); done(); });
             menu.addItem ("Input level (IN)",    [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::inputGain, 0, rep.get()); done(); });
             menu.addItem (turn ? "Tempo  (each click = 1 BPM)" : "Tempo  (40 - 240 BPM)",
                           [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tempo, 0, rep.get()); done(); });

@@ -10,7 +10,9 @@ struct Mapping
                         stompSlot,      // on/off of the Nth effect in whatever preset is loaded (paramIndex = N, 1-based)
                         presetSelect,   // load preset N of the current bank (paramIndex = N, 1-based)
                         tapTempo, tempo, click, instrumentInput,
-                        modOn, modTrigger, modRate, modAmount };   // modifier N (paramIndex = N, 1-based)
+                        modOn, modTrigger, modRate, modAmount,     // modifier N (paramIndex = N, 1-based)
+                        sceneSelect, sceneNext, scenePrev,         // scene N (paramIndex = N, 1-based)
+                        presetInGain, presetOutGain };             // this preset's IN / OUT level
     enum class Source { midiCC, midiNote, osc, controller };
 
     // Controller sources: unit uid + control (0-3 switch, 100 pedal, 200 encoder turn, 201 encoder press) + layer
@@ -46,7 +48,8 @@ struct Mapping
                                          || target == Target::stompSlot || target == Target::presetSelect
                                          || target == Target::tapTempo || target == Target::click
                                          || target == Target::instrumentInput
-                                         || target == Target::modOn || target == Target::modTrigger; }
+                                         || target == Target::modOn || target == Target::modTrigger
+                                         || target == Target::sceneSelect || target == Target::sceneNext || target == Target::scenePrev; }
     bool isModifierTarget() const { return target == Target::modOn || target == Target::modTrigger
                                          || target == Target::modRate || target == Target::modAmount; }
 

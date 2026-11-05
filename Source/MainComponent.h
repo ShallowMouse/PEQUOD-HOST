@@ -8,6 +8,7 @@
 #include "BrowserPanel.h"
 #include "RackView.h"
 #include "ModifierRow.h"
+#include "SceneBar.h"
 #include "ControlPanel.h"
 #include "PresetLibrary.h"
 #include "ControllerManager.h"
@@ -49,6 +50,7 @@ private:
     BrowserPanel browser { engine, library };
     RackView rack;
     ModifierRow modifierRow { engine };
+    SceneBar sceneBar { engine, control };
     ControlPanel controlPanel { engine, control };
     juce::Label statusBar;
     juce::TextButton rackViewButton { "RACK" }, pedalboardViewButton { "PEDALBOARD" };

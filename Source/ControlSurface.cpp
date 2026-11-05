@@ -4,7 +4,8 @@
 
 namespace
 {
-    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner", "stompSlot", "presetSelect", "tapTempo", "tempo", "click", "instrument", "modOn", "modTrigger", "modRate", "modAmount" };
+    const char* targetNames[] = { "param", "bypass", "splitMix", "inputGain", "outputGain", "presetNext", "presetPrev", "mute", "bankNext", "bankPrev", "tuner", "stompSlot", "presetSelect", "tapTempo", "tempo", "click", "instrument", "modOn", "modTrigger", "modRate", "modAmount",
+                                  "sceneSelect", "sceneNext", "scenePrev", "presetIn", "presetOut" };
     const char* sourceNames[] = { "cc", "note", "osc", "ctrl" };
 
     template <typename Enum>
@@ -402,6 +403,25 @@ bool ControlSurface::handleFixedOsc (const juce::OSCMessage& msg, float value)
         return true;
     }
 
+    // /pequod/scene i (1-based), /pequod/scene/next, /pequod/scene/prev
+    if (parts[1] == "scene")
+    {
+        const int n = engine.getNumScenes();
+        if (n == 0) return true;
+        const int cur = juce::jmax (0, engine.getCurrentScene());
+        if (parts.size() >= 3 && parts[2] == "next")      { if (msg.isEmpty() || press) engine.selectScene ((cur + 1) % n); }
+        else if (parts.size() >= 3 && parts[2] == "prev") { if (msg.isEmpty() || press) engine.selectScene ((cur + n - 1) % n); }
+        else if (! msg.isEmpty()) engine.selectScene ((int) argAsFloat (msg, 1.0f) - 1);
+        return true;
+    }
+    // /pequod/level/in f, /pequod/level/out f: this preset's levels
+    if (parts[1] == "level" && parts.size() >= 3 && ! msg.isEmpty())
+    {
+        if (parts[2] == "in")  engine.getInputStage()->presetDb  = normToDb (value);
+        if (parts[2] == "out") engine.getOutputStage()->presetDb = normToDb (value);
+        engine.markModified();
+        return true;
+    }
     if (parts[1] == "master" && parts.size() >= 3)
     {
         if (parts[2] == "in")  engine.getInputStage()->gainDb  = normToDb (value);
@@ -601,6 +621,18 @@ void ControlSurface::apply (Mapping& m, float value, bool isPress)
                 setModifierRate (mod, value);
             break;
         }
+        case Mapping::Target::sceneSelect: if (risingEdge) engine.selectScene (m.paramIndex - 1); break;
+        case Mapping::Target::sceneNext:
+        case Mapping::Target::scenePrev:
+            if (risingEdge && engine.getNumScenes() > 0)
+            {
+                const int n = engine.getNumScenes();
+                const int cur = juce::jmax (0, engine.getCurrentScene());
+                engine.selectScene ((cur + (m.target == Mapping::Target::sceneNext ? 1 : n - 1)) % n);
+            }
+            break;
+        case Mapping::Target::presetInGain:  engine.getInputStage()->presetDb = normToDb (value); engine.markModified(); break;
+        case Mapping::Target::presetOutGain: engine.getOutputStage()->presetDb = normToDb (value); engine.markModified(); break;
         case Mapping::Target::inputGain:  engine.getInputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::outputGain: engine.getOutputStage()->gainDb = normToDb (value); break;
         case Mapping::Target::presetNext: if (risingEdge && onPresetNext) onPresetNext(); break;
@@ -920,6 +952,23 @@ bool ControlSurface::handleControllerEvent (const juce::String& unit, int contro
                 case Mapping::Target::inputGain:
                     engine.getInputStage()->gainDb = juce::jlimit (-36.0f, 12.0f, engine.getInputStage()->gainDb.load() + 0.5f * (float) delta);
                     break;
+                case Mapping::Target::presetInGain:
+                case Mapping::Target::presetOutGain:
+                {
+                    auto* st = m.target == Mapping::Target::presetInGain ? engine.getInputStage() : engine.getOutputStage();
+                    st->presetDb = juce::jlimit (-36.0f, 12.0f, st->presetDb.load() + 0.5f * (float) delta);
+                    engine.markModified();
+                    break;
+                }
+                case Mapping::Target::sceneNext:
+                case Mapping::Target::scenePrev:
+                case Mapping::Target::sceneSelect:
+                    if (engine.getNumScenes() > 0)
+                    {
+                        const int n = engine.getNumScenes();
+                        engine.selectScene (((juce::jmax (0, engine.getCurrentScene()) + delta) % n + n) % n);
+                    }
+                    break;
                 case Mapping::Target::outputGain:
                     engine.getOutputStage()->gainDb = juce::jlimit (-36.0f, 12.0f, engine.getOutputStage()->gainDb.load() + 0.5f * (float) delta);
                     break;
@@ -1023,6 +1072,13 @@ juce::String ControlSurface::describeTarget (const Mapping& m) const
         case Mapping::Target::splitMix:   return "Split " + juce::String (engine.getSplitNumber (m.slotUid)) + " / MIX";
         case Mapping::Target::inputGain:  return "Master IN";
         case Mapping::Target::outputGain: return "Master OUT";
+        case Mapping::Target::presetInGain:  return "Preset IN";
+        case Mapping::Target::presetOutGain: return "Preset OUT";
+        case Mapping::Target::sceneNext:     return "Scene NEXT";
+        case Mapping::Target::scenePrev:     return "Scene PREV";
+        case Mapping::Target::sceneSelect:
+            return "Scene " + juce::String (m.paramIndex)
+                 + (engine.getSceneName (m.paramIndex - 1).isNotEmpty() ? " (" + engine.getSceneName (m.paramIndex - 1) + ")" : juce::String());
         case Mapping::Target::presetNext: return "Preset NEXT";
         case Mapping::Target::presetPrev: return "Preset PREV";
         case Mapping::Target::mute:       return "MUTE";
@@ -1103,7 +1159,7 @@ static juce::XmlElement* mappingToXml (const Mapping& m, int targetRef)
 static Mapping mappingFromXml (const juce::XmlElement& x)
 {
     Mapping m;
-    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 21, Mapping::Target::param);
+    m.target = enumFromName (x.getStringAttribute ("target"), targetNames, 26, Mapping::Target::param);
     m.paramIndex = x.getIntAttribute ("param", -1);
     m.source = enumFromName (x.getStringAttribute ("source"), sourceNames, 4, Mapping::Source::midiCC);
     m.midiChannel = x.getIntAttribute ("ch");

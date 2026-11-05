@@ -45,6 +45,10 @@ ControlPanel::ControlPanel (HostEngine& e, ControlSurface& c) : engine (e), cont
         m.addItem ("Preset PREV",  [this] { control.armLearnFor (Mapping::Target::presetPrev); });
         m.addItem ("Master IN",    [this] { control.armLearnFor (Mapping::Target::inputGain); });
         m.addItem ("Master OUT",   [this] { control.armLearnFor (Mapping::Target::outputGain); });
+        m.addItem ("Preset IN level",  [this] { control.armLearnFor (Mapping::Target::presetInGain); });
+        m.addItem ("Preset OUT level", [this] { control.armLearnFor (Mapping::Target::presetOutGain); });
+        m.addItem ("Scene NEXT",   [this] { control.armLearnFor (Mapping::Target::sceneNext); });
+        m.addItem ("Scene PREV",   [this] { control.armLearnFor (Mapping::Target::scenePrev); });
         m.addItem ("Bank NEXT",    [this] { control.armLearnFor (Mapping::Target::bankNext); });
         m.addItem ("Bank PREV",    [this] { control.armLearnFor (Mapping::Target::bankPrev); });
         m.addItem ("MUTE",         [this] { control.armLearnFor (Mapping::Target::mute); });

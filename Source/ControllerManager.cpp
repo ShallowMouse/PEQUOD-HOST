@@ -572,6 +572,15 @@ juce::String ControllerManager::shortLabelOf (const Mapping& mapping, int code) 
             case Mapping::Target::splitMix:     return "SPLIT " + juce::String (engine.getSplitNumber (m->slotUid));
             case Mapping::Target::inputGain:    return "IN";
             case Mapping::Target::outputGain:   return "VOLUME";
+            case Mapping::Target::presetInGain:  return "PRE IN";
+            case Mapping::Target::presetOutGain: return "PRE VOL";
+            case Mapping::Target::sceneNext:     return "SCENE >";
+            case Mapping::Target::scenePrev:     return "< SCENE";
+            case Mapping::Target::sceneSelect:
+            {
+                const auto name = engine.getSceneName (m->paramIndex - 1);
+                return name.isNotEmpty() ? shortName (name, 11) : "SCENE " + juce::String (m->paramIndex);
+            }
         }
         return "?";
     }
@@ -728,7 +737,11 @@ bool ControllerManager::mappingIsOn (const Mapping& m) const
         case Mapping::Target::presetNext: case Mapping::Target::presetPrev:
         case Mapping::Target::bankNext:   case Mapping::Target::bankPrev:
         case Mapping::Target::inputGain:  case Mapping::Target::outputGain:
+        case Mapping::Target::presetInGain: case Mapping::Target::presetOutGain:
+        case Mapping::Target::sceneNext: case Mapping::Target::scenePrev:
             return false;
+        case Mapping::Target::sceneSelect:
+            return engine.getCurrentScene() == m.paramIndex - 1;
     }
     return false;
 }
@@ -761,7 +774,7 @@ void ControllerManager::assign (const juce::String& uid, int code, int lay, Mapp
     m.ctrlControl = code;
     m.ctrlLayer = lay;
     m.target = target;
-    if (target == Mapping::Target::stompSlot || target == Mapping::Target::presetSelect
+    if (target == Mapping::Target::stompSlot || target == Mapping::Target::presetSelect || target == Mapping::Target::sceneSelect
          || target == Mapping::Target::modOn || target == Mapping::Target::modTrigger
          || target == Mapping::Target::modRate || target == Mapping::Target::modAmount) m.paramIndex = uidOrIndex;
     else m.slotUid = uidOrIndex;
@@ -1105,6 +1118,10 @@ juce::String ControllerManager::flashFor (const Mapping& m, bool afterPress) con
             return {};
         case Mapping::Target::instrumentInput:
             return engine.getRack().instrumentInput.load() ? "INSTRUMENT" : "GUITAR";
+        case Mapping::Target::sceneSelect:
+        case Mapping::Target::sceneNext:
+        case Mapping::Target::scenePrev:
+            return engine.getCurrentScene() >= 0 ? "SCENE " + upper (engine.getSceneName (engine.getCurrentScene()), 14) : juce::String ("NO SCENES");
         case Mapping::Target::modOn:
         {
             const int i = m.paramIndex - 1;
@@ -1211,6 +1228,7 @@ juce::String ControllerManager::screenToken (const juce::String& name, int numbe
         return names.isEmpty() ? juce::String() : upper (names[(idx + 1) % names.size()], 64);
     }
     if (name == "bpm")    return juce::String (juce::roundToInt (engine.transport.bpm.load()));
+    if (name == "scene")  return engine.getCurrentScene() >= 0 ? upper (engine.getSceneName (engine.getCurrentScene()), 64) : juce::String();
     if (name == "beat")   return juce::String (engine.transport.currentBeatInBar() + 1);
     if (name == "click")  return engine.transport.clickOn.load() ? "CLICK" : "";
     if (name == "layer")  return getNumLayers() > 1 ? "L" + juce::String (layer + 1) : juce::String();
@@ -1279,7 +1297,14 @@ void ControllerManager::updateScreen (bool force)
         auto preset = control.getPresetName ? control.getPresetName() : juce::String();
         const int idx = control.getPresetIndex ? control.getPresetIndex() : -1;
         juce::String sub;
-        if (idx >= 0) sub << "PRESET " << (idx + 1);
+        const int scene = engine.getCurrentScene();
+        if (scene >= 0)
+        {
+            // short form so the scene fits: "P3 VERSE  120 BPM"
+            if (idx >= 0) sub << "P" << (idx + 1) << " ";
+            sub << upper (engine.getSceneName (scene), 8);
+        }
+        else if (idx >= 0) sub << "PRESET " << (idx + 1);
         if (getNumLayers() > 1) sub << (sub.isEmpty() ? "" : "  ") << "L" << (layer + 1);
         sub << (sub.isEmpty() ? "" : "  ") << juce::roundToInt (engine.transport.bpm.load()) << " BPM";
         o->setProperty ("mode", "preset");

@@ -224,6 +224,7 @@ const std::vector<Token>& tokens()
         { "{bank}",    "Bank name" },
         { "{num}",     "Preset number in the bank" },
         { "{next}",    "Name of the next preset" },
+        { "{scene}",   "Scene name (when the preset has scenes)" },
         { "{bpm}",     "Tempo (BPM)" },
         { "{beat}",    "Beat of the bar (1 2 3 4)" },
         { "{click}",   "CLICK while the metronome click is on" },

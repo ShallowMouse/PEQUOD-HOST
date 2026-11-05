@@ -117,6 +117,14 @@ MainComponent::MainComponent()
     header.onLevelTargetChanged = [this] { saveSettings(); };
     engine.onBeforeEdit = [this] { pushUndo(); };
     addAndMakeVisible (modifierRow);
+    addAndMakeVisible (sceneBar);
+    sceneBar.addOutMenuItems = [this] (juce::PopupMenu& m) { header.addLevelMatchMenu (m); };
+    sceneBar.onStatus = [this] (const juce::String& t) { setStatus (t); };
+    header.onMeasuring = [this] (int left) { sceneBar.showMeasuring (left); };
+    engine.onScenesChanged = [this] { sceneBar.rebuild(); };
+    // master levels: the same for every preset
+    engine.getInputStage()->gainDb  = (float) settings->getDoubleValue ("masterIn", 0.0);
+    engine.getOutputStage()->gainDb = (float) settings->getDoubleValue ("masterOut", 0.0);
     modifierRow.onHeightChanged = [this] { resized(); };
     engine.onModifiersChanged = [this] { modifierRow.rebuild(); };
     modifierRow.setExpanded (settings->getBoolValue ("modifiersShown", true));
@@ -296,6 +304,7 @@ MainComponent::~MainComponent()
 {
     stopTimer();
     engine.onModifiersChanged = nullptr;
+    engine.onScenesChanged = nullptr;
     control.onGlobalSettingsChanged = nullptr;
     controllerWindow.reset();
     saveSettings();
@@ -340,6 +349,8 @@ void MainComponent::saveSettings()
     s->setValue ("networkDry", engine.isNetworkSendingDry());
     s->setValue ("keyboardShown", keyboard != nullptr && keyboard->isVisible());
     s->setValue ("modifiersShown", modifierRow.isExpanded());
+    s->setValue ("masterIn", engine.getInputStage()->gainDb.load());
+    s->setValue ("masterOut", engine.getOutputStage()->gainDb.load());
     if (! std::isnan (engine.loudnessReference)) s->setValue ("loudnessTarget", engine.loudnessReference);
     s->setValue ("pedalboardView", rack.isPedalboard());
     s->setValue ("sessionModified", engine.getChangeCounter() != savedChangeCounter);
@@ -383,6 +394,7 @@ void MainComponent::resized()
         keyboard->setBounds (k);
         keyboard->setKeyWidth (juce::jlimit (16.0f, 34.0f, (float) k.getWidth() / 36.0f));   // about three octaves
     }
+    sceneBar.setBounds (r.removeFromTop (SceneBar::height));
     modifierRow.setBounds (r.removeFromTop (modifierRow.getIdealHeight()));
     rack.setBounds (r);
 }
