@@ -8,7 +8,15 @@
     position between its FROM and TO. Saved with the preset. */
 namespace Modifiers
 {
-    enum class Type { lfo = 1, follower = 2, envelope = 3, sequencer = 4 };
+    enum class Type { lfo = 1, follower = 2, envelope = 3, sequencer = 4,
+                      macro = 5, pitch = 6, random = 7, ducker = 8, swell = 9, counter = 10 };
+    constexpr int numTypes = 10;
+
+    /** How an assignment bends the sweep. */
+    enum class Curve { linear, slowStart, fastStart, sCurve, steps4, steps8 };
+    constexpr int numCurves = 6;
+    const char* curveName (Curve);
+    float applyCurve (int curve, float v);
     enum class Shape { sine, triangle, square, sawUp, sawDown, sampleHold, smoothRandom };
     constexpr int maxModifiers = 16;
     constexpr int maxSteps = 16;
@@ -55,10 +63,29 @@ namespace Modifiers
         std::atomic<int> pressCount { 0 };       // bumped by footswitch / FIRE button
         std::atomic<bool> held { false };
 
-        // Step sequencer
+        // Step sequencer (and note counter)
         std::atomic<float> steps[maxSteps];
         std::atomic<int> length { 8 };
         std::atomic<float> glide { 0.0f };       // 0..1 of a step
+
+        // Macro knob
+        std::atomic<float> macroValue { 0.0f };
+
+        // Pitch follower: the note range that sweeps 0..1 (MIDI notes)
+        std::atomic<float> lowNote { 40.0f }, highNote { 88.0f };   // E2 .. E6
+        std::atomic<float> glideMs { 80.0f };                       // pitch follower / randomiser smoothing
+
+        // Randomiser: 0 drift (rate / sync), 1 each picked note, 2 each switch press, 3 each beat division
+        enum RandomMode { randomDrift = 0, randomPick = 1, randomSwitch = 2, randomBeat = 3 };
+        std::atomic<int> randomMode { randomDrift };
+
+        // Ducker: playing above the threshold = 1 (ducked), quiet = 0
+        std::atomic<float> thresholdDb { -45.0f };
+        std::atomic<float> holdMs { 150.0f };
+
+        // Another modifier moving this one (-1 = not): rate (0..1 like a pedal), amount, macro
+        std::atomic<float> rateMod { -1.0f }, amountMod { -1.0f }, macroMod { -1.0f };
+        float effectiveAmount() const { const float m = amountMod.load(); return m >= 0.0f ? m : amount.load(); }
 
         // Output (for the UI)
         std::atomic<float> out { 0.0f };
@@ -74,8 +101,13 @@ namespace Modifiers
         float followDb = -100.0f;
         float envLevel = 0.0f; int envStage = 0;   // 0 idle 1 attack 2 decay 3 sustain 4 release
         int seenPresses = 0;
-        float fastDb = -100.0f, slowDb = -100.0f; double pickHoldoff = 0;
+        float fastDb = -100.0f, slowDb = -100.0f; double pickHoldoff = 0; bool pickArmed = true;
         float lastOut = 0.0f;
+        int64_t lastBeat = 0; float randTarget = 0.0f, randValue = 0.0f;
+        double duckHoldLeft = 0.0; float duckLevel = 0.0f;
+        float swellLevel = 0.0f; bool swellUp = false; bool lastHeld = false;
+        int counterStep = 0; float counterValue = 0.0f;
+        float pitchValue = 0.0f;
         juce::Random rng;
     };
 
@@ -85,7 +117,13 @@ namespace Modifiers
         juce::String slotId;       // the plugin's stable id in the preset
         int paramIndex = -1;
         std::atomic<float> from { 0.0f }, to { 1.0f };
+        std::atomic<int> curve { 0 };          // Curve
+
+        // Or another modifier (slotId "mod:<its id>"): 0 its rate, 1 its amount, 2 its macro knob
+        static constexpr const char* modPrefix = "mod:";
+        bool targetsModifier() const { return slotId.startsWith (modPrefix); }
     };
+    enum ModParam { modParamRate = 0, modParamAmount = 1, modParamMacro = 2 };
 
     /** What the audio thread knows about the block. */
     struct BlockInfo
@@ -98,7 +136,11 @@ namespace Modifiers
         int noteOns = 0;               // MIDI notes in this block
         int noteOffs = 0;
         bool notesHeld = false;
+        float pitchHz = 0.0f;          // the note being played (0 = none), from the tuner
     };
+
+    /** True when the rate is a tempo division (synced LFO, step sequencer, randomiser on the beat). */
+    bool usesDivision (const Slot&);
 
     /** Works out a slot's value for this block (0..1). Audio thread. */
     float process (Slot&, const BlockInfo&);

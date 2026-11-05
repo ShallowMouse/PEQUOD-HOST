@@ -264,7 +264,24 @@ void HostEngine::rewire()
         {
             auto* mod = &rack->modBank[m.bank];
             plan->modifiers.push_back (mod);
+            mod->rateMod = -1.0f; mod->amountMod = -1.0f; mod->macroMod = -1.0f;   // set again by whatever still moves it
             for (auto& a : m.assignments)
+            {
+                if (a->targetsModifier())
+                {
+                    const auto id = a->slotId.fromFirstOccurrenceOf (Modifiers::Assignment::modPrefix, false, false);
+                    for (auto& other : modifiers)
+                        if (other.id == id && other.bank != m.bank)
+                        {
+                            RenderPlan::ModTarget t;
+                            t.targetMod = &rack->modBank[other.bank];
+                            t.modParam = a->paramIndex;
+                            t.mod = mod;
+                            t.assignment = a;
+                            plan->modTargets.push_back (std::move (t));
+                        }
+                    continue;
+                }
                 for (auto& sl : slots)
                     if (sl->stableId == a->slotId && sl->instance() != nullptr)
                     {
@@ -279,6 +296,7 @@ void HostEngine::rewire()
                         }
                         break;
                     }
+            }
         }
     }
 
@@ -1070,6 +1088,12 @@ juce::String HostEngine::modifierName (int i) const
         case Modifiers::Type::follower:  base = "FOLLOWER"; break;
         case Modifiers::Type::envelope:  base = "ENVELOPE"; break;
         case Modifiers::Type::sequencer: base = "STEPS"; break;
+        case Modifiers::Type::macro:     base = "MACRO"; break;
+        case Modifiers::Type::pitch:     base = "PITCH"; break;
+        case Modifiers::Type::random:    base = "RANDOM"; break;
+        case Modifiers::Type::ducker:    base = "DUCKER"; break;
+        case Modifiers::Type::swell:     base = "SWELL"; break;
+        case Modifiers::Type::counter:   base = "STEPPER"; break;
     }
     return base + " " + juce::String (number);
 }
@@ -1082,12 +1106,17 @@ int HostEngine::addModifier (Modifiers::Type type)
         for (auto& m : modifiers) used = used || m.bank == b;
         if (used) continue;
 
+        aboutToEdit();
         auto& slot = rack->modBank[b];
         slot.resetSettings();
-        if (type == Modifiers::Type::envelope) slot.trigger = Modifiers::Slot::triggerPicking;
+        if (type == Modifiers::Type::envelope || type == Modifiers::Type::counter) slot.trigger = Modifiers::Slot::triggerPicking;
+        if (type == Modifiers::Type::ducker) { slot.attackMs = 5.0f; slot.releaseMs = 600.0f; }
+        if (type == Modifiers::Type::swell)  { slot.aMs = 1500.0f; slot.rMs = 1500.0f; }
+        if (type == Modifiers::Type::random) { slot.sync = false; slot.rateHz = 0.5f; }
         slot.type = (int) type;
         ModifierInfo info;
         info.bank = b;
+        info.id = juce::Uuid().toString().substring (0, 8);
         modifiers.push_back (info);
         rewire();
         changed();
@@ -1169,8 +1198,39 @@ void HostEngine::modifierParamTouched (int slotUid, int paramIndex, float value)
     if (onModifiersChanged) onModifiersChanged();
 }
 
+void HostEngine::modifierKnobTouched (int target, int modParam, float value)
+{
+    const int i = modLearn.load();
+    if (! juce::isPositiveAndBelow (i, (int) modifiers.size()) || ! juce::isPositiveAndBelow (target, (int) modifiers.size()) || i == target) return;
+    modLearn = -1;
+    const auto slotId = juce::String (Modifiers::Assignment::modPrefix) + modifiers[(size_t) target].id;
+    auto& list = modifiers[(size_t) i].assignments;
+    for (auto& a : list)
+        if (a->slotId == slotId && a->paramIndex == modParam) { changed(); if (onModifiersChanged) onModifiersChanged(); return; }
+
+    auto a = std::make_shared<Modifiers::Assignment>();
+    a->slotId = slotId;
+    a->paramIndex = modParam;
+    a->from = value;
+    a->to = value < 0.5f ? juce::jmin (1.0f, value + 0.5f) : juce::jmax (0.0f, value - 0.5f);
+    list.push_back (a);
+    rewire();
+    markModified();
+    changed();
+    if (onModifiersChanged) onModifiersChanged();
+}
+
 juce::String HostEngine::describeAssignment (const Modifiers::Assignment& a) const
 {
+    if (a.targetsModifier())
+    {
+        const auto id = a.slotId.fromFirstOccurrenceOf (Modifiers::Assignment::modPrefix, false, false);
+        for (int k = 0; k < (int) modifiers.size(); ++k)
+            if (modifiers[(size_t) k].id == id)
+                return modifierName (k) + (a.paramIndex == Modifiers::modParamRate ? "  RATE"
+                                         : a.paramIndex == Modifiers::modParamAmount ? "  AMOUNT" : "  KNOB");
+        return "(modifier removed)";
+    }
     for (auto& sl : getFlatSlots())
         if (sl->stableId == a.slotId && sl->instance() != nullptr)
         {
@@ -1222,6 +1282,14 @@ std::unique_ptr<juce::XmlElement> HostEngine::modifiersToXml() const
         xm->setAttribute ("steps", steps.joinIntoString (" "));
         xm->setAttribute ("length", s.length.load());
         xm->setAttribute ("glide", s.glide.load());
+        xm->setAttribute ("id", m.id);
+        xm->setAttribute ("macro", s.macroValue.load());
+        xm->setAttribute ("lowNote", s.lowNote.load());
+        xm->setAttribute ("highNote", s.highNote.load());
+        xm->setAttribute ("smooth", s.glideMs.load());
+        xm->setAttribute ("randomMode", s.randomMode.load());
+        xm->setAttribute ("threshold", s.thresholdDb.load());
+        xm->setAttribute ("holdMs", s.holdMs.load());
         for (auto& a : m.assignments)
         {
             auto* xa = xm->createNewChildElement ("TO");
@@ -1229,6 +1297,7 @@ std::unique_ptr<juce::XmlElement> HostEngine::modifiersToXml() const
             xa->setAttribute ("param", a->paramIndex);
             xa->setAttribute ("from", a->from.load());
             xa->setAttribute ("to", a->to.load());
+            xa->setAttribute ("curve", a->curve.load());
         }
     }
     return x;
@@ -1239,7 +1308,7 @@ void HostEngine::modifiersFromXml (const juce::XmlElement& x)
     for (auto* xm : x.getChildWithTagNameIterator ("MOD"))
     {
         const int type = xm->getIntAttribute ("type");
-        if (type < 1 || type > 4) continue;
+        if (type < 1 || type > Modifiers::numTypes) continue;
         int bank = -1;
         for (int b = 0; b < Modifiers::maxModifiers && bank < 0; ++b)
         {
@@ -1273,10 +1342,18 @@ void HostEngine::modifiersFromXml (const juce::XmlElement& x)
         for (int k = 0; k < juce::jmin (steps.size(), Modifiers::maxSteps); ++k) s.steps[k] = steps[k].getFloatValue();
         s.length = xm->getIntAttribute ("length", 8);
         s.glide = (float) xm->getDoubleAttribute ("glide", 0.0);
+        s.macroValue = (float) xm->getDoubleAttribute ("macro", 0.0);
+        s.lowNote = (float) xm->getDoubleAttribute ("lowNote", 40.0);
+        s.highNote = (float) xm->getDoubleAttribute ("highNote", 88.0);
+        s.glideMs = (float) xm->getDoubleAttribute ("smooth", 80.0);
+        s.randomMode = xm->getIntAttribute ("randomMode", 0);
+        s.thresholdDb = (float) xm->getDoubleAttribute ("threshold", -45.0);
+        s.holdMs = (float) xm->getDoubleAttribute ("holdMs", 150.0);
         s.type = type;
 
         ModifierInfo info;
         info.bank = bank;
+        info.id = xm->getStringAttribute ("id", juce::Uuid().toString().substring (0, 8));
         for (auto* xa : xm->getChildWithTagNameIterator ("TO"))
         {
             auto a = std::make_shared<Modifiers::Assignment>();
@@ -1284,6 +1361,7 @@ void HostEngine::modifiersFromXml (const juce::XmlElement& x)
             a->paramIndex = xa->getIntAttribute ("param", -1);
             a->from = (float) xa->getDoubleAttribute ("from", 0.0);
             a->to = (float) xa->getDoubleAttribute ("to", 1.0);
+            a->curve = juce::jlimit (0, Modifiers::numCurves - 1, xa->getIntAttribute ("curve", 0));
             info.assignments.push_back (a);
         }
         modifiers.push_back (info);

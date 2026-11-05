@@ -98,7 +98,9 @@ struct RenderPlan
     // Modifiers: which slots run, and the knobs they move
     struct ModTarget
     {
-        juce::AudioProcessorParameter* param = nullptr;
+        juce::AudioProcessorParameter* param = nullptr;   // a plugin knob...
+        Modifiers::Slot* targetMod = nullptr;             // ...or another modifier's rate / amount / macro
+        int modParam = 0;
         Modifiers::Slot* mod = nullptr;
         std::shared_ptr<Modifiers::Assignment> assignment;
         float last = -1.0f;
@@ -148,6 +150,8 @@ public:
 
     /** The modifiers' settings and running state (HostEngine says which are in use). */
     Modifiers::Slot modBank[Modifiers::maxModifiers];
+    /** The note being played (Hz, 0 = none), from the tuner: for pitch followers. */
+    std::atomic<float> detectedPitchHz { 0.0f };
 
     /** The master tempo every plugin sees (and the click). */
     Transport* transport = nullptr;

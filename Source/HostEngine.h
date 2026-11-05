@@ -323,6 +323,7 @@ public:
     struct ModifierInfo
     {
         int bank = -1;                                                    // slot in RackProcessor::modBank
+        juce::String id;                                                  // for other modifiers that move it
         std::vector<std::shared_ptr<Modifiers::Assignment>> assignments;
     };
     int getNumModifiers() const noexcept { return (int) modifiers.size(); }
@@ -334,9 +335,12 @@ public:
     void moveModifier (int from, int to);
     void removeModAssignment (int i, int assignment);
     /** Learn: the next plugin knob touched is given to modifier i (-1 = stop). */
-    void armModifierLearn (int i) { modLearn = i; changed(); }
+    void armModifierLearn (int i) { modLearn = i; modLearnArmedAt = juce::Time::getMillisecondCounterHiRes(); changed(); }
+    double getModifierLearnArmedAt() const noexcept { return modLearnArmedAt; }
     int getModifierLearn() const noexcept { return modLearn.load(); }
     void modifierParamTouched (int slotUid, int paramIndex, float value);  // message thread
+    /** Learn with another modifier's RATE / AMOUNT / macro knob: modParam is Modifiers::ModParam. */
+    void modifierKnobTouched (int targetModifier, int modParam, float value);
     /** Plugin + knob name of an assignment ("DELAY  FEEDBACK"). */
     juce::String describeAssignment (const Modifiers::Assignment&) const;
     std::function<void()> onModifiersChanged;
@@ -360,6 +364,7 @@ private:
     int nextUid = 1;
     std::vector<ModifierInfo> modifiers;
     std::atomic<int> modLearn { -1 };
+    double modLearnArmedAt = 0;
     void clearModifiers();
     std::unique_ptr<juce::XmlElement> modifiersToXml() const;
     void modifiersFromXml (const juce::XmlElement&);

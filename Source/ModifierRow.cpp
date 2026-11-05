@@ -30,12 +30,14 @@ namespace
               std::function<juce::String()> text)
             : label (name), getter (std::move (get)), setter (std::move (set)), texter (std::move (text))
         {
+            setName (name);
             slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
             slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
             slider.setRange (0.0, 1.0);
             slider.setDoubleClickReturnValue (false, 0.0);
             slider.setValue (getter(), juce::dontSendNotification);
             slider.onValueChange = [this] { setter (slider.getValue()); repaint(); };
+            slider.onDragStart = [this] { if (onTouch) onTouch (slider.getValue()); };
             addAndMakeVisible (slider);
         }
 
@@ -61,6 +63,7 @@ namespace
         void resized() override { slider.setBounds (getLocalBounds().reduced (0, 12)); }
 
         juce::Slider slider;
+        std::function<void (double)> onTouch;     // drag started (learn for other modifiers)
 
     private:
         juce::String label, shown;
@@ -148,7 +151,7 @@ public:
         colour = colourFor (s.type.load());
 
         for (auto* b : { &onButton, &learnButton, &removeButton, &leftButton, &rightButton, &invertButton,
-                         &shapeButton, &syncButton, &triggerButton, &holdButton, &fireButton })
+                         &shapeButton, &syncButton, &triggerButton, &holdButton, &fireButton, &modeButton })
             styleButton (*b);
         onButton.setClickingTogglesState (true);
         onButton.setToggleState (s.on.load(), juce::dontSendNotification);
@@ -272,6 +275,135 @@ public:
                                      [this] { return juce::String (juce::roundToInt (slot().glide.load() * 100.0f)) + "%"; }));
                 knobs.add (amount);
                 break;
+
+            case Modifiers::Type::macro:
+                knobs.add (new Knob ("KNOB", [this] { return (double) slot().macroValue.load(); },
+                                     [this, mark] (double v) { slot().macroValue = (float) v; mark(); },
+                                     [this] { return juce::String (juce::roundToInt (slot().macroValue.load() * 100.0f)) + "%"; }));
+                knobs.getLast()->onTouch = [this] (double v) { learnOnto (Modifiers::modParamMacro, v); };
+                knobs.add (amount);
+                break;
+
+            case Modifiers::Type::pitch:
+            {
+                auto noteKnob = [this, mark] (const char* name, std::atomic<float> Slot::* member)
+                {
+                    return new Knob (name, [this, member] { return ((slot().*member).load() - 28.0) / 72.0; },
+                                     [this, member, mark] (double v) { (slot().*member) = (float) juce::roundToInt (28.0 + v * 72.0); mark(); },
+                                     [this, member] { return juce::MidiMessage::getMidiNoteName (juce::roundToInt ((slot().*member).load()), true, true, 4); });
+                };
+                knobs.add (noteKnob ("LOW", &Slot::lowNote));
+                knobs.add (noteKnob ("HIGH", &Slot::highNote));
+                knobs.add (new Knob ("SMOOTH", [this] { return normFromMs (slot().glideMs.load()); },
+                                     [this, mark] (double v) { slot().glideMs = (float) msFromNorm (v); mark(); },
+                                     [this] { return msText (slot().glideMs.load()); }));
+                knobs.add (amount);
+                break;
+            }
+
+            case Modifiers::Type::random:
+            {
+                modeButton.setTooltip ("When it picks a new value: drifting at RATE, each note you pick, each switch press, or on the beat");
+                modeButton.onClick = [this]
+                {
+                    juce::PopupMenu m;
+                    const char* names[] = { "DRIFT (smooth, at RATE)", "EACH NOTE YOU PICK", "EACH SWITCH PRESS / NEW BUTTON", "ON THE BEAT (RATE = 1/4, 1/8...)" };
+                    for (int k = 0; k < 4; ++k)
+                        m.addItem (names[k], true, slot().randomMode.load() == k, [this, k] { slot().randomMode = k; engine.markModified(); updateButtons(); });
+                    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&modeButton));
+                };
+                fireButton.setButtonText ("NEW");
+                fireButton.setTooltip ("Pick a new value now (EACH PRESS mode)");
+                fireButton.onClick = [this] { ++slot().pressCount; };
+                addAndMakeVisible (modeButton);
+                addAndMakeVisible (fireButton);
+                knobs.add (new Knob ("RATE", [this] { return rateNorm(); }, [this, mark] (double v) { setRateNorm (v); mark(); },
+                                     [this] { return rateText(); }));
+                knobs.add (new Knob ("SMOOTH", [this] { return normFromMs (slot().glideMs.load()); },
+                                     [this, mark] (double v) { slot().glideMs = (float) msFromNorm (v); mark(); },
+                                     [this] { return msText (slot().glideMs.load()); }));
+                knobs.add (new Knob ("PICK", [this] { return (slot().pickThresholdDb.load() + 70.0) / 60.0; },
+                                     [this, mark] (double v) { slot().pickThresholdDb = (float) (-70.0 + v * 60.0); mark(); },
+                                     [this] { return juce::String (juce::roundToInt (slot().pickThresholdDb.load())) + " dB"; }));
+                knobs.add (amount);
+                break;
+            }
+
+            case Modifiers::Type::ducker:
+                knobs.add (new Knob ("THRESH", [this] { return (slot().thresholdDb.load() + 70.0) / 60.0; },
+                                     [this, mark] (double v) { slot().thresholdDb = (float) (-70.0 + v * 60.0); mark(); },
+                                     [this] { return juce::String (juce::roundToInt (slot().thresholdDb.load())) + " dB"; }));
+                knobs.add (new Knob ("ATTACK", [this] { return normFromMs (slot().attackMs.load()); },
+                                     [this, mark] (double v) { slot().attackMs = (float) msFromNorm (v); mark(); },
+                                     [this] { return msText (slot().attackMs.load()); }));
+                knobs.add (new Knob ("HOLD", [this] { return normFromMs (slot().holdMs.load()); },
+                                     [this, mark] (double v) { slot().holdMs = (float) msFromNorm (v); mark(); },
+                                     [this] { return msText (slot().holdMs.load()); }));
+                knobs.add (new Knob ("RELEASE", [this] { return normFromMs (slot().releaseMs.load()); },
+                                     [this, mark] (double v) { slot().releaseMs = (float) msFromNorm (v); mark(); },
+                                     [this] { return msText (slot().releaseMs.load()); }));
+                knobs.add (amount);
+                break;
+
+            case Modifiers::Type::swell:
+            {
+                holdButton.setClickingTogglesState (true);
+                holdButton.setToggleState (s.holdMode.load(), juce::dontSendNotification);
+                holdButton.setTooltip ("HOLD: swells up while the switch is held, back down when you let go. Off: each press swells up / down");
+                holdButton.onClick = [this] { slot().holdMode = holdButton.getToggleState(); engine.markModified(); };
+                fireButton.setButtonText ("SWELL");
+                fireButton.setTooltip ("Swell now (to try it)");
+                fireButton.onClick = [this] { ++slot().pressCount; };
+                fireButton.onStateChange = [this] { slot().held = fireButton.isDown(); };
+                addAndMakeVisible (holdButton);
+                addAndMakeVisible (fireButton);
+                auto longKnob = [this, mark] (const char* name, std::atomic<float> Slot::* member)
+                {
+                    // 10 ms - 10 s
+                    return new Knob (name, [this, member] { return std::log (juce::jmax (10.0f, (slot().*member).load()) / 10.0) / std::log (1000.0); },
+                                     [this, member, mark] (double v) { (slot().*member) = (float) (10.0 * std::pow (1000.0, v)); mark(); },
+                                     [this, member] { return msText ((slot().*member).load()); });
+                };
+                knobs.add (longKnob ("UP", &Slot::aMs));
+                knobs.add (longKnob ("DOWN", &Slot::rMs));
+                knobs.add (amount);
+                break;
+            }
+
+            case Modifiers::Type::counter:
+            {
+                triggerButton.setTooltip ("What moves it on a step: each note you pick, a footswitch / NEXT, or MIDI notes");
+                triggerButton.onClick = [this]
+                {
+                    juce::PopupMenu m;
+                    const char* names[] = { "FOOTSWITCH / NEXT BUTTON", "PICKING (each note you play)", "MIDI NOTES" };
+                    for (int k = 0; k < 3; ++k)
+                        m.addItem (names[k], true, slot().trigger.load() == k, [this, k] { slot().trigger = k; engine.markModified(); updateButtons(); });
+                    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&triggerButton));
+                };
+                fireButton.setButtonText ("NEXT");
+                fireButton.setTooltip ("Next step now");
+                fireButton.onClick = [this] { ++slot().pressCount; };
+                addAndMakeVisible (triggerButton);
+                addAndMakeVisible (fireButton);
+                knobs.add (new Knob ("STEPS", [this] { return (slot().length.load() - 1) / 15.0; },
+                                     [this, mark] (double v) { slot().length = 1 + juce::roundToInt (v * 15.0); mark(); },
+                                     [this] { return juce::String (slot().length.load()); }));
+                knobs.add (new Knob ("GLIDE", [this] { return (double) slot().glide.load(); },
+                                     [this, mark] (double v) { slot().glide = (float) v; mark(); },
+                                     [this] { return juce::String (juce::roundToInt (slot().glide.load() * 100.0f)) + "%"; }));
+                knobs.add (new Knob ("PICK", [this] { return (slot().pickThresholdDb.load() + 70.0) / 60.0; },
+                                     [this, mark] (double v) { slot().pickThresholdDb = (float) (-70.0 + v * 60.0); mark(); },
+                                     [this] { return juce::String (juce::roundToInt (slot().pickThresholdDb.load())) + " dB"; }));
+                knobs.add (amount);
+                break;
+            }
+        }
+        // learn: another modifier can move this one's RATE and AMOUNT
+        for (auto* k : knobs)
+        {
+            if (k == amount) k->onTouch = [this] (double v) { learnOnto (Modifiers::modParamAmount, v); };
+            else if (k->getName() == "RATE") k->onTouch = [this] (double v) { learnOnto (Modifiers::modParamRate, v); };
         }
         for (auto* k : knobs)
         {
@@ -283,7 +415,11 @@ public:
     }
 
     Slot& slot() { return engine.modifier (index); }
-    int width() { return slot().type.load() == (int) Modifiers::Type::envelope ? 360 : 300; }
+    int width()
+    {
+        const auto t = (Modifiers::Type) slot().type.load();
+        return t == Modifiers::Type::envelope || t == Modifiers::Type::ducker ? 360 : t == Modifiers::Type::macro ? 240 : 300;
+    }
 
     void tick()
     {
@@ -364,11 +500,17 @@ public:
         scopeArea = scopeRow;
         auto sideRow = [&side] { auto b = side.removeFromTop (20); side.removeFromTop (4); return b; };
         const auto type = (Modifiers::Type) slot().type.load();
-        if (type == Modifiers::Type::lfo)          { shapeButton.setBounds (sideRow()); syncButton.setBounds (sideRow()); }
-        else if (type == Modifiers::Type::envelope) { triggerButton.setBounds (sideRow()); auto b = sideRow(); holdButton.setBounds (b.removeFromLeft (37)); fireButton.setBounds (b.withTrimmedLeft (4)); }
-        else                                        { invertButton.setBounds (sideRow()); }
-        if (type == Modifiers::Type::lfo || type == Modifiers::Type::envelope)
-            invertButton.setVisible (false);
+        bool showInvert = false;
+        switch (type)
+        {
+            case Modifiers::Type::lfo:      shapeButton.setBounds (sideRow()); syncButton.setBounds (sideRow()); break;
+            case Modifiers::Type::envelope: { triggerButton.setBounds (sideRow()); auto b = sideRow(); holdButton.setBounds (b.removeFromLeft (37)); fireButton.setBounds (b.withTrimmedLeft (4)); break; }
+            case Modifiers::Type::random:   modeButton.setBounds (sideRow()); fireButton.setBounds (sideRow()); break;
+            case Modifiers::Type::swell:    holdButton.setBounds (sideRow()); fireButton.setBounds (sideRow()); break;
+            case Modifiers::Type::counter:  triggerButton.setBounds (sideRow()); fireButton.setBounds (sideRow()); break;
+            default:                        invertButton.setBounds (sideRow()); showInvert = true; break;
+        }
+        invertButton.setVisible (showInvert);
         r.removeFromTop (4);
 
         auto knobRow = r.removeFromTop (62);
@@ -384,6 +526,8 @@ public:
             auto row = r.removeFromTop (20);
             removeAssign[k]->setBounds (row.removeFromRight (18));
             row.removeFromRight (2);
+            curveButtons[k]->setBounds (row.removeFromRight (34));
+            row.removeFromRight (2);
             rangeBars[k]->setBounds (row.removeFromRight (juce::jmax (80, row.getWidth() / 2)));
             nameAreas.add (row);
         }
@@ -393,11 +537,16 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        if (slot().type.load() == (int) Modifiers::Type::sequencer && scopeArea.contains (e.getPosition())) drawStep (e);
+        if (hasSteps() && scopeArea.contains (e.getPosition())) drawStep (e);
     }
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        if (slot().type.load() == (int) Modifiers::Type::sequencer && scopeArea.expanded (0, 20).contains (e.getPosition())) drawStep (e);
+        if (hasSteps() && scopeArea.expanded (0, 20).contains (e.getPosition())) drawStep (e);
+    }
+    bool hasSteps()
+    {
+        const auto t = slot().type.load();
+        return t == (int) Modifiers::Type::sequencer || t == (int) Modifiers::Type::counter;
     }
 
 private:
@@ -406,33 +555,50 @@ private:
     juce::Colour colour;
     juce::TextButton onButton { "ON" }, learnButton { "LEARN" }, removeButton { "X" },
                      leftButton { "<" }, rightButton { ">" }, invertButton { "INVERT" },
-                     shapeButton { "SINE" }, syncButton { "SYNC" }, triggerButton { "PICKING" }, holdButton { "HOLD" }, fireButton { "FIRE" };
+                     shapeButton { "SINE" }, syncButton { "SYNC" }, triggerButton { "PICKING" }, holdButton { "HOLD" }, fireButton { "FIRE" },
+                     modeButton { "DRIFT" };
     juce::OwnedArray<Knob> knobs;
     juce::OwnedArray<RangeBar> rangeBars;
-    juce::OwnedArray<juce::TextButton> removeAssign;
+    juce::OwnedArray<juce::TextButton> removeAssign, curveButtons;
     juce::Rectangle<int> titleArea, scopeArea, assignArea, assignOverflow;
     juce::Array<juce::Rectangle<int>> nameAreas;
     std::array<float, 120> history {};
     int historyPos = 0, flash = 0;
+
+    static juce::String curveShort (int c)
+    {
+        const char* names[] = { "LIN", "SLOW", "FAST", "S", "4ST", "8ST" };
+        return names[juce::jlimit (0, Modifiers::numCurves - 1, c)];
+    }
 
     void updateButtons()
     {
         shapeButton.setButtonText (Modifiers::shapeName ((Modifiers::Shape) slot().shape.load()));
         const char* trig[] = { "SWITCH", "PICKING", "MIDI NOTES" };
         triggerButton.setButtonText (trig[juce::jlimit (0, 2, slot().trigger.load())]);
+        const char* modes[] = { "DRIFT", "EACH NOTE", "EACH PRESS", "ON BEAT" };
+        modeButton.setButtonText (modes[juce::jlimit (0, 3, slot().randomMode.load())]);
+    }
+
+    void learnOnto (int modParam, double value)
+    {
+        // another modifier is learning: this knob is what it will move
+        const int learning = engine.getModifierLearn();
+        if (learning >= 0 && learning != index)
+            engine.modifierKnobTouched (index, modParam, (float) value);
     }
 
     double rateNorm()
     {
         auto& s = slot();
-        if (s.sync || s.type.load() == (int) Modifiers::Type::sequencer)
+        if (Modifiers::usesDivision (s))
             return s.division.load() / (double) juce::jmax (1, (int) Modifiers::divisions().size() - 1);
         return Modifiers::normFromRate (s.rateHz.load());
     }
     void setRateNorm (double v) { ControlSurfaceRate (slot(), (float) v); }
     static void ControlSurfaceRate (Slot& s, float v)
     {
-        if (s.sync || s.type.load() == (int) Modifiers::Type::sequencer)
+        if (Modifiers::usesDivision (s))
             s.division = juce::roundToInt (v * (float) ((int) Modifiers::divisions().size() - 1));
         else
             s.rateHz = (float) Modifiers::rateFromNorm (v);
@@ -440,7 +606,7 @@ private:
     juce::String rateText()
     {
         auto& s = slot();
-        if (s.sync || s.type.load() == (int) Modifiers::Type::sequencer)
+        if (Modifiers::usesDivision (s))
             return Modifiers::divisions()[(size_t) juce::jlimit (0, (int) Modifiers::divisions().size() - 1, s.division.load())].label;
         const float hz = s.rateHz.load();
         return juce::String (hz, hz < 1.0f ? 2 : 1) + " Hz";
@@ -450,6 +616,7 @@ private:
     {
         rangeBars.clear();
         removeAssign.clear();
+        curveButtons.clear();
         const auto& list = engine.modifierInfo (index).assignments;
         const int shown = juce::jmin ((int) list.size(), 3);
         for (int k = 0; k < shown; ++k)
@@ -463,6 +630,24 @@ private:
             x->setTooltip ("Stop moving this knob");
             x->onClick = [this, k] { auto& eng = engine; const int i = index; juce::MessageManager::callAsync ([&eng, i, k] { eng.removeModAssignment (i, k); }); };
             addAndMakeVisible (x);
+
+            auto assignment = list[(size_t) k];
+            auto* cb = curveButtons.add (new juce::TextButton (curveShort (assignment->curve.load())));
+            styleButton (*cb);
+            cb->setTooltip ("How it sweeps: straight, slow start, fast start, S-curve, or in steps");
+            cb->onClick = [this, cb, assignment]
+            {
+                juce::PopupMenu m;
+                for (int c = 0; c < Modifiers::numCurves; ++c)
+                    m.addItem (Modifiers::curveName ((Modifiers::Curve) c), true, assignment->curve.load() == c, [this, cb, assignment, c]
+                    {
+                        assignment->curve = c;
+                        cb->setButtonText (curveShort (c));
+                        engine.markModified();
+                    });
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (cb));
+            };
+            addAndMakeVisible (cb);
         }
     }
 
@@ -473,7 +658,7 @@ private:
         g.fillRoundedRectangle (r, 3.0f);
         auto& s = slot();
 
-        if (s.type.load() == (int) Modifiers::Type::sequencer)
+        if (s.type.load() == (int) Modifiers::Type::sequencer || s.type.load() == (int) Modifiers::Type::counter)
         {
             const int count = juce::jlimit (1, Modifiers::maxSteps, s.length.load());
             const float w = r.getWidth() / (float) Modifiers::maxSteps;
@@ -508,11 +693,19 @@ private:
             g.setColour (colour.withAlpha (0.12f * (float) flash));
             g.fillRoundedRectangle (r, 3.0f);
         }
-        if (s.type.load() == (int) Modifiers::Type::follower)
+        const char* caption = nullptr;
+        switch ((Modifiers::Type) s.type.load())
+        {
+            case Modifiers::Type::follower: caption = "HOW HARD YOU PLAY"; break;
+            case Modifiers::Type::pitch:    caption = "THE NOTE YOU PLAY"; break;
+            case Modifiers::Type::ducker:   caption = "DUCKED WHILE YOU PLAY"; break;
+            default: break;
+        }
+        if (caption != nullptr)
         {
             g.setColour (Pequod::Colours::textDim);
             g.setFont (Pequod::heading (9.5f, false));
-            g.drawText ("YOUR PLAYING", r.reduced (5.0f, 2.0f), juce::Justification::topLeft);
+            g.drawText (caption, r.reduced (5.0f, 2.0f), juce::Justification::topLeft);
         }
     }
 
@@ -537,17 +730,43 @@ juce::Colour ModifierRow::colourFor (int type)
         case Modifiers::Type::follower:  return juce::Colour (0xffe3a391);   // dusty rose
         case Modifiers::Type::envelope:  return juce::Colour (0xffb4c5a8);   // sage
         case Modifiers::Type::sequencer: return juce::Colour (0xffc29a64);   // caramel
+        case Modifiers::Type::macro:     return juce::Colour (0xffede6d6);   // cream
+        case Modifiers::Type::pitch:     return juce::Colour (0xff9fc2c9);   // dusty teal
+        case Modifiers::Type::random:    return juce::Colour (0xffd28f5c);   // burnt orange
+        case Modifiers::Type::ducker:    return juce::Colour (0xffb0a2c8);   // lilac
+        case Modifiers::Type::swell:     return juce::Colour (0xffd8c27a);   // pale gold
+        case Modifiers::Type::counter:   return juce::Colour (0xffa8b87e);   // olive
     }
     return Pequod::Colours::mustard;
 }
 
 ModifierRow::ModifierRow (HostEngine& e) : engine (e)
 {
-    for (auto* b : { &showButton, &addLfo, &addFollower, &addEnvelope, &addSteps })
+    for (auto* b : { &showButton, &addLfo, &addFollower, &addEnvelope, &addSteps, &addMore })
     {
         styleButton (*b);
         addAndMakeVisible (b);
     }
+    addMore.setTooltip ("More modifiers: macro knob, pitch follower, randomiser, ducker, swell, note stepper");
+    addMore.onClick = [this]
+    {
+        juce::PopupMenu m;
+        struct Entry { Modifiers::Type t; const char* text; };
+        const Entry entries[] = {
+            { Modifiers::Type::macro,   "MACRO KNOB - one knob (or pedal) moves several knobs, each its own way" },
+            { Modifiers::Type::pitch,   "PITCH FOLLOWER - follows the note you play (low to high)" },
+            { Modifiers::Type::random,  "RANDOMISER - drifts, or a new value each note / press / beat" },
+            { Modifiers::Type::ducker,  "DUCKER - moves while you play, back when you stop (delay / reverb that blooms)" },
+            { Modifiers::Type::swell,   "SWELL - ramps up / down over a set time when you press a switch" },
+            { Modifiers::Type::counter, "NOTE STEPPER - a step pattern that moves on with each note you pick" },
+        };
+        for (auto& entry : entries)
+        {
+            const auto t = entry.t;
+            m.addItem (entry.text, [this, t] { add (t); });
+        }
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addMore));
+    };
     addLfo.setTooltip ("Add an LFO: moves knobs up and down in time with the tempo (or at its own rate)");
     addFollower.setTooltip ("Add an envelope follower: moves knobs with how hard you play (auto-wah, dynamic drive...)");
     addEnvelope.setTooltip ("Add a triggered envelope: a sweep fired by each note you pick, a footswitch or MIDI");
@@ -597,6 +816,7 @@ void ModifierRow::rebuild()
 void ModifierRow::timerCallback()
 {
     if (builtCount != engine.getNumModifiers()) { rebuild(); return; }
+    if (engine.getModifierLearn() != shownLearn) { shownLearn = engine.getModifierLearn(); repaint (0, 0, getWidth(), barHeight); }
     if (expanded)
         for (auto* m : modules) m->tick();
 }
@@ -613,9 +833,9 @@ void ModifierRow::paint (juce::Graphics& g)
     g.setColour (Pequod::Colours::textDim);
     g.setFont (Pequod::body (12.0f));
     const int n = engine.getNumModifiers();
-    juce::String hint = n == 0 ? "LFOs, envelopes and step sequencers that move effect knobs. Add one:"
+    juce::String hint = n == 0 ? "LFOs, envelopes, followers and sequencers that move effect knobs. Add one:"
                                : juce::String (n) + (n == 1 ? " in this preset" : " in this preset");
-    if (engine.getModifierLearn() >= 0) { hint = "LEARN: move a knob on any effect (click LEARN again to stop)"; g.setColour (Pequod::Colours::mustard); }
+    if (engine.getModifierLearn() >= 0) { hint = "LEARN: move a knob on any effect, or another modifier's RATE / AMOUNT / KNOB"; g.setColour (Pequod::Colours::mustard); }
     g.drawText (hint, bar.withTrimmedLeft (104).withRight (addLfo.getX() - 8), juce::Justification::centredRight, true);
     g.setColour (Pequod::Colours::line);
     g.fillRect (getLocalBounds().removeFromBottom (1));
@@ -634,9 +854,9 @@ void ModifierRow::resized()
     auto bar = r.removeFromTop (barHeight).reduced (8, 4);
     showButton.setBounds (bar.removeFromRight (56));
     bar.removeFromRight (16);
-    for (auto* b : { &addSteps, &addEnvelope, &addFollower, &addLfo })
+    for (auto* b : { &addMore, &addSteps, &addEnvelope, &addFollower, &addLfo })
     {
-        b->setBounds (bar.removeFromRight (b == &addLfo ? 60 : 92));
+        b->setBounds (bar.removeFromRight (b == &addLfo ? 60 : b == &addMore ? 70 : 92));
         bar.removeFromRight (4);
     }
 

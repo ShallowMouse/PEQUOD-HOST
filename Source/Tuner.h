@@ -121,7 +121,7 @@ private:
         if (f <= 0.0f)
         {
             // Hold the last note briefly so the display doesn't flicker as a string decays.
-            if (++silentFrames > 6) reading.valid = false;
+            if (++silentFrames > 6) { reading.valid = false; engine.getRack().detectedPitchHz = 0.0f; }
             return;
         }
         silentFrames = 0;
@@ -143,6 +143,7 @@ private:
         reading.cents = reading.valid && reading.midiNote == note ? reading.cents * 0.6f + cents * 0.4f : cents;
         reading.valid = true;
         reading.frequency = f;
+        engine.getRack().detectedPitchHz = f;     // pitch followers
         reading.midiNote = note;
         reading.noteName = juce::MidiMessage::getMidiNoteName (note, true, false, 4);
         reading.octave = note / 12 - 1;

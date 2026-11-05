@@ -34,6 +34,19 @@ A standalone VST3 host for Windows with a Guitar Rig-style layout, MIDI and OSC 
 - **Output safety**: a limiter just under 0 dB on the output protects ears and speakers from a runaway plugin (right-click **OUT** to turn it off). The light on top of the OUT meter turns red if the output hit 0 dB (click it to clear), and mustard while the limiter is working.
 - **Level per preset**: the **OUT** level is saved with each preset. To even out presets, right-click **OUT** > *Use this preset's level as the target* and play for 6 seconds; then on each other preset, right-click **OUT** > *Match this preset to the target* and play the same way. OUT is set for you; save the preset to keep it.
 - **Instruments (VSTi)**: add a synth, piano etc. from the browser like any plugin (they're marked INSTRUMENT) and play it from any MIDI keyboard (enable it under **AUDIO**), or click **KEYS** at the bottom for an on-screen keyboard (also playable from the computer keyboard: A W S E D F T G Y H U J K). The **INPUT: GUITAR / INSTRUMENT** button at the bottom switches between them: on INSTRUMENT the guitar is muted so only the instrument is heard (the tuner still listens) and the IN label shows **IN OFF**. It's saved with each preset, and can go on a footswitch (right-click it to learn, or pick *Input: guitar / instrument* in the controller window; OSC `/pequod/instrument`). Effects after the instrument in the rack process it.
+- **Modifiers** (the strip above the rack, saved with each preset): things that move effect knobs for you. Add one with the buttons on the strip (**+ MORE** for the rest), click its **LEARN**, then move any knob on any effect: the modifier now moves that knob between **FROM** (hollow handle, where the knob was) and **TO** (solid handle). Drag the handles to set the sweep, double-click to swap them, and pick a curve (**LIN** straight, **SLOW** / **FAST** start, **S**-curve, **4ST** / **8ST** steps). One modifier can move several knobs, each its own way. **ON** turns it off (the knobs go back to FROM); **AMOUNT** scales every sweep; **INVERT** turns it upside down; **<** **>** reorder, **X** removes. Up to 16 per preset.
+  - **LFO**: sine, triangle, square, ramps, random steps / smooth random. **SYNC** locks it to the tempo (4 bars ... 1/32, dotted and triplets) or a free rate (0.05-20 Hz). **PHASE** offsets it.
+  - **Envelope follower**: follows how hard you play (auto-wah, dynamic drive, swells). **SENS**, **ATTACK**, **RELEASE**.
+  - **Triggered envelope**: an attack-decay-sustain-release sweep fired by each note you pick (**PICK** sets how hard), a footswitch / **FIRE**, or MIDI notes. **HOLD** keeps it at sustain while the switch / note is held.
+  - **Step sequencer**: up to 16 steps in time with the tempo; draw the steps with the mouse. **STEPS**, **RATE**, **GLIDE**.
+  - **Macro knob**: one **KNOB** (or an expression pedal on it) that moves several knobs at once, each over its own range.
+  - **Pitch follower**: follows the note you play, from **LOW** to **HIGH** (it uses the tuner). **SMOOTH** glides between notes.
+  - **Randomiser**: drifts at **RATE**, or jumps to a new value each note you pick, each switch press / **NEW**, or on the beat. **SMOOTH** glides to it.
+  - **Ducker**: moves while you play (above **THRESH**) and back after **HOLD** + **RELEASE** when you stop: delay or reverb that ducks under your playing and blooms in the gaps (turn the mix down for TO).
+  - **Swell**: ramps over **UP** / **DOWN** when you press a switch / **SWELL** (each press flips it; with **HOLD**, up while held).
+  - **Note stepper**: a step pattern that moves on one step for each note you pick (or each switch press / MIDI note).
+  - **Modifiers moving modifiers**: click LEARN on one, then turn another one's **RATE**, **AMOUNT** or macro **KNOB** (e.g. play harder and an LFO speeds up).
+  - **Foot controller / MIDI / OSC**: in the controller window, switches can turn a modifier on/off or fire / swell / step it; the pedal and encoder can set a modifier's rate, amount or macro knob. OSC: `/pequod/mod/{n}/on`, `/pequod/mod/{n}/trigger`, `/pequod/mod/{n}/rate f`, `/pequod/mod/{n}/amount f` (n = its place in the strip, from 1).
 - **Network output to Hawthorne**: **AUDIO > NETWORK** sends PEQUOD's output to Hawthorne on another PC over the network (Hawthorne Link: uncompressed 24-bit, the same protocol as the Hawthorne Link sender app). Tick *Send PEQUOD's output to Hawthorne*, then in Hawthorne open NETWORK and pick PEQUOD by its name. Channels 1-2 are what you hear (after OUT, the limiter and MUTE); tick *Also send the dry guitar* for channels 3-4, the guitar as it comes in, to re-amp later. Run both PCs at the same sample rate; with word clock between the interfaces the transfer is bit-perfect, otherwise Hawthorne corrects the drift. The setting is remembered.
 
 ## MIDI
@@ -62,6 +75,9 @@ Receives on port **9000**, sends feedback to **127.0.0.1:9001** by default (chan
 | `/pequod/bank/load` | int (1-based) or string name | Switch bank and load a preset |
 | `/pequod/bank/select` | int (1-based) | Switch bank without loading |
 | `/pequod/mute` | 0/1 (no arg = toggle) | Output mute |
+| `/pequod/mod/{n}/on` | 0/1 (no arg = toggle) | Modifier *n* (its place in the strip) on/off |
+| `/pequod/mod/{n}/trigger` | 1 = press, 0 = release | Fire an envelope, swell, step or randomise |
+| `/pequod/mod/{n}/rate`, `/pequod/mod/{n}/amount` | float 0–1 | Rate (slow to fast; a macro's KNOB), amount |
 | `/pequod/sync` | — | Send the full state back (all names and values) |
 
 Any other address can be mapped with **LEARN**: touch a plugin control, then send the OSC message.

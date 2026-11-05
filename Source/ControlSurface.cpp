@@ -166,7 +166,8 @@ void ControlSurface::timerCallback()
     }
 
     // Modifier learn: the first knob touched goes to the armed modifier.
-    if (engine.getModifierLearn() >= 0 && ! latest.empty())
+    if (engine.getModifierLearn() >= 0 && ! latest.empty()
+         && juce::Time::getMillisecondCounterHiRes() - engine.getModifierLearnArmedAt() > 300.0)
     {
         const auto& ev = latest.begin()->second;
         engine.modifierParamTouched (ev.slotUid, ev.index, ev.value);
@@ -933,7 +934,9 @@ bool ControlSurface::handleControllerEvent (const juce::String& unit, int contro
                     auto& mod = engine.modifier (i);
                     if (m.target == Mapping::Target::modAmount)
                         mod.amount = juce::jlimit (0.0f, 1.0f, mod.amount.load() + 0.02f * (float) delta);
-                    else if (mod.sync || mod.type.load() == (int) Modifiers::Type::sequencer)
+                    else if (mod.type.load() == (int) Modifiers::Type::macro)
+                        mod.macroValue = juce::jlimit (0.0f, 1.0f, mod.macroValue.load() + 0.02f * (float) delta);
+                    else if (Modifiers::usesDivision (mod))
                         mod.division = juce::jlimit (0, (int) Modifiers::divisions().size() - 1, mod.division.load() + delta);
                     else
                         mod.rateHz = (float) Modifiers::rateFromNorm (Modifiers::normFromRate (mod.rateHz.load()) + 0.01 * delta);
@@ -1046,7 +1049,9 @@ juce::String ControlSurface::describeTarget (const Mapping& m) const
             const int i = m.paramIndex - 1;
             const auto name = juce::isPositiveAndBelow (i, engine.getNumModifiers()) ? engine.modifierName (i) : "Modifier " + juce::String (m.paramIndex);
             return name + (m.target == Mapping::Target::modOn ? " ON/OFF" : m.target == Mapping::Target::modTrigger ? " TRIGGER"
-                         : m.target == Mapping::Target::modRate ? " RATE" : " AMOUNT");
+                         : m.target == Mapping::Target::modRate
+                               ? (juce::isPositiveAndBelow (i, engine.getNumModifiers()) && engine.modifier (i).type.load() == (int) Modifiers::Type::macro ? " KNOB" : " RATE")
+                               : " AMOUNT");
         }
     }
     return {};
@@ -1265,7 +1270,8 @@ void ControlSurface::setModifierRate (Modifiers::Slot& mod, float value)
 {
     // 0 = slowest, 1 = fastest: a tempo division when synced (and for step sequencers), else 0.05 - 20 Hz.
     value = juce::jlimit (0.0f, 1.0f, value);
-    if (mod.sync || mod.type.load() == (int) Modifiers::Type::sequencer)
+    if (mod.type.load() == (int) Modifiers::Type::macro) { mod.macroValue = value; return; }   // a pedal on the macro knob
+    if (Modifiers::usesDivision (mod))
         mod.division = juce::roundToInt (value * (float) ((int) Modifiers::divisions().size() - 1));
     else
         mod.rateHz = (float) Modifiers::rateFromNorm (value);

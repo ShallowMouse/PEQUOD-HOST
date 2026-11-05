@@ -1319,8 +1319,10 @@ private:
                 const int n = k + 1;
                 const auto name = engine.modifierName (k);
                 menu.addItem (name + " on/off", [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::modOn, n, rep.get()); done(); });
-                if (engine.modifier (k).type.load() == (int) Modifiers::Type::envelope)
-                    menu.addItem ("Fire " + name + "  (hold it in HOLD mode)", [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::modTrigger, n, rep.get()); done(); });
+                const auto t = (Modifiers::Type) engine.modifier (k).type.load();
+                if (t == Modifiers::Type::envelope || t == Modifiers::Type::swell || t == Modifiers::Type::counter || t == Modifiers::Type::random)
+                    menu.addItem ((t == Modifiers::Type::swell ? "Swell " : t == Modifiers::Type::counter ? "Next step of " : t == Modifiers::Type::random ? "New value for " : "Fire ")
+                                  + name + (t == Modifiers::Type::swell || t == Modifiers::Type::envelope ? "  (hold it in HOLD mode)" : ""), [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::modTrigger, n, rep.get()); done(); });
             }
         }
         else
@@ -1349,7 +1351,9 @@ private:
                 const auto name = engine.modifierName (k);
                 if (k == 0) menu.addSectionHeader ("MODIFIERS (THIS PRESET'S)");
                 const auto type = engine.modifier (k).type.load();
-                if (type == (int) Modifiers::Type::lfo || type == (int) Modifiers::Type::sequencer)
+                if (type == (int) Modifiers::Type::macro)
+                    menu.addItem (name + " knob  (like an expression pedal)", [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::modRate, n, rep.get()); done(); });
+                if (type == (int) Modifiers::Type::lfo || type == (int) Modifiers::Type::sequencer || type == (int) Modifiers::Type::random)
                     menu.addItem (name + " rate", [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::modRate, n, rep.get()); done(); });
                 menu.addItem (name + " amount", [&m, rep, u, c, lay, n, done] { m.assign (u, c, lay, Mapping::Target::modAmount, n, rep.get()); done(); });
             }

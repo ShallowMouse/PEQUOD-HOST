@@ -35,11 +35,12 @@ private:
     bool expanded = true;
 
     juce::TextButton showButton { "HIDE" };
-    juce::TextButton addLfo { "+ LFO" }, addFollower { "+ FOLLOWER" }, addEnvelope { "+ ENVELOPE" }, addSteps { "+ STEPS" };
+    juce::TextButton addLfo { "+ LFO" }, addFollower { "+ FOLLOWER" }, addEnvelope { "+ ENVELOPE" }, addSteps { "+ STEPS" },
+                     addMore { "+ MORE" };
     juce::Viewport viewport;
     juce::Component strip;
     juce::OwnedArray<Module> modules;
-    int builtCount = -1;
+    int builtCount = -1, shownLearn = -1;
 
     void add (Modifiers::Type);
     void timerCallback() override;

@@ -158,6 +158,7 @@ void RackProcessor::runModifiers (RenderPlan& p, const juce::AudioBuffer<float>&
         else if (msg.isAllNotesOff() || msg.isAllSoundOff()) notesHeld = 0;
     }
     b.notesHeld = notesHeld > 0;
+    b.pitchHz = detectedPitchHz.load (std::memory_order_relaxed);
 
     for (auto* m : p.modifiers)
         Modifiers::process (*m, b);
@@ -168,9 +169,23 @@ void RackProcessor::runModifiers (RenderPlan& p, const juce::AudioBuffer<float>&
         const bool on = t.mod->on.load (std::memory_order_relaxed);
         const float from = t.assignment->from.load (std::memory_order_relaxed);
         const float to = t.assignment->to.load (std::memory_order_relaxed);
+
+        if (t.targetMod != nullptr)
+        {
+            // another modifier: its rate / amount / macro follow this one (off: its own setting again)
+            auto& dest = t.modParam == Modifiers::modParamRate ? t.targetMod->rateMod
+                       : t.modParam == Modifiers::modParamAmount ? t.targetMod->amountMod : t.targetMod->macroMod;
+            dest.store (on ? juce::jlimit (0.0f, 1.0f, from + (to - from)
+                                           * Modifiers::applyCurve (t.assignment->curve.load (std::memory_order_relaxed), t.mod->lastOut)
+                                           * t.mod->effectiveAmount())
+                           : -1.0f, std::memory_order_relaxed);
+            continue;
+        }
+
         float v;
         if (on)
-            v = from + (to - from) * t.mod->lastOut * t.mod->amount.load (std::memory_order_relaxed);
+            v = from + (to - from) * Modifiers::applyCurve (t.assignment->curve.load (std::memory_order_relaxed), t.mod->lastOut)
+                                   * t.mod->effectiveAmount();
         else if (t.active || t.last < 0.0f)
             v = from;
         else
