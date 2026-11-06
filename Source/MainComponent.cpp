@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "Melville.h"
 #include "PequodNative.h"
 #include "SettingsPanel.h"
 #include "PluginManagerPanel.h"
@@ -327,7 +328,7 @@ void MainComponent::saveSettings()
 {
     auto* s = appProperties->getUserSettings();
 
-    if (auto dev = engine.deviceManager.createStateXml())
+    if (auto dev = melville::isHosted() ? nullptr : engine.deviceManager.createStateXml())
         s->setValue ("audioDevice", dev.get());
     if (auto plugins = engine.knownPlugins.createXml())
         s->setValue ("knownPlugins", plugins.get());

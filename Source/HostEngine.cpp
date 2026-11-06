@@ -1,4 +1,5 @@
 #include "HostEngine.h"
+#include "Melville.h"
 #include "CrashGuard.h"
 #include "PequodNative.h"
 #include "Modifiers.h"
@@ -66,7 +67,9 @@ HostEngine::~HostEngine()
 
 void HostEngine::initialiseAudio (const juce::XmlElement* savedDeviceState)
 {
-    auto err = deviceManager.initialise (2, 2, savedDeviceState, true);
+    // inside MELVILLE: MELVILLE's PEQUOD HOST device
+    auto err = melville::attach (deviceManager, "pequod") ? juce::String()
+                                                          : deviceManager.initialise (2, 2, savedDeviceState, true);
     if (err.isNotEmpty())
         DBG ("Audio init: " << err);
 

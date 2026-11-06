@@ -1,4 +1,5 @@
 #include "Updater.h"
+#include "Melville.h"
 
 namespace
 {
@@ -38,6 +39,7 @@ int Updater::compareVersions (const juce::String& a, const juce::String& b)
 
 void Updater::checkSoon()
 {
+    if (melville::isHosted()) return;     // inside MELVILLE, MELVILLE updates everything
     if (isThreadRunning()) return;
     job = Job::check;
     startThread();
