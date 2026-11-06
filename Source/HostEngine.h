@@ -327,7 +327,9 @@ public:
     struct Scene
     {
         juce::String name;
-        struct SlotState { bool bypass = false; std::vector<float> params; };
+        // params: switched at once. state: the plugin's whole saved state (IR files, models, anything
+        // in its own window that isn't a knob), restored a moment later if that part differs.
+        struct SlotState { bool bypass = false; std::vector<float> params; juce::MemoryBlock state; };
         std::map<juce::String, SlotState> slots;      // by the plugin's stable id
         std::map<juce::String, float> splitMix;        // by the split's stable id
         std::map<juce::String, bool> modifiersOn;      // by the modifier's id
@@ -393,6 +395,9 @@ private:
     int currentScene = -1;
     Scene captureScene (const juce::String& name) const;
     void applyScene (const Scene&);
+    void finishScene (int sceneIndex);              // the full-state part of a scene switch
+    int sceneSerial = 0;
+    std::shared_ptr<int> lifeToken = std::make_shared<int> (0);
     std::unique_ptr<juce::XmlElement> scenesToXml() const;
     void scenesFromXml (const juce::XmlElement&);
     std::atomic<int> modLearn { -1 };

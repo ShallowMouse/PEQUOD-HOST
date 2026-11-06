@@ -1392,8 +1392,12 @@ HostEngine::Scene HostEngine::captureScene (const juce::String& name) const
         Scene::SlotState st;
         st.bypass = sl->bypassed.load();
         if (auto* inst = sl->instance())
+        {
             for (auto* p : inst->getParameters())
                 st.params.push_back (p->getValue());
+            CrashGuard::Scope guard (sl->nameUtf8.c_str(), "saving its settings");
+            inst->getStateInformation (st.state);
+        }
         sc.slots[sl->stableId] = std::move (st);
     }
     for (auto& item : items)
@@ -1442,6 +1446,50 @@ void HostEngine::applyScene (const Scene& sc)
     }
     inputStage->presetDb = sc.presetIn;
     outputStage->presetDb = sc.presetOut;
+
+    // A moment later (once the plugins have taken the new knob values), check the rest of each
+    // plugin's state and restore it where it differs.
+    const int serial = ++sceneSerial;
+    const int index = currentScene;
+    std::weak_ptr<int> alive = lifeToken;
+    juce::Timer::callAfterDelay (60, [this, alive, serial, index]
+    {
+        if (alive.expired() || serial != sceneSerial) return;    // gone, or switched again since
+        finishScene (index);
+    });
+}
+
+void HostEngine::finishScene (int index)
+{
+    if (! juce::isPositiveAndBelow (index, (int) scenes.size()) || index != currentScene) return;
+    const auto& sc = scenes[(size_t) index];
+
+    std::vector<std::pair<std::shared_ptr<PluginSlot>, const juce::MemoryBlock*>> restore;
+    for (auto& sl : getFlatSlots())
+    {
+        auto it = sc.slots.find (sl->stableId);
+        if (it == sc.slots.end() || it->second.state.isEmpty() || sl->instance() == nullptr) continue;
+        juce::MemoryBlock now;
+        {
+            CrashGuard::Scope guard (sl->nameUtf8.c_str(), "saving its settings");
+            sl->instance()->getStateInformation (now);
+        }
+        if (now != it->second.state)
+            restore.emplace_back (sl, &it->second.state);
+    }
+    DBG ("PEQUOD: scene " << index << ": " << (int) restore.size() << " plugin(s) need their full state");
+    if (restore.empty()) return;
+
+    // Something that isn't a knob differs (an IR, a model...): restore those plugins under a short fade.
+    rack->fadeOut();
+    rack->waitForSilence (40);
+    for (auto& [sl, state] : restore)
+    {
+        CrashGuard::Scope guard (sl->nameUtf8.c_str(), "loading its settings");
+        sl->instance()->setStateInformation (state->getData(), (int) state->getSize());
+    }
+    rack->fadeIn();
+    changed();
 }
 
 int HostEngine::addScene()
@@ -1537,6 +1585,8 @@ std::unique_ptr<juce::XmlElement> HostEngine::scenesToXml() const
             e->setAttribute ("bypass", st.bypass);
             juce::MemoryBlock mb (st.params.data(), st.params.size() * sizeof (float));
             e->setAttribute ("params", mb.toBase64Encoding());
+            if (! st.state.isEmpty())
+                e->setAttribute ("state", st.state.toBase64Encoding());
         }
         for (auto& [id, mix] : sc.splitMix)
         {
@@ -1573,6 +1623,8 @@ void HostEngine::scenesFromXml (const juce::XmlElement& x)
                 st.params.resize (mb.getSize() / sizeof (float));
                 std::memcpy (st.params.data(), mb.getData(), st.params.size() * sizeof (float));
             }
+            if (e->hasAttribute ("state"))
+                st.state.fromBase64Encoding (e->getStringAttribute ("state"));
             sc.slots[e->getStringAttribute ("id")] = std::move (st);
         }
         for (auto* e : xs->getChildWithTagNameIterator ("SPLIT"))
