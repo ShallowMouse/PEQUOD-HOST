@@ -128,6 +128,10 @@ void BrowserPanel::refresh()
                 continue;
             }
 
+           #if defined (IRVING_LOOK) && IRVING_LOOK
+            if (t.isInstrument) continue;              // (IRVING is for guitar: no instruments)
+           #endif
+
             const auto function = PluginTags::functionOf (t);
             const auto collection = PluginTags::collectionOf (t);
             if (filter.isNotEmpty() && ! (t.name.containsIgnoreCase (filter) || t.manufacturerName.containsIgnoreCase (filter)

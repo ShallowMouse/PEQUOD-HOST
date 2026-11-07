@@ -94,7 +94,7 @@ void TempoDisplay::paint (juce::Graphics& g)
     auto top = inner.removeFromTop (12.0f);
     g.setFont (Pequod::heading (10.0f, false));
     g.setColour (Pequod::Colours::textDim);
-    g.drawText (transport.clickOn.load() ? "TEMPO  -  CLICK ON" : "TEMPO", top, juce::Justification::centredLeft);
+    g.drawText (melville::isHosted() ? "TEMPO  -  MELVILLE" : transport.clickOn.load() ? "TEMPO  -  CLICK ON" : "TEMPO", top, juce::Justification::centredLeft);
 
     // beat dots
     const int beats = juce::jlimit (1, 8, transport.beatsPerBar.load());
@@ -133,6 +133,7 @@ void TempoDisplay::timerCallback()
 
 void TempoDisplay::mouseDown (const juce::MouseEvent& e)
 {
+    if (melville::isHosted()) { dragged = true; return; }   // inside MELVILLE: set the tempo on MELVILLE's bar
     dragStartBpm = transport.bpm.load();
     dragged = false;
     if (e.mods.isPopupMenu()) { showMenu(); dragged = true; }
@@ -140,6 +141,7 @@ void TempoDisplay::mouseDown (const juce::MouseEvent& e)
 
 void TempoDisplay::mouseDrag (const juce::MouseEvent& e)
 {
+    if (melville::isHosted()) return;
     if (std::abs (e.getDistanceFromDragStartY()) < 3 && ! dragged) return;
     dragged = true;
     const double perPixel = e.mods.isShiftDown() ? 0.1 : 0.5;
@@ -159,6 +161,7 @@ void TempoDisplay::mouseUp (const juce::MouseEvent& e)
 
 void TempoDisplay::mouseDoubleClick (const juce::MouseEvent&)
 {
+    if (melville::isHosted()) return;
     dragged = true;     // cancels the single-click menu
     typeTempo();
 }
@@ -214,6 +217,7 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
     tapButton.onClick = [this] { engine.transport.tap(); };
     tapButton.onLearn = [this] { control.armLearnFor (Mapping::Target::tapTempo); };
     addAndMakeVisible (tapButton);
+    if (melville::isHosted()) tapButton.setVisible (false);     // the tempo comes from MELVILLE
 
     muteButton.setTooltip ("Mute the output (e.g. while tuning). Right-click to learn a MIDI / OSC control.");
     muteButton.onClick = [this] { control.setMuted (! control.isMuted()); };
@@ -505,8 +509,9 @@ void HeaderBar::resized()
 
     // Widths per size: normal, compact; the wordmark goes last when even compact is too wide.
     struct Sizes { int cpu, controller, gap, tuner, tap, tempo, wordmark, update; };
-    const Sizes normal  { 104, 126, 10, 176, 50, 124, 132, 150 };
-    const Sizes compact {  78, 112,  6, 140, 44, 108, 132, 112 };
+    const int tapW = tapButton.isVisible() ? 1 : 0;
+    const Sizes normal  { 104, 126, 10, 176, 50 * tapW, 124, 132, 150 };
+    const Sizes compact {  78, 112,  6, 140, 44 * tapW, 108, 132, 112 };
 
     auto needed = [&] (const Sizes& z, bool wordmark)
     {
@@ -550,7 +555,7 @@ void HeaderBar::resized()
     learnButton.setBounds (row (r.removeFromRight (66)));
     r.removeFromRight (z.gap);
     tapButton.setBounds (row (r.removeFromRight (z.tap)));
-    r.removeFromRight (4);
+    if (tapButton.isVisible()) r.removeFromRight (4);
     tempoDisplay.setBounds (row (r.removeFromRight (z.tempo), 44));
     r.removeFromRight (12);
 

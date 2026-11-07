@@ -65,6 +65,21 @@ MainComponent::MainComponent()
     // Audio + MIDI
     auto deviceXml = settings->getXmlValue ("audioDevice");
     engine.initialiseAudio (deviceXml.get());
+   #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
+    // MELVILLE's session file keeps this IRVING's rack (each instance its own)
+    melville::addToSession (engine.deviceManager, {
+        [this] { auto x = createFullRackXml();
+                 x->setAttribute ("irvingPreset", currentPresetFile.getFullPathName());
+                 return x; },
+        [this] (const juce::XmlElement& x)
+        {
+            loadRack (x);
+            clearUndo();
+            currentPresetFile = juce::File (x.getStringAttribute ("irvingPreset"));
+            savedChangeCounter = engine.getChangeCounter();
+            control.sendRackSummary();
+        } });
+   #endif
 
     engine.setPipelineStages (settings->getIntValue ("pipelineStages", 1));
     engine.transport.clickOn = settings->getBoolValue ("clickOn", false);
@@ -72,7 +87,7 @@ MainComponent::MainComponent()
     engine.transport.beatsPerBar = juce::jlimit (2, 7, settings->getIntValue ("beatsPerBar", 4));
     engine.getOutputStage()->limiterOn = settings->getBoolValue ("limiter", true);
     engine.networkOut.setName (settings->getValue ("networkName", "PEQUOD Host - " + juce::SystemStats::getComputerName()));
-    if (settings->getBoolValue ("networkOut", false))
+    if (settings->getBoolValue ("networkOut", false) && ! melville::isHosted())   // (inside MELVILLE its jacks are on the patchbay)
     {
         juce::String netError;
         engine.setNetworkOutput (true, engine.networkOut.getName(), settings->getBoolValue ("networkDry", false), netError);
@@ -155,7 +170,9 @@ MainComponent::MainComponent()
     keysButton.setColour (juce::TextButton::textColourOnId, Pequod::Colours::rail);
     keysButton.setTooltip ("On-screen keyboard for instrument plugins (click it, then play with A W S E D F T G... too)");
     keysButton.onClick = [this] { showKeyboard (! keyboard->isVisible()); };
+   #if ! (defined (IRVING_LOOK) && IRVING_LOOK)     // (IRVING, in MELVILLE, is for guitar: no instruments)
     addAndMakeVisible (keysButton);
+   #endif
     inputButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
     inputButton.setColour (juce::TextButton::buttonOnColourId, Pequod::Colours::mustard);
     inputButton.setColour (juce::TextButton::textColourOnId, Pequod::Colours::rail);
@@ -168,7 +185,9 @@ MainComponent::MainComponent()
         updateInputButton();
     };
     inputButton.onLearn = [this] { control.armLearnFor (Mapping::Target::instrumentInput); };
+   #if ! (defined (IRVING_LOOK) && IRVING_LOOK)
     addAndMakeVisible (inputButton);
+   #endif
     showKeyboard (settings->getBoolValue ("keyboardShown", false));
 
     undoButton.setTooltip ("Undo the last rack change (Ctrl+Z)");
@@ -303,6 +322,9 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+   #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
+    melville::detach (engine.deviceManager);   // (and out of MELVILLE's session)
+   #endif
     stopTimer();
     engine.onModifiersChanged = nullptr;
     engine.onScenesChanged = nullptr;

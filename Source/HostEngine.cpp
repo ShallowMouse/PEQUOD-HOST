@@ -442,6 +442,15 @@ std::shared_ptr<PluginSlot> HostEngine::createSlot (const juce::PluginDescriptio
         return {};
     }
 
+   #if defined (IRVING_LOOK) && IRVING_LOOK
+    // IRVING is a guitar rig: no instrument plugins (a VSTi in an old preset is left out)
+    if (desc.isInstrument || (inst->getMainBusNumInputChannels() == 0 && inst->acceptsMidi() && inst->getMainBusNumOutputChannels() > 0))
+    {
+        error = desc.name + " is an instrument - IRVING is for guitar";
+        return {};
+    }
+   #endif
+
     // Prefer stereo main buses; plugins that refuse keep their own layout (mono is handled when rendering).
     for (bool isInput : { true, false })
         if (auto* bus = inst->getBus (isInput, 0))
@@ -1064,7 +1073,11 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
     outputStage->presetDb = (float) root.getDoubleAttribute ("outGain", 0.0);
     if (root.hasAttribute ("bpm")) transport.setBpm (root.getDoubleAttribute ("bpm", 120.0));   // older presets keep the current tempo
     inputStage->inputMode = root.getIntAttribute ("inputMode", (int) GainMeterProcessor::InputMode::Left);
+   #if defined (IRVING_LOOK) && IRVING_LOOK
+    rack->instrumentInput = false;                  // (IRVING is for guitar)
+   #else
     rack->instrumentInput = root.getStringAttribute ("input") == "instrument";
+   #endif
     clearModifiers();
     if (auto* xm = root.getChildByName ("MODIFIERS"))
         modifiersFromXml (*xm);

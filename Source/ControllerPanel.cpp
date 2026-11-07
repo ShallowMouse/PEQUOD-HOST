@@ -1312,7 +1312,9 @@ private:
             menu.addSectionHeader ("OUTPUT");
             menu.addItem ("Tuner  (mutes while tuning)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tuner, 0, rep.get()); done(); });
             menu.addItem ("Mute",                        [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::mute, 0, rep.get()); done(); });
+           #if ! (defined (IRVING_LOOK) && IRVING_LOOK)     // (IRVING is for guitar)
             menu.addItem ("Input: guitar / instrument  (mutes the guitar)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::instrumentInput, 0, rep.get()); done(); });
+           #endif
             menu.addSectionHeader ("TEMPO");
             menu.addItem ("Tap tempo  (its light flashes in time)", [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::tapTempo, 0, rep.get()); done(); });
             menu.addItem ("Metronome click on/off",                 [&m, rep, u, c, lay, done] { m.assign (u, c, lay, Mapping::Target::click, 0, rep.get()); done(); });

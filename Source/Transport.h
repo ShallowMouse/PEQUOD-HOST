@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "Melville.h"
 
 //==============================================================================
 /** The master tempo. Every hosted plugin sees it as a running transport, so tempo-synced
@@ -17,12 +18,14 @@ public:
 
     void setBpm (double b)
     {
+        if (melville::isHosted()) return;      // inside MELVILLE the tempo is the transport's (set on MELVILLE's bar)
         bpm = juce::jlimit (minBpm, maxBpm, std::round (b * 10.0) / 10.0);
     }
 
     /** Message thread. Several taps set the tempo from their spacing; each tap starts a beat. */
     void tap()
     {
+        if (melville::isHosted()) return;
         const double now = juce::Time::getMillisecondCounterHiRes();
         if (! taps.empty() && now - taps.back() > 2000.0) taps.clear();
         taps.push_back (now);
@@ -55,6 +58,26 @@ public:
         sr = sampleRate > 0.0 ? sampleRate : 48000.0;
         if (resyncRequested.exchange (false))
             ppq = std::floor (ppq) + 1.0 - 1e-9;          // a tap starts a new beat right now
+       #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
+        if (melville::isHosted())
+        {
+            // inside MELVILLE: the transport's tempo and the tape's place in the bar, so plugins
+            // lock to the song; no click of IRVING's own (MELVILLE has one)
+            auto& t = melville::transport();
+            const double b = t.bpm.load();
+            if (b > 0.0) bpm = juce::jlimit (minBpm, maxBpm, b);
+            beatsPerBar = juce::jmax (1, t.beatsPerBar.load());
+            double pos = 0.0, rate = 0.0; int fl = 0;
+            following = melville::tapePositionAt (melville::currentFrame(), pos, rate, fl);
+            if (following)
+            {
+                const double reelRate = juce::jmax (1.0, t.reelRate.load());
+                ppq = (pos - t.barOne.load()) * bpm.load() / (60.0 * reelRate);
+                playing = t.rolling.load();
+            }
+            else playing = true;
+        }
+       #endif
         blockPpq = ppq;
         blockSamples = samples;
     }
@@ -63,7 +86,7 @@ public:
     void endBlock (juce::AudioBuffer<float>& stereo, int n)
     {
         const double perSample = bpm.load() / (60.0 * sr);
-        const bool click = clickOn.load();
+        const bool click = clickOn.load() && ! melville::isHosted();
         const float gain = juce::Decibels::decibelsToGain (clickGainDb.load());
         auto* L = stereo.getWritePointer (0);
         auto* R = stereo.getNumChannels() > 1 ? stereo.getWritePointer (1) : nullptr;
@@ -106,7 +129,7 @@ public:
         p.setPpqPositionOfLastBarStart (std::floor (blockPpq / bars) * bars);
         p.setTimeInSamples (blockSamples);
         p.setTimeInSeconds ((double) blockSamples / sr);
-        p.setIsPlaying (true);
+        p.setIsPlaying (playing);
         p.setIsRecording (false);
         p.setIsLooping (false);
         return p;
@@ -114,6 +137,7 @@ public:
 
 private:
     std::vector<double> taps;
+    bool following = false, playing = true;
     std::atomic<bool> resyncRequested { false };
     std::atomic<double> uiPpq { 0.0 };
     double sr = 48000.0, ppq = 0.0, blockPpq = 0.0;
