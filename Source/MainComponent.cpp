@@ -814,7 +814,7 @@ void MainComponent::showAudioSettings()
 {
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (new SettingsPanel (engine, control));
-    o.dialogTitle = "Audio, MIDI & OSC settings";
+    o.dialogTitle = melville::isHosted() ? "IRVING - guitar input, MIDI & OSC" : "Audio, MIDI & OSC settings";
     o.dialogBackgroundColour = Pequod::Colours::panel;
     o.useNativeTitleBar = true;
     o.resizable = true;
@@ -934,14 +934,14 @@ void MainComponent::askAfterCrash (const CrashGuard::LastRun& last)
     }
 
     const bool known = last.plugin.isNotEmpty();
-    juce::String msg = "PEQUOD Host didn't close properly last time";
+    juce::String msg = juce::String (melville::isHosted() ? "IRVING" : "PEQUOD Host") + " didn't close properly last time";
     msg << (known ? " - it crashed inside " + last.plugin.quoted() + (last.doing.isNotEmpty() ? " while " + last.doing : juce::String()) + "."
                   : ".");
     msg << "\n\nHow do you want to start?";
 
     auto options = juce::MessageBoxOptions()
                        .withIconType (juce::MessageBoxIconType::NoIcon)
-                       .withTitle ("PEQUOD Host")
+                       .withTitle (melville::isHosted() ? "IRVING" : "PEQUOD Host")
                        .withMessage (msg)
                        .withAssociatedComponent (this);
     options = known ? options.withButton ("Without " + last.plugin).withButton ("Empty rack").withButton ("Load normally")

@@ -15,8 +15,14 @@ namespace Pequod
         const juce::Colour well      { 0xff151515 };
         const juce::Colour rail      { 0xff101010 };
         const juce::Colour line      { 0xff3a3a3a };
+       #if defined (IRVING_LOOK) && IRVING_LOOK
+        // Inside MELVILLE this app is IRVING, in oxblood (Hawthorne is MELVILLE's mustard)
+        const juce::Colour mustard   { 0xffa8443a };
+        const juce::Colour mustardLo { 0xff5e2620 };
+       #else
         const juce::Colour mustard   { 0xffe0a82e };
         const juce::Colour mustardLo { 0xff7d6020 };
+       #endif
         const juce::Colour text      { 0xffede6d6 };
         const juce::Colour textDim   { 0xff8f8a80 };
         const juce::Colour danger    { 0xffc0503a };

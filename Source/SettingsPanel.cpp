@@ -1,4 +1,5 @@
 #include "SettingsPanel.h"
+#include "Melville.h"
 
 namespace
 {
@@ -34,6 +35,15 @@ namespace
 
             for (auto* c : std::initializer_list<juce::Component*> { &inputCaption, &inputHelp, &inputMode, &deviceCaption, &selector })
                 addAndMakeVisible (c);
+
+            // inside MELVILLE: no audio device here (MELVILLE's INTERFACE), just the MIDI inputs
+            if ((midiOnly = melville::midiInputsPanel (engine.deviceManager)) != nullptr)
+            {
+                selector.setVisible (false);
+                styleCaption (deviceCaption, "MIDI");
+                styleLabel (inputHelp, "Which of IRVING's IN jacks on MELVILLE's patchbay your guitar comes in on. It is sent to both sides of the rack.");
+                addAndMakeVisible (*midiOnly);
+            }
             startTimerHz (4);
         }
 
@@ -47,6 +57,7 @@ namespace
             r.removeFromTop (12);
             deviceCaption.setBounds (r.removeFromTop (22));
             selector.setBounds (r);
+            if (midiOnly != nullptr) midiOnly->setBounds (r);
         }
 
     private:
@@ -54,6 +65,7 @@ namespace
         juce::Label inputCaption, inputHelp, deviceCaption;
         juce::ComboBox inputMode;
         juce::AudioDeviceSelectorComponent selector;
+        std::unique_ptr<juce::Component> midiOnly;
 
         void timerCallback() override
         {

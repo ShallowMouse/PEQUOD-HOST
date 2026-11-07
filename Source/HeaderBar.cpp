@@ -1,4 +1,5 @@
 #include "HeaderBar.h"
+#include "Melville.h"
 
 //==============================================================================
 void TunerDisplay::timerCallback()
@@ -234,6 +235,7 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
     initButton.onClick    = [this] { if (onInit) onInit(); };
     learnButton.onClick   = [this] { if (onToggleLearn) onToggleLearn(); };
     audioButton.onClick   = [this] { if (onAudioSettings) onAudioSettings(); };
+    if (melville::isHosted()) audioButton.setButtonText ("SETUP");   // (no audio device inside MELVILLE: input, MIDI and OSC)
     pluginsButton.onClick = [this] { if (onPluginManager) onPluginManager(); };
     controllerButton.onClick = [this] { if (onController) onController(); };
     updateButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::mustard);
@@ -483,10 +485,17 @@ void HeaderBar::paint (juce::Graphics& g)
     auto wm = wordmarkArea.toFloat();
     g.setColour (Pequod::Colours::mustard);
     g.setFont (Pequod::heading (28.0f));
+   #if defined (IRVING_LOOK) && IRVING_LOOK
+    g.drawText ("IRVING", wm.removeFromTop (wm.getHeight() * 0.68f), juce::Justification::bottomLeft);    // (its name inside MELVILLE)
+    g.setColour (Pequod::Colours::textDim);
+    g.setFont (Pequod::heading (11.0f, false));
+    g.drawText ("G  U  I  T  A  R    R  I  G", wm, juce::Justification::topLeft);
+   #else
     g.drawText ("PEQUOD", wm.removeFromTop (wm.getHeight() * 0.68f), juce::Justification::bottomLeft);
     g.setColour (Pequod::Colours::textDim);
     g.setFont (Pequod::heading (11.0f, false));
     g.drawText ("H  O  S  T", wm, juce::Justification::topLeft);
+   #endif
 }
 
 void HeaderBar::resized()

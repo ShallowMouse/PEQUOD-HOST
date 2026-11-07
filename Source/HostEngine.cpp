@@ -67,7 +67,7 @@ HostEngine::~HostEngine()
 
 void HostEngine::initialiseAudio (const juce::XmlElement* savedDeviceState)
 {
-    // inside MELVILLE: MELVILLE's PEQUOD HOST device
+    // inside MELVILLE (where it's IRVING): MELVILLE's device for it
     auto err = melville::attach (deviceManager, "pequod") ? juce::String()
                                                           : deviceManager.initialise (2, 2, savedDeviceState, true);
     if (err.isNotEmpty())
