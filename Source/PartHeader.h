@@ -25,6 +25,7 @@ inline juce::Colour accent (const juce::String& part)
     if (part == "thoreau")   return juce::Colour (0xff9fbf62);   // moss green
     if (part == "irving")    return juce::Colour (0xffa8443a);   // oxblood
     if (part == "twain")     return juce::Colour (0xffd9875a);
+    if (part == "alcott")    return juce::Colour (0xffb27fc0);   // plum
     return juce::Colour (0xff5fa8a0);                            // MELVILLE's verdigris
 }
 
