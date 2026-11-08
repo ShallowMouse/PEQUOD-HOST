@@ -44,6 +44,7 @@ private:
         int p = -1, m = -1;
         float x = 0, y = 0, r = 20, w = 0, h = 0, size = 12, lo = 0, hi = 1, rowH = 22;
         int cols = 1;                              // a radio list in columns (rack mode)
+        float h0 = 0;                              // a meter's height as designed (rack mode draws it smaller, to scale)
         int alignX = 0, alignY = 0;
         juce::String label, tip, meterKind;
         juce::StringArray labels;

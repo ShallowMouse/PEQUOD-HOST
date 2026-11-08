@@ -492,15 +492,20 @@ void PequodPanel::drawSelector (juce::Graphics& g, const Item& it, int index) co
 
 void PequodPanel::drawMeter (juce::Graphics& g, const Item& it) const
 {
+    // Drawn to scale: a rack's smaller meter is the same meter, its type kept readable
+    // (and fewer numbers on the scale when it's small)
+    const float s = it.h0 > 0.0f ? juce::jlimit (0.3f, 1.0f, it.h / it.h0) : 1.0f;
+    const bool small = s < 0.8f;
+    const float font = juce::jmax (8.5f, 11.0f * s);
     const Rect rect (it.x, it.y, it.w, it.h);
     const bool gr = it.meterKind == "gr";
     const float value = juce::isPositiveAndBelow (it.m, (int) shown.size()) ? shown[(size_t) it.m] : (gr ? 0.0f : -25.0f);
     g.setColour (BAKELITE);
-    g.fillRoundedRectangle (rect.expanded (5.0f), 6.0f);
+    g.fillRoundedRectangle (rect.expanded (5.0f * s), 6.0f * s);
     g.setColour (METER_FACE);
     g.fillRoundedRectangle (rect, 3.0f);
-    const Pt pivot (rect.getCentreX(), rect.getBottom() + 28.0f);
-    const float radius = rect.getHeight() + 2.0f;
+    const Pt pivot (rect.getCentreX(), rect.getBottom() + 28.0f * s);
+    const float radius = rect.getHeight() + 2.0f * s;
     const float sweep = 40.0f;
 
     auto map = [&] (float v)
@@ -515,34 +520,43 @@ void PequodPanel::drawMeter (juce::Graphics& g, const Item& it) const
         }
         return (-sweep + 2.0f * sweep * juce::jlimit (0.0f, 1.0f, t)) * pi / 180.0f;
     };
-    struct Mark { float v; const char* t; };
-    static const Mark grMarks[] = { { 0, "0" }, { 1, "" }, { 2, "2" }, { 3, "" }, { 5, "5" }, { 7, "" }, { 10, "10" }, { 15, "" }, { 20, "20" } };
-    static const Mark vuMarks[] = { { -20, "20" }, { -10, "10" }, { -7, "7" }, { -5, "5" }, { -3, "3" }, { -2, "" }, { -1, "" }, { 0, "0" }, { 1, "" }, { 2, "" }, { 3, "+3" } };
+    struct Mark { float v; const char* t; const char* tSmall; };
+    static const Mark grMarks[] = { { 0, "0", "0" }, { 1, "", "" }, { 2, "2", "" }, { 3, "", "" }, { 5, "5", "5" }, { 7, "", "" },
+                                    { 10, "10", "10" }, { 15, "", "" }, { 20, "20", "20" } };
+    static const Mark vuMarks[] = { { -20, "20", "20" }, { -10, "10", "10" }, { -7, "7", "" }, { -5, "5", "5" }, { -3, "3", "" },
+                                    { -2, "", "" }, { -1, "", "" }, { 0, "0", "0" }, { 1, "", "" }, { 2, "", "" }, { 3, "+3", "+3" } };
     const float redFrom = gr ? 10.0f : 0.0f, redTo = gr ? 20.0f : 3.0f;
-    polyline (g, 20, [&] (int k) { return polar (pivot, radius - 22.0f, map (redFrom + (redTo - redFrom) * (float) k / 20.0f)); }, 4.0f, accent);
+    polyline (g, 20, [&] (int k) { return polar (pivot, radius - 22.0f * s, map (redFrom + (redTo - redFrom) * (float) k / 20.0f)); }, 4.0f * s, accent);
     const float lo = gr ? 0.0f : -20.0f, hi = gr ? 20.0f : 3.0f;
-    polyline (g, 40, [&] (int k) { return polar (pivot, radius - 26.0f, map (lo + (hi - lo) * (float) k / 40.0f)); }, 1.2f, INK);
+    polyline (g, 40, [&] (int k) { return polar (pivot, radius - 26.0f * s, map (lo + (hi - lo) * (float) k / 40.0f)); }, 1.2f, INK);
     auto drawMarks = [&] (const Mark* m, int count)
     {
         for (int k = 0; k < count; ++k)
         {
             const float a = map (m[k].v);
             const bool lng = m[k].t[0] != 0;
-            line (g, polar (pivot, radius - 26.0f, a), polar (pivot, radius - (lng ? 36.0f : 32.0f), a), 1.2f, INK);
-            if (lng) say (g, m[k].t, polar (pivot, radius - 14.0f, a), 0, 0, 11.0f, INK);
+            line (g, polar (pivot, radius - 26.0f * s, a), polar (pivot, radius - (lng ? 36.0f : 32.0f) * s, a), 1.2f, INK);
+            const char* t = small ? m[k].tSmall : m[k].t;
+            if (t[0] != 0) say (g, t, polar (pivot, radius - 14.0f * s, a), 0, 0, font, INK);
         }
     };
     if (gr) drawMarks (grMarks, (int) std::size (grMarks));
     else    drawMarks (vuMarks, (int) std::size (vuMarks));
-    say (g, it.label, { rect.getCentreX(), rect.getBottom() - 34.0f }, 0, 0, 10.0f, INK_SOFT);
-    say (g, gr ? "dB" : "VU", { rect.getCentreX(), rect.getBottom() - 21.0f }, 0, 0, 10.0f, INK_SOFT);
+    // its name (and VU / dB), between the scale and the strip
+    if (small)
+        say (g, it.label + (gr ? juce::String() : juce::String (" VU")), { rect.getCentreX(), rect.getBottom() - 10.0f * s - font * 0.75f }, 0, 0, juce::jmax (8.0f, font - 1.0f), INK_SOFT);
+    else
     {
-        juce::Graphics::ScopedSaveState s (g);
+        say (g, it.label, { rect.getCentreX(), rect.getBottom() - 34.0f * s }, 0, 0, 10.0f * s, INK_SOFT);
+        say (g, gr ? "dB" : "VU", { rect.getCentreX(), rect.getBottom() - 21.0f * s }, 0, 0, 10.0f * s, INK_SOFT);
+    }
+    {
+        juce::Graphics::ScopedSaveState ss (g);
         g.reduceClipRegion (rect.toNearestInt());
-        line (g, pivot, polar (pivot, radius - 8.0f, map (value)), 2.0f, Colour (0xff1a120c));
+        line (g, pivot, polar (pivot, radius - 8.0f * s, map (value)), 2.0f, Colour (0xff1a120c));
     }
     juce::Path strip;
-    strip.addRoundedRectangle (rect.getX(), rect.getBottom() - 10.0f, rect.getWidth(), 10.0f, 3.0f, 3.0f, false, false, true, true);
+    strip.addRoundedRectangle (rect.getX(), rect.getBottom() - 10.0f * s, rect.getWidth(), 10.0f * s, 3.0f, 3.0f, false, false, true, true);
     g.setColour (BAKELITE_HI);
     g.fillPath (strip);
 }
@@ -841,7 +855,7 @@ juce::Rectangle<float> PequodPanel::itemBounds (const Item& it) const
         }
         case Kind::lamp:      return Rect (it.x - 9.0f, it.y - 9.0f, 26.0f + textW (it.label, 12.0f), 18.0f);
         case Kind::polar:
-        case Kind::rotor:     return Rect (it.x - it.r - 16.0f, it.y - it.r - 20.0f, 2.0f * it.r + 32.0f, 2.0f * it.r + 40.0f);
+        case Kind::rotor:     return Rect (it.x - it.r - 16.0f, it.y - it.r - 20.0f, 2.0f * it.r + 32.0f, 2.0f * it.r + (it.kind == Kind::rotor ? 50.0f : 40.0f));   // (a rotor's caption under it)
         case Kind::radio:     return Rect (it.x, it.y, it.w * (float) it.cols, it.rowH * (float) juce::jmax (1, radioRows (it.labels.size(), it.cols)));
         case Kind::caption:   return Rect (it.x, it.y, it.w, juce::jmax (it.h, it.size * 2.6f));
         case Kind::irloader:  return Rect (it.x, it.y, it.w, juce::jmax (it.h, 30.0f));
@@ -870,18 +884,23 @@ void PequodPanel::rackLayout()
         {
             case Kind::knob:     it.r = juce::jmin (it.r, 22.0f); break;
             case Kind::selector: it.r = juce::jmin (it.r, 18.0f); break;
-            case Kind::polar: case Kind::rotor: it.r = juce::jmin (it.r, 30.0f); break;
+            case Kind::polar:    it.r = juce::jmin (it.r, 30.0f); break;
+            case Kind::rotor:    it.r = juce::jmin (it.r, 22.0f); break;
             case Kind::radio:    // a long list folds into columns of four
                 it.cols = (it.labels.size() + 3) / 4; it.rowH = juce::jmin (it.rowH, 18.0f);
                 break;
-            case Kind::meter: case Kind::tuner: case Kind::roomplan:
-                if (it.h > 64.0f) { it.w *= 64.0f / it.h; it.h = 64.0f; }
+            case Kind::meter: case Kind::tuner:
+                it.h0 = it.h;
+                if (it.h > 72.0f) { it.w *= 72.0f / it.h; it.h = 72.0f; }
+                break;
+            case Kind::roomplan:
+                if (it.h > 72.0f) { it.w *= 72.0f / it.h; it.h = 72.0f; }
                 break;
             default: break;
         }
     }
 
-    struct Group { Rect area; std::vector<int> items; };
+    struct Group { Rect area; std::vector<int> items; float anchor = 0.0f; };
     std::vector<Rect> boxes (items.size());
     std::vector<int> controls, texts;
     for (int k = 0; k < (int) items.size(); ++k)
@@ -907,8 +926,80 @@ void PequodPanel::rackLayout()
             if (gap > -6.0f && gap < bestGap && c.getHorizontalRange().intersects (t.getHorizontalRange()))
                 { best = g; bestGap = gap; }
         }
-        if (best >= 0) { groups[(size_t) best].items.push_back (k); groups[(size_t) best].area = groups[(size_t) best].area.getUnion (t); }
+        if (best >= 0)
+        {
+            // a heading centred over a pair or a row (Bi-Phase's PHASOR A over DEPTH and FEEDBACK): the controls
+            // the same distance either side of it, on its line, go with it as one group
+            {
+                const auto& cb = items[(size_t) groups[(size_t) best].items.front()];
+                const float reach = std::abs (boxes[(size_t) groups[(size_t) best].items.front()].getCentreX() - t.getCentreX()) + 12.0f;
+                if (reach > 16.0f)
+                    for (int g = 0; g < (int) groups.size(); ++g)
+                    {
+                        if (g == best || groups[(size_t) g].items.size() != 1) continue;
+                        const auto& c = items[(size_t) groups[(size_t) g].items.front()];
+                        const auto& cbox = boxes[(size_t) groups[(size_t) g].items.front()];
+                        if (c.kind == Kind::text || std::abs (c.y - cb.y) > 4.0f) continue;
+                        if (std::abs (cbox.getCentreX() - t.getCentreX()) > reach) continue;
+                        auto& bg = groups[(size_t) best];
+                        bg.area = bg.area.getUnion (cbox);
+                        bg.items.push_back (groups[(size_t) g].items.front());
+                        groups.erase (groups.begin() + g);
+                        if (g < best) --best;
+                        --g;
+                    }
+            }
+            // a heading over a row of switches (Echorec's HEADS 1 2 3 4) keeps the whole row with it
+            const auto& c0 = items[(size_t) groups[(size_t) best].items.front()];
+            if (c0.kind == Kind::sw)
+                for (bool grew = true; grew;)
+                {
+                    grew = false;
+                    for (int g = 0; g < (int) groups.size(); ++g)
+                    {
+                        if (g == best || groups[(size_t) g].items.size() != 1) continue;
+                        const auto& c = items[(size_t) groups[(size_t) g].items.front()];
+                        const auto& a = groups[(size_t) g].area;
+                        const auto& ab = groups[(size_t) best].area;
+                        const float gapBetween = juce::jmax (a.getX() - ab.getRight(), ab.getX() - a.getRight());
+                        if (c.kind == Kind::sw && std::abs (c.y - c0.y) < 4.0f && gapBetween < 40.0f)
+                        {
+                            auto& bg = groups[(size_t) best];
+                            bg.area = bg.area.getUnion (a);
+                            bg.items.push_back (groups[(size_t) g].items.front());
+                            groups.erase (groups.begin() + g);
+                            if (g < best) --best;
+                            grew = true;
+                            break;
+                        }
+                    }
+                }
+            // the heading sits just above what it names (no tall gap: fewer rack units)
+            {
+                auto& bg = groups[(size_t) best];
+                float top = bg.area.getY();
+                for (int i : bg.items) if (items[(size_t) i].kind != Kind::text) top = juce::jmin (top, boxes[(size_t) i].getY());
+                const float dy = (top - 2.0f) - t.getBottom();
+                if (dy > 0.0f) { items[(size_t) k].y += dy; boxes[(size_t) k] = t.translated (0.0f, dy); }
+                bg.items.push_back (k);
+                bg.area = bg.area.getUnion (boxes[(size_t) k]);
+            }
+        }
         else groups.push_back ({ t, { k } });
+    }
+
+    // each group's centre line: its control's middle (a knob's, a switch's, a meter's ...), not its
+    // labels', so the controls of a row line up whatever is printed above and below them
+    for (auto& grp : groups)
+    {
+        const auto& c = items[(size_t) grp.items.front()];
+        switch (c.kind)
+        {
+            case Kind::knob: case Kind::selector: case Kind::polar: case Kind::rotor: case Kind::lamp: case Kind::sw:
+                grp.anchor = c.y; break;
+            default:
+                grp.anchor = boxes[(size_t) grp.items.front()].getCentreY(); break;
+        }
     }
 
     // reading order: the panel's own rows top to bottom (by where each group's middle is), left to right
@@ -925,7 +1016,7 @@ void PequodPanel::rackLayout()
     for (auto& g : groups) widest = juce::jmax (widest, g.area.getWidth());
     const float width = juce::jmax ((float) rackWidth, (float) rackTitleWidth + 2.0f * margin + widest);
     const float avail = width - (float) rackTitleWidth - 2.0f * margin;
-    struct Row { std::vector<int> groups; float w = 0.0f, h = 0.0f; };
+    struct Row { std::vector<int> groups; float w = 0.0f, h = 0.0f, up = 0.0f, down = 0.0f; };
     std::vector<Row> rows (1);
     for (int g = 0; g < (int) groups.size(); ++g)
     {
@@ -933,7 +1024,10 @@ void PequodPanel::rackLayout()
         if (! rows.back().groups.empty() && rows.back().w + gapX + a.getWidth() > avail) rows.push_back ({});
         auto& r = rows.back();
         r.w = r.groups.empty() ? a.getWidth() : r.w + gapX + a.getWidth();
-        r.h = juce::jmax (r.h, a.getHeight());
+        const float anchor = groups[(size_t) g].anchor;
+        r.up = juce::jmax (r.up, anchor - a.getY());
+        r.down = juce::jmax (r.down, a.getBottom() - anchor);
+        r.h = r.up + r.down;
         r.groups.push_back (g);
     }
     float contentH = 0.0f;
@@ -946,17 +1040,23 @@ void PequodPanel::rackLayout()
     const int units = juce::jmax (1, (int) std::ceil ((juce::jmax (contentH + 2.0f * margin, minH)) / unit - 0.03f));
     const float height = (float) units * unit;
 
-    // 4. every control (and its heading) to its place; spread a short row across the width
+    // 4. every control (and its heading) to its place: each row's controls on one centre line, the
+    //    gaps between them even, across the width (a short row: no wider gaps than a full one has)
+    float fullGap = gapX;
+    for (auto& r : rows)
+        if (r.groups.size() > 1 && avail - r.w < 0.5f * avail)
+            fullGap = juce::jmax (fullGap, gapX + (avail - r.w) / (float) (r.groups.size() - 1));
     float y = (height - contentH) * 0.5f;
     for (auto& r : rows)
     {
         const float spare = avail - r.w;
-        const float extra = r.groups.size() > 1 ? juce::jmin (spare / (float) (r.groups.size() - 1), 40.0f) : 0.0f;
+        const float extra = r.groups.size() > 1 ? juce::jmin (spare / (float) (r.groups.size() - 1), juce::jmax (fullGap - gapX, 56.0f)) : 0.0f;
         float x = (float) rackTitleWidth + margin + (spare - extra * (float) (r.groups.size() - 1)) * 0.5f;
+        const float line = y + r.up;
         for (int g : r.groups)
         {
             auto& grp = groups[(size_t) g];
-            const float dx = x - grp.area.getX(), dy = y + (r.h - grp.area.getHeight()) * 0.5f - grp.area.getY();
+            const float dx = x - grp.area.getX(), dy = line - grp.anchor;
             for (int k : grp.items) { items[(size_t) k].x += dx; items[(size_t) k].y += dy; }
             x += grp.area.getWidth() + gapX + extra;
         }
