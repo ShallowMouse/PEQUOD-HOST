@@ -14,6 +14,13 @@ class PequodPanel : public juce::AudioProcessorEditor,
 {
 public:
     explicit PequodPanel (PequodNative::Instance&);
+
+    /** Rack-mounted: every panel is a 19-inch rack faceplate (the name and presets down the
+        left, the controls re-flowed into rows, whole rack units high, all the same width).
+        Set once by the host before any panel opens (EMERSON's rack, IRVING). */
+    static void setRackMounted (bool b) noexcept { rackMountedFlag() = b; }
+    static bool isRackMounted() noexcept         { return rackMountedFlag(); }
+    static constexpr int rackWidth = 1240, rackTitleWidth = 180;     // (wide and shallow: as few rack units as it can)
     ~PequodPanel() override;
 
     void paint (juce::Graphics&) override;
@@ -36,6 +43,7 @@ private:
         Kind kind = Kind::unknown;
         int p = -1, m = -1;
         float x = 0, y = 0, r = 20, w = 0, h = 0, size = 12, lo = 0, hi = 1, rowH = 22;
+        int cols = 1;                              // a radio list in columns (rack mode)
         int alignX = 0, alignY = 0;
         juce::String label, tip, meterKind;
         juce::StringArray labels;
@@ -98,6 +106,10 @@ private:
     juce::Rectangle<float> irClear (const Item&) const;
 
     void drawFaceplate (juce::Graphics&) const;
+    void rackLayout();                      // (rack-mounted) the controls into rows, the panel to whole units
+    juce::Rectangle<float> itemBounds (const Item&) const;
+    static bool& rackMountedFlag() noexcept { static bool b = false; return b; }
+    bool rack = false;
     void drawKnob (juce::Graphics&, const Item&, int index) const;
     void drawSwitch (juce::Graphics&, const Item&, int index) const;
     void drawSelector (juce::Graphics&, const Item&, int index) const;

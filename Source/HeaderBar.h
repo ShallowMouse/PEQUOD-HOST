@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ControlSurface.h"
+#include "PartHeader.h"
 #include "PequodLookAndFeel.h"
 #include "Tuner.h"
 
@@ -95,9 +96,11 @@ private:
     HostEngine& engine;
     ControlSurface& control;
 
-    juce::TextButton prevButton { "<" }, nextButton { ">" }, presetButton,
-                     saveButton { "SAVE" }, saveAsButton { "SAVE AS" }, initButton { "INIT" },
-                     learnButton { "LEARN" }, audioButton { "AUDIO" }, pluginsButton { "PLUGINS" };
+    juce::TextButton prevButton { "<" }, nextButton { ">" }, presetButton;
+    // the keys every part has (the same icons in each)
+    partui::Key saveButton { "Save the preset", partui::Icon::save }, saveAsButton { "Save as a new preset", partui::Icon::plus },
+                initButton { "Init: an empty rack", partui::Icon::reset }, learnButton { "Learn", partui::Icon::midi },
+                audioButton { "Audio", partui::Icon::settings }, pluginsButton { "Plugins", partui::Icon::list };
 
     /** Opens the foot controller window; the dot shows whether one is connected. */
     struct ControllerButton : public juce::TextButton

@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "PequodPanel.h"
 #include "Melville.h"
 #include "PequodNative.h"
 #include "SettingsPanel.h"
@@ -53,6 +54,9 @@ MainComponent::MainComponent()
                           [this] (int uid) { closePluginWindow (uid); },
                           [this] (const juce::String& s) { setStatus (s); } })
 {
+   #if defined (IRVING_LOOK) && IRVING_LOOK
+    PequodPanel::setRackMounted (true);      // IRVING's rack: every effect a rack faceplate (whole units)
+   #endif
     auto* settings = appProperties->getUserSettings();
     const auto lastRun = CrashGuard::start (settings->getFile().getParentDirectory());
 
@@ -394,7 +398,7 @@ void MainComponent::paint (juce::Graphics& g)
 void MainComponent::resized()
 {
     auto r = getLocalBounds();
-    header.setBounds (r.removeFromTop (64));
+    header.setBounds (r.removeFromTop (partui::headerHeight));
     auto status = r.removeFromBottom (24);
     auto toggles = status.removeFromRight (540).reduced (4, 3);
     pedalboardViewButton.setBounds (toggles.removeFromRight (100));

@@ -65,6 +65,14 @@ namespace
         g.drawText (s, Rect (x, y, w, h), ax < 0 ? juce::Justification::centredLeft : ax > 0 ? juce::Justification::centredRight : juce::Justification::centred, false);
     }
 
+    /** say(), shrunk until it fits `maxW` (the rack faceplate's name block). */
+    void sayFit (juce::Graphics& g, const juce::String& s, Pt at, float maxW, float size, Colour c)
+    {
+        float sz = size;
+        while (sz > 7.0f && juce::GlyphArrangement::getStringWidth (font (sz), s) > maxW) sz -= 0.5f;
+        say (g, s, at, -1, 0, sz, c);
+    }
+
     void line (juce::Graphics& g, Pt a, Pt b, float width, Colour c)
     {
         g.setColour (c);
@@ -196,6 +204,8 @@ PequodPanel::PequodPanel (PequodNative::Instance& p)
     lastValues.assign ((size_t) inst.getParameters().size(), -1.0f);
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
 
+    rack = isRackMounted();
+    if (rack) rackLayout();
     setSize (panelW, panelH);
     setWantsKeyboardFocus (false);
     startTimerHz (30);
@@ -297,7 +307,7 @@ void PequodPanel::paint (juce::Graphics& g)
                 say (g, it.label, { it.x + 14.0f, it.y }, -1, 0, 12.0f, INK);
                 break;
             case Kind::rotor:    drawRotor (g, it); break;
-            case Kind::divider:  line (g, { 40.0f, it.y }, { (float) panelW - 40.0f, it.y }, 1.0f, PLATE_EDGE); break;
+            case Kind::divider:  if (! rack) line (g, { 40.0f, it.y }, { (float) panelW - 40.0f, it.y }, 1.0f, PLATE_EDGE); break;
             case Kind::text:     say (g, it.label, { it.x, it.y }, it.alignX, it.alignY, it.size, INK); break;
             case Kind::radio:    drawRadio (g, it); break;
             case Kind::caption:  drawCaption (g, it); break;
@@ -310,7 +320,8 @@ void PequodPanel::paint (juce::Graphics& g)
     }
 
     const float h = (float) panelH;
-    say (g, "[PEQUOD]", { 38.0f, h - 36.0f }, -1, 0, 12.0f, Colour (0xffa8823a), true);
+    if (rack) { if (presets.empty()) say (g, "[PEQUOD]", { 16.0f, h - 14.0f }, -1, 0, 10.0f, CREAM.withAlpha (0.6f), true); }
+    else      say (g, "[PEQUOD]", { 38.0f, h - 36.0f }, -1, 0, 12.0f, Colour (0xffa8823a), true);
     if (! presets.empty())
     {
         drawPresetBar (g);
@@ -321,6 +332,24 @@ void PequodPanel::paint (juce::Graphics& g)
 void PequodPanel::drawFaceplate (juce::Graphics& g) const
 {
     const float w = (float) panelW, h = (float) panelH;
+    if (rack)
+    {
+        // a rack faceplate: the plate edge to edge, the name block down the left in the accent
+        g.setGradientFill (juce::ColourGradient (PLATE.brighter (0.05f), 0.0f, 0.0f, PLATE.darker (0.06f), 0.0f, h, false));
+        g.fillAll();
+        g.setColour (PLATE_EDGE);
+        g.drawRect (getLocalBounds().toFloat(), 1.5f);
+        const Rect block (0.0f, 0.0f, (float) rackTitleWidth, h);
+        g.setGradientFill (juce::ColourGradient (accent.brighter (0.08f), 0.0f, 0.0f, accent.darker (0.2f), 0.0f, h, false));
+        g.fillRect (block);
+        g.setColour (blackAlpha (60));
+        g.fillRect (block.withX (block.getRight() - 2.0f).withWidth (2.0f));
+        const float fitW = (float) rackTitleWidth - 28.0f;
+        sayFit (g, title, { 16.0f, 30.0f }, fitW, 24.0f, CREAM);
+        sayFit (g, sub1, { 16.0f, 54.0f }, fitW, 10.5f, CREAM);
+        sayFit (g, sub2, { 16.0f, 68.0f }, fitW, 10.5f, CREAM);
+        return;
+    }
     g.fillAll (WOOD);
     for (int k = 0; (float) k * 29.0f < h; ++k)
     {
@@ -562,12 +591,18 @@ void PequodPanel::drawRotor (juce::Graphics& g, const Item& it) const
     say (g, "ROTOR", { c.x, rect.getBottom() + 16.0f }, 0, 0, 10.0f, INK_SOFT);
 }
 
+namespace
+{
+    int radioRows (int n, int cols) { return (n + juce::jmax (1, cols) - 1) / juce::jmax (1, cols); }
+}
+
 void PequodPanel::drawRadio (juce::Graphics& g, const Item& it) const
 {
     const int current = indexOf (it.p);
     for (int k = 0; k < it.labels.size(); ++k)
     {
-        const Rect r (it.x, it.y + (float) k * it.rowH, it.w, it.rowH - 3.0f);
+        const int rows = radioRows (it.labels.size(), it.cols);
+        const Rect r (it.x + (float) (k / rows) * it.w, it.y + (float) (k % rows) * it.rowH, it.w - 6.0f * (float) (it.cols > 1), it.rowH - 3.0f);
         const bool on = k == current;
         const bool hovered = r.contains (lastMouse) && isMouseOver();
         if (on || hovered)
@@ -785,10 +820,166 @@ void PequodPanel::drawIrLoader (juce::Graphics& g, const Item& it) const
 }
 
 //==============================================================================
-juce::Point<float> PequodPanel::presetCentre() const { return { (float) panelW / 2.0f, (float) panelH - 36.0f }; }
-juce::Rectangle<float> PequodPanel::presetNameRect() const { return Rect (220.0f, 20.0f).withCentre (presetCentre()); }
-juce::Rectangle<float> PequodPanel::presetPrevRect() const { return Rect (22.0f, 20.0f).withCentre (presetCentre() - Pt (128.0f, 0.0f)); }
-juce::Rectangle<float> PequodPanel::presetNextRect() const { return Rect (22.0f, 20.0f).withCentre (presetCentre() + Pt (128.0f, 0.0f)); }
+// Rack-mounted panels
+
+juce::Rectangle<float> PequodPanel::itemBounds (const Item& it) const
+{
+    const auto textW = [] (const juce::String& s, float size) { return 0.55f * size * (float) s.length(); };
+    switch (it.kind)
+    {
+        case Kind::knob:
+        {
+            const bool big = it.r > 30.0f;
+            const float hw = juce::jmax (it.r + 10.0f, 0.5f * textW (it.label, big ? 16.0f : 11.0f) + 4.0f);
+            return Rect (it.x - hw, it.y - it.r - (big ? 32.0f : 28.0f), 2.0f * hw, 2.0f * it.r + (big ? 62.0f : 54.0f));
+        }
+        case Kind::selector:  return Rect (it.x - it.r - 34.0f, it.y - it.r - 30.0f, 2.0f * it.r + 68.0f, 2.0f * it.r + 52.0f);
+        case Kind::sw:
+        {
+            const float lw = it.labels.size() >= 2 ? juce::jmax (textW (it.labels[0], 11.0f), textW (it.labels[1], 11.0f)) : 0.0f;
+            return Rect (it.x - 23.0f - lw, it.y - 12.0f, 46.0f + 2.0f * lw, 24.0f);
+        }
+        case Kind::lamp:      return Rect (it.x - 9.0f, it.y - 9.0f, 26.0f + textW (it.label, 12.0f), 18.0f);
+        case Kind::polar:
+        case Kind::rotor:     return Rect (it.x - it.r - 16.0f, it.y - it.r - 20.0f, 2.0f * it.r + 32.0f, 2.0f * it.r + 40.0f);
+        case Kind::radio:     return Rect (it.x, it.y, it.w * (float) it.cols, it.rowH * (float) juce::jmax (1, radioRows (it.labels.size(), it.cols)));
+        case Kind::caption:   return Rect (it.x, it.y, it.w, juce::jmax (it.h, it.size * 2.6f));
+        case Kind::irloader:  return Rect (it.x, it.y, it.w, juce::jmax (it.h, 30.0f));
+        case Kind::meter: case Kind::tuner: case Kind::roomplan:
+            return Rect (it.x, it.y, it.w, it.h).expanded (0.0f, 14.0f);
+        case Kind::text:
+        {
+            const float w = textW (it.label, it.size), h = it.size * 1.4f;
+            const float x = it.alignX < 0 ? it.x : it.alignX > 0 ? it.x - w : it.x - w / 2.0f;
+            const float y = it.alignY < 0 ? it.y : it.alignY > 0 ? it.y - h : it.y - h / 2.0f;
+            return Rect (x, y, w, h);
+        }
+        case Kind::divider: case Kind::unknown: break;
+    }
+    return {};
+}
+
+void PequodPanel::rackLayout()
+{
+    // 1. the controls as groups, in reading order: each control on its own, with any heading
+    //    printed just above it travelling with it
+    // 0. rack gear is compact: big knobs come down to the small size, meters and plans to rack height
+    for (auto& it : items)
+    {
+        switch (it.kind)
+        {
+            case Kind::knob:     it.r = juce::jmin (it.r, 22.0f); break;
+            case Kind::selector: it.r = juce::jmin (it.r, 18.0f); break;
+            case Kind::polar: case Kind::rotor: it.r = juce::jmin (it.r, 30.0f); break;
+            case Kind::radio:    // a long list folds into columns of four
+                it.cols = (it.labels.size() + 3) / 4; it.rowH = juce::jmin (it.rowH, 18.0f);
+                break;
+            case Kind::meter: case Kind::tuner: case Kind::roomplan:
+                if (it.h > 64.0f) { it.w *= 64.0f / it.h; it.h = 64.0f; }
+                break;
+            default: break;
+        }
+    }
+
+    struct Group { Rect area; std::vector<int> items; };
+    std::vector<Rect> boxes (items.size());
+    std::vector<int> controls, texts;
+    for (int k = 0; k < (int) items.size(); ++k)
+    {
+        boxes[(size_t) k] = itemBounds (items[(size_t) k]);
+        if (boxes[(size_t) k].isEmpty()) continue;
+        (items[(size_t) k].kind == Kind::text ? texts : controls).push_back (k);
+    }
+    if (controls.empty() && texts.empty()) return;
+
+    std::vector<Group> groups;
+    for (int k : controls) groups.push_back ({ boxes[(size_t) k], { k } });
+    for (int k : texts)
+    {
+        // a heading: the nearest control just under it that it overlaps sideways
+        const auto& t = boxes[(size_t) k];
+        int best = -1;
+        float bestGap = 44.0f;
+        for (int g = 0; g < (int) groups.size(); ++g)
+        {
+            const auto& c = boxes[(size_t) groups[(size_t) g].items.front()];
+            const float gap = c.getY() - t.getBottom();
+            if (gap > -6.0f && gap < bestGap && c.getHorizontalRange().intersects (t.getHorizontalRange()))
+                { best = g; bestGap = gap; }
+        }
+        if (best >= 0) { groups[(size_t) best].items.push_back (k); groups[(size_t) best].area = groups[(size_t) best].area.getUnion (t); }
+        else groups.push_back ({ t, { k } });
+    }
+
+    // reading order: the panel's own rows top to bottom (by where each group's middle is), left to right
+    std::sort (groups.begin(), groups.end(), [] (const Group& a, const Group& b)
+    {
+        if (std::abs (a.area.getCentreY() - b.area.getCentreY()) > 0.5f * juce::jmin (a.area.getHeight(), b.area.getHeight()))
+            return a.area.getCentreY() < b.area.getCentreY();
+        return a.area.getCentreX() < b.area.getCentreX();
+    });
+
+    // 2. flowed across the rack in rows (the name block on the left)
+    constexpr float margin = 10.0f, gapX = 12.0f, gapY = 6.0f;
+    float widest = 0.0f;
+    for (auto& g : groups) widest = juce::jmax (widest, g.area.getWidth());
+    const float width = juce::jmax ((float) rackWidth, (float) rackTitleWidth + 2.0f * margin + widest);
+    const float avail = width - (float) rackTitleWidth - 2.0f * margin;
+    struct Row { std::vector<int> groups; float w = 0.0f, h = 0.0f; };
+    std::vector<Row> rows (1);
+    for (int g = 0; g < (int) groups.size(); ++g)
+    {
+        const auto& a = groups[(size_t) g].area;
+        if (! rows.back().groups.empty() && rows.back().w + gapX + a.getWidth() > avail) rows.push_back ({});
+        auto& r = rows.back();
+        r.w = r.groups.empty() ? a.getWidth() : r.w + gapX + a.getWidth();
+        r.h = juce::jmax (r.h, a.getHeight());
+        r.groups.push_back (g);
+    }
+    float contentH = 0.0f;
+    for (auto& r : rows) contentH += r.h;
+    contentH += gapY * (float) (rows.size() - 1);
+
+    // 3. whole rack units: 1U is 44.45 mm of a 450.8 mm face (between the ears)
+    const float unit = width * 44.45f / 450.8f;
+    const float minH = presets.empty() ? 84.0f : 104.0f;           // (the name block's needs)
+    const int units = juce::jmax (1, (int) std::ceil ((juce::jmax (contentH + 2.0f * margin, minH)) / unit - 0.03f));
+    const float height = (float) units * unit;
+
+    // 4. every control (and its heading) to its place; spread a short row across the width
+    float y = (height - contentH) * 0.5f;
+    for (auto& r : rows)
+    {
+        const float spare = avail - r.w;
+        const float extra = r.groups.size() > 1 ? juce::jmin (spare / (float) (r.groups.size() - 1), 40.0f) : 0.0f;
+        float x = (float) rackTitleWidth + margin + (spare - extra * (float) (r.groups.size() - 1)) * 0.5f;
+        for (int g : r.groups)
+        {
+            auto& grp = groups[(size_t) g];
+            const float dx = x - grp.area.getX(), dy = y + (r.h - grp.area.getHeight()) * 0.5f - grp.area.getY();
+            for (int k : grp.items) { items[(size_t) k].x += dx; items[(size_t) k].y += dy; }
+            x += grp.area.getWidth() + gapX + extra;
+        }
+        y += r.h + gapY;
+    }
+    panelW = juce::roundToInt (width);
+    panelH = juce::roundToInt (height);
+}
+
+//==============================================================================
+juce::Point<float> PequodPanel::presetCentre() const
+{
+    return rack ? Pt ((float) rackTitleWidth / 2.0f, (float) panelH - 18.0f) : Pt ((float) panelW / 2.0f, (float) panelH - 36.0f);
+}
+juce::Rectangle<float> PequodPanel::presetNameRect() const { return Rect (rack ? (float) rackTitleWidth - 72.0f : 220.0f, 20.0f).withCentre (presetCentre()); }
+juce::Rectangle<float> PequodPanel::presetPrevRect() const
+{
+    return Rect (22.0f, 20.0f).withCentre (presetCentre() - Pt (presetNameRect().getWidth() / 2.0f + 18.0f, 0.0f));
+}
+juce::Rectangle<float> PequodPanel::presetNextRect() const
+{
+    return Rect (22.0f, 20.0f).withCentre (presetCentre() + Pt (presetNameRect().getWidth() / 2.0f + 18.0f, 0.0f));
+}
 
 juce::Rectangle<float> PequodPanel::presetListRect() const
 {
@@ -889,7 +1080,7 @@ int PequodPanel::hitTest (Pt p) const
                 if (Rect (58.0f, 58.0f).withCentre (c).contains (p)) return k;
                 break;
             case Kind::radio:
-                if (Rect (it.x, it.y, it.w, it.rowH * (float) it.labels.size()).contains (p)) return k;
+                if (Rect (it.x, it.y, it.w * (float) it.cols, it.rowH * (float) radioRows (it.labels.size(), it.cols)).contains (p)) return k;
                 break;
             default: break;
         }
@@ -914,7 +1105,21 @@ void PequodPanel::mouseDown (const juce::MouseEvent& e)
         const int n = (int) presets.size();
         if (presetPrevRect().contains (p)) { applyPreset (currentPreset < 0 ? n - 1 : (currentPreset + n - 1) % n); return; }
         if (presetNextRect().contains (p)) { applyPreset (currentPreset < 0 ? 0 : (currentPreset + 1) % n); return; }
-        if (presetNameRect().contains (p)) { presetOpen = ! presetOpen; repaint(); return; }
+        if (presetNameRect().contains (p))
+        {
+            if (rack)
+            {
+                // (the rack panel is short: the presets as a menu)
+                juce::PopupMenu m;
+                for (int k = 0; k < n; ++k) m.addItem (k + 1, presets[(size_t) k].name, true, k == currentPreset);
+                juce::Component::SafePointer<PequodPanel> safe (this);
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this)
+                                    .withTargetScreenArea (localAreaToGlobal (presetNameRect().toNearestInt())),
+                                 [safe] (int r) { if (safe != nullptr && r > 0) safe->applyPreset (r - 1); });
+                return;
+            }
+            presetOpen = ! presetOpen; repaint(); return;
+        }
     }
     if (auto* ir = irItem())
     {
@@ -965,8 +1170,10 @@ void PequodPanel::mouseDown (const juce::MouseEvent& e)
             break;
         case Kind::radio:
         {
-            const int k = (int) ((p.y - it.y) / it.rowH);
-            if (k != indexOf (it.p)) setIndex (it.p, k);
+            const int rows = radioRows (it.labels.size(), it.cols);
+            const int k = juce::jlimit (0, rows - 1, (int) ((p.y - it.y) / it.rowH))
+                        + rows * juce::jlimit (0, it.cols - 1, (int) ((p.x - it.x) / it.w));
+            if (k != indexOf (it.p) && k < it.labels.size()) setIndex (it.p, k);
             dragItem = -1;
             break;
         }

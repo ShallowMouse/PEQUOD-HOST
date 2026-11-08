@@ -228,6 +228,8 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
 
     presetButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::well);
     presetButton.setTooltip ("Click for the preset list");
+    for (auto* k : { &saveButton, &saveAsButton, &initButton, &learnButton, &audioButton, &pluginsButton })
+        k->setPartColour (Pequod::Colours::mustard);
     learnButton.setTooltip ("MIDI / OSC learn: click, move a control on any plugin, then move a MIDI control or send OSC");
     initButton.setTooltip ("Empty rack");
 
@@ -239,7 +241,7 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
     initButton.onClick    = [this] { if (onInit) onInit(); };
     learnButton.onClick   = [this] { if (onToggleLearn) onToggleLearn(); };
     audioButton.onClick   = [this] { if (onAudioSettings) onAudioSettings(); };
-    if (melville::isHosted()) audioButton.setButtonText ("SETUP");   // (no audio device inside MELVILLE: input, MIDI and OSC)
+    if (melville::isHosted()) audioButton.setTooltip ("Setup: input, MIDI and OSC");   // (no audio device inside MELVILLE)
     pluginsButton.onClick = [this] { if (onPluginManager) onPluginManager(); };
     controllerButton.onClick = [this] { if (onController) onController(); };
     updateButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::mustard);
@@ -479,26 +481,13 @@ void HeaderBar::showCoresMenu()
 
 void HeaderBar::paint (juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat();
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff262626), 0, 0, juce::Colour (0xff171717), 0, r.getHeight(), false));
-    g.fillAll();
-    g.setColour (Pequod::Colours::mustard);
-    g.fillRect (r.removeFromBottom (2.0f));
-
+    // the bar every part has, in this part's colour (IRVING's oxblood inside MELVILLE)
+    partui::drawBar (g, getLocalBounds(), Pequod::Colours::mustard);
     if (! showWordmark) return;
-    auto wm = wordmarkArea.toFloat();
-    g.setColour (Pequod::Colours::mustard);
-    g.setFont (Pequod::heading (28.0f));
    #if defined (IRVING_LOOK) && IRVING_LOOK
-    g.drawText ("IRVING", wm.removeFromTop (wm.getHeight() * 0.68f), juce::Justification::bottomLeft);    // (its name inside MELVILLE)
-    g.setColour (Pequod::Colours::textDim);
-    g.setFont (Pequod::heading (11.0f, false));
-    g.drawText ("G  U  I  T  A  R    R  I  G", wm, juce::Justification::topLeft);
+    partui::drawWordmark (g, wordmarkArea, "IRVING", "GUITAR RIG", Pequod::Colours::mustard, Pequod::heading (28.0f));    // (its name inside MELVILLE)
    #else
-    g.drawText ("PEQUOD", wm.removeFromTop (wm.getHeight() * 0.68f), juce::Justification::bottomLeft);
-    g.setColour (Pequod::Colours::textDim);
-    g.setFont (Pequod::heading (11.0f, false));
-    g.drawText ("H  O  S  T", wm, juce::Justification::topLeft);
+    partui::drawWordmark (g, wordmarkArea, "PEQUOD", "HOST", Pequod::Colours::mustard, Pequod::heading (28.0f));
    #endif
 }
 
@@ -515,10 +504,10 @@ void HeaderBar::resized()
 
     auto needed = [&] (const Sizes& z, bool wordmark)
     {
-        int w = 66 + 6 + 66 + 8 + z.cpu + 8 + 78 + 4 + z.controller + 4 + 62 + z.gap + 66 + 4 + z.tuner + z.gap
-              + 66 + z.gap + z.tap + 4 + z.tempo + 12;
+        int w = 66 + 6 + 66 + 8 + z.cpu + 8 + partui::keyWidth + 4 + z.controller + 4 + partui::keyWidth + z.gap + 66 + 4 + z.tuner + z.gap
+              + partui::keyWidth + z.gap + z.tap + 4 + z.tempo + 12;
         w += (wordmark ? z.wordmark + 8 : 0) + (updateButton.isVisible() ? z.update + 8 : 0);
-        w += 30 + 4 + 4 + 30 + 8 + 48 + 4 + 52 + 4 + 74;   // < > INIT SAVE SAVE AS
+        w += 30 + 4 + 4 + 30 + 8 + 3 * (partui::keyWidth + 4);   // < > INIT SAVE SAVE AS
         return w;
     };
     constexpr int presetWanted = 200;
@@ -542,17 +531,17 @@ void HeaderBar::resized()
     r.removeFromRight (8);
     cpuButton.setBounds (row (r.removeFromRight (z.cpu), 40));
     r.removeFromRight (8);
-    pluginsButton.setBounds (row (r.removeFromRight (78)));
+    pluginsButton.setBounds (row (r.removeFromRight (partui::keyWidth), partui::keyHeight));
     r.removeFromRight (4);
     controllerButton.setBounds (row (r.removeFromRight (z.controller)));
     r.removeFromRight (4);
-    audioButton.setBounds (row (r.removeFromRight (62)));
+    audioButton.setBounds (row (r.removeFromRight (partui::keyWidth), partui::keyHeight));
     r.removeFromRight (z.gap);
     muteButton.setBounds (row (r.removeFromRight (66)));
     r.removeFromRight (4);
     tunerDisplay.setBounds (row (r.removeFromRight (z.tuner), 44));
     r.removeFromRight (z.gap);
-    learnButton.setBounds (row (r.removeFromRight (66)));
+    learnButton.setBounds (row (r.removeFromRight (partui::keyWidth), partui::keyHeight));
     r.removeFromRight (z.gap);
     tapButton.setBounds (row (r.removeFromRight (z.tap)));
     if (tapButton.isVisible()) r.removeFromRight (4);
@@ -570,18 +559,18 @@ void HeaderBar::resized()
     prevButton.setBounds (row (r.removeFromLeft (30)));
     r.removeFromLeft (4);
 
-    auto saveAs = r.removeFromRight (74);
+    auto saveAs = r.removeFromRight (partui::keyWidth);
     r.removeFromRight (4);
-    auto save = r.removeFromRight (52);
+    auto save = r.removeFromRight (partui::keyWidth);
     r.removeFromRight (4);
-    auto init = r.removeFromRight (48);
+    auto init = r.removeFromRight (partui::keyWidth);
     r.removeFromRight (8);
     auto next = r.removeFromRight (30);
     r.removeFromRight (4);
 
     presetButton.setBounds (row (r.removeFromLeft (juce::jlimit (0, 320, r.getWidth()))));
     nextButton.setBounds (row (next.withX (presetButton.getRight() + 4)));
-    initButton.setBounds (row (init.withX (nextButton.getRight() + 8)));
-    saveButton.setBounds (row (save.withX (initButton.getRight() + 4)));
-    saveAsButton.setBounds (row (saveAs.withX (saveButton.getRight() + 4)));
+    initButton.setBounds (row (init.withX (nextButton.getRight() + 8), partui::keyHeight));
+    saveButton.setBounds (row (save.withX (initButton.getRight() + 4), partui::keyHeight));
+    saveAsButton.setBounds (row (saveAs.withX (saveButton.getRight() + 4), partui::keyHeight));
 }
