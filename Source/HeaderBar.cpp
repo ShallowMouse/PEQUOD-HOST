@@ -241,7 +241,7 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
     initButton.onClick    = [this] { if (onInit) onInit(); };
     learnButton.onClick   = [this] { if (onToggleLearn) onToggleLearn(); };
     audioButton.onClick   = [this] { if (onAudioSettings) onAudioSettings(); };
-    if (melville::isHosted()) audioButton.setTooltip ("Setup: input, MIDI and OSC");   // (no audio device inside MELVILLE)
+    if (melville::isHosted()) audioButton.setTooltip ("Settings: input, MIDI and OSC");   // (no audio device inside MELVILLE)
     pluginsButton.onClick = [this] { if (onPluginManager) onPluginManager(); };
     controllerButton.onClick = [this] { if (onController) onController(); };
     updateButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::mustard);
