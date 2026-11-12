@@ -226,3 +226,95 @@ mod tests {
         assert!((comp_gr(-10.0, -20.0, 4.0, 0.0) - 7.5).abs() < 1e-9);
     }
 }
+
+/// A Leslie 122-style rotating speaker for the instruments (the same model as the Rotor
+/// effect): a valve amp, an 800 Hz crossover, a horn and a drum spinning with inertia, two
+/// mics. Horn 0.83 / 6.75 rev/s, drum 0.67 / 5.9 rev/s (chorale / tremolo).
+pub struct Leslie {
+    fs: f64,
+    xo_lp: [crate::dsp::Biquad; 2],
+    xo_hp: [crate::dsp::Biquad; 2],
+    horn_line: crate::dsp::DelayLine,
+    drum_line: crate::dsp::DelayLine,
+    horn_tone: [crate::dsp::OnePole; 2],
+    pub horn_speed: f64,
+    pub drum_speed: f64,
+    pub horn_phase: f64,
+    pub drum_phase: f64,
+}
+
+impl Leslie {
+    pub const HORN_SLOW: f64 = 0.83;
+    pub const HORN_FAST: f64 = 6.75;
+    pub const DRUM_SLOW: f64 = 0.67;
+    pub const DRUM_FAST: f64 = 5.9;
+
+    pub fn new(fs: f64) -> Self {
+        let mut xo_lp = [crate::dsp::Biquad::identity(); 2];
+        let mut xo_hp = [crate::dsp::Biquad::identity(); 2];
+        for b in &mut xo_lp {
+            b.set_lowpass(fs, 800.0, 0.707);
+        }
+        for b in &mut xo_hp {
+            b.set_highpass(fs, 800.0, 0.707);
+        }
+        Self {
+            fs,
+            xo_lp,
+            xo_hp,
+            horn_line: crate::dsp::DelayLine::new((fs * 0.01) as usize),
+            drum_line: crate::dsp::DelayLine::new((fs * 0.01) as usize),
+            horn_tone: [crate::dsp::OnePole::default(); 2],
+            horn_speed: Self::HORN_SLOW,
+            drum_speed: Self::DRUM_SLOW,
+            horn_phase: 0.0,
+            drum_phase: 0.3,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.xo_lp.iter_mut().for_each(|b| b.reset());
+        self.xo_hp.iter_mut().for_each(|b| b.reset());
+        self.horn_line.reset();
+        self.drum_line.reset();
+    }
+
+    /// One sample in (mono, after its amp), stereo out. `speed`: 0 stopped (the brake),
+    /// 1 chorale, 2 tremolo. The horn gets to a new speed in about `accel_s`; the heavy drum
+    /// takes three times as long.
+    pub fn process(&mut self, x: f64, speed: u8, accel_s: f64, spread: f64) -> (f64, f64) {
+        use std::f64::consts::{PI, TAU};
+        let fs = self.fs;
+        let (ht, dt) = match speed {
+            0 => (0.0, 0.0),
+            1 => (Self::HORN_SLOW, Self::DRUM_SLOW),
+            _ => (Self::HORN_FAST, Self::DRUM_FAST),
+        };
+        let horn_c = crate::dsp::coeff(fs, accel_s * 1000.0 / 3.0);
+        let drum_c = crate::dsp::coeff(fs, accel_s * 3000.0 / 3.0);
+        self.horn_speed = ht + horn_c * (self.horn_speed - ht);
+        self.drum_speed = dt + drum_c * (self.drum_speed - dt);
+        self.horn_phase = (self.horn_phase + self.horn_speed / fs).fract();
+        self.drum_phase = (self.drum_phase + self.drum_speed / fs).fract();
+        let hi = self.xo_hp[0].process(x);
+        let hi = self.xo_hp[1].process(hi);
+        let lo = self.xo_lp[0].process(x);
+        let lo = self.xo_lp[1].process(lo);
+        self.horn_line.write(hi);
+        self.drum_line.write(lo);
+        let mic = [-spread * PI / 2.0, spread * PI / 2.0];
+        let mut out = [0.0f64; 2];
+        for m in 0..2 {
+            let ha = self.horn_phase * TAU - mic[m];
+            let da = self.drum_phase * TAU - mic[m];
+            let hd = 0.00042 * (1.0 + ha.sin()) * fs + 2.0;
+            let dd = 0.00012 * (1.0 + da.sin()) * fs + 2.0;
+            let facing = 0.5 + 0.5 * ha.cos();
+            self.horn_tone[m].set_lowpass(fs, 2500.0 + 9000.0 * facing);
+            let h = self.horn_tone[m].lp(self.horn_line.read(hd)) * (0.45 + 0.55 * facing);
+            let d = self.drum_line.read(dd) * (0.72 + 0.28 * da.cos());
+            out[m] = (h * 0.55 + d * 0.45) * 1.6;
+        }
+        (out[0], out[1])
+    }
+}

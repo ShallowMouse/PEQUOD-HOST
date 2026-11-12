@@ -239,3 +239,10 @@ de_magnatone = { path = "../eddy/de_magnatone" }
 de_rooms = { path = "../eddy/de_rooms" }
 de_tank = { path = "../eddy/de_tank" }
 de_twang = { path = "../eddy/de_twang" }
+kb_clav = { path = "../keys/kb_clav" }
+kb_dx7 = { path = "../keys/kb_dx7" }
+kb_hammond = { path = "../keys/kb_hammond" }
+kb_mellotron = { path = "../keys/kb_mellotron" }
+kb_minimoog = { path = "../keys/kb_minimoog" }
+kb_rhodes = { path = "../keys/kb_rhodes" }
+kb_wurli = { path = "../keys/kb_wurli" }

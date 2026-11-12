@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["vintage", "plugins/*", "spector/*", "hannett/*", "plank/*", "townhouse/*", "ford/*", "sombr/*", "pequod/*", "antonoff/*", "setzer/*", "may/*", "monkeys/*", "strokes/*", "blocparty/*", "blink/*", "pedals/*", "boingo/*", "amps/*", "cabs/*", "straits/*", "livingend/*", "puppets/*", "lanham/*", "finn/*", "eddy/*", "pequod_engine"]
+members = ["vintage", "plugins/*", "spector/*", "hannett/*", "plank/*", "townhouse/*", "ford/*", "sombr/*", "pequod/*", "antonoff/*", "setzer/*", "may/*", "monkeys/*", "strokes/*", "blocparty/*", "blink/*", "pedals/*", "boingo/*", "amps/*", "cabs/*", "straits/*", "livingend/*", "puppets/*", "lanham/*", "finn/*", "eddy/*", "keys/*", "pequod_engine"]
 
 [workspace.package]
 version = "1.0.1"

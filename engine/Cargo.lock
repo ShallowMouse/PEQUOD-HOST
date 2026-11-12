@@ -2371,6 +2371,62 @@ dependencies = [
 ]
 
 [[package]]
+name = "kb_clav"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "kb_dx7"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "kb_hammond"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "kb_mellotron"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "kb_minimoog"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "kb_rhodes"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "kb_wurli"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3486,6 +3542,13 @@ dependencies = [
  "jf_studer",
  "jf_synth",
  "jf_tape",
+ "kb_clav",
+ "kb_dx7",
+ "kb_hammond",
+ "kb_mellotron",
+ "kb_minimoog",
+ "kb_rhodes",
+ "kb_wurli",
  "le_battery",
  "le_dualdelay",
  "le_rooms",

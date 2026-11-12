@@ -237,7 +237,14 @@ static FNS: &[fn() -> Descriptor] = &[
         de_magnatone::pequod_native,
         de_rooms::pequod_native,
         de_tank::pequod_native,
-        de_twang::pequod_native
+        de_twang::pequod_native,
+        kb_clav::pequod_native,
+        kb_dx7::pequod_native,
+        kb_hammond::pequod_native,
+        kb_mellotron::pequod_native,
+        kb_minimoog::pequod_native,
+        kb_rhodes::pequod_native,
+        kb_wurli::pequod_native
 ];
 
 struct Entry {
