@@ -203,7 +203,7 @@ impl TapeVoice {
                     k += 1;
                 }
                 // air through the folds, louder as they open
-                let air = noise.next() * sec.breath * (0.25 + flow / sec.singers.len().max(1) as f64);
+                let air = noise.next() * sec.breath * (0.1 + flow / sec.singers.len().max(1) as f64);
                 // the lips radiate the change in flow (a gentle rise in the treble)
                 let src = flow + air;
                 let rad = 12.0 * (src - 0.94 * self.radiate[si]);
@@ -311,8 +311,8 @@ pub mod sounds {
         name: "Mixed Choir",
         players: &[],
         wave: Wave::Voices(&[
-            Section { singers: &[p(-9.0, 5.1, 20.0), p(4.0, 5.6, 18.0)], formants: TENOR_AH, breath: 0.25 },
-            Section { singers: &[p(-3.0, 5.8, 22.0), p(8.0, 5.4, 19.0)], formants: ALTO_AH, breath: 0.25 },
+            Section { singers: &[p(-9.0, 5.1, 20.0), p(4.0, 5.6, 18.0)], formants: TENOR_AH, breath: 0.05 },
+            Section { singers: &[p(-3.0, 5.8, 22.0), p(8.0, 5.4, 19.0)], formants: ALTO_AH, breath: 0.05 },
         ]),
         formants: [NONE; 3],
         lp: 6000.0, lp_start: 6000.0, open_s: 0.0,
@@ -381,8 +381,8 @@ pub mod sounds {
         name: "Male Choir",
         players: &[],
         wave: Wave::Voices(&[
-            Section { singers: MEN_A, formants: TENOR_AH, breath: 0.25 },
-            Section { singers: MEN_B, formants: BASS_AH, breath: 0.25 },
+            Section { singers: MEN_A, formants: TENOR_AH, breath: 0.05 },
+            Section { singers: MEN_B, formants: BASS_AH, breath: 0.05 },
         ]),
         formants: [NONE; 3],
         lp: 5000.0, lp_start: 5000.0, open_s: 0.0,
@@ -392,8 +392,8 @@ pub mod sounds {
         name: "Female Choir",
         players: &[],
         wave: Wave::Voices(&[
-            Section { singers: WOMEN_A, formants: SOPRANO_AH, breath: 0.3 },
-            Section { singers: WOMEN_B, formants: ALTO_AH, breath: 0.3 },
+            Section { singers: WOMEN_A, formants: SOPRANO_AH, breath: 0.06 },
+            Section { singers: WOMEN_B, formants: ALTO_AH, breath: 0.06 },
         ]),
         formants: [NONE; 3],
         lp: 7000.0, lp_start: 7000.0, open_s: 0.0,
@@ -403,10 +403,10 @@ pub mod sounds {
         name: "8 Voice Choir",
         players: &[],
         wave: Wave::Voices(&[
-            Section { singers: &[p(-10.0, 5.1, 20.0), p(5.0, 5.6, 22.0)], formants: BASS_AH, breath: 0.25 },
-            Section { singers: &[p(-4.0, 5.4, 24.0), p(9.0, 5.0, 19.0)], formants: TENOR_AH, breath: 0.25 },
-            Section { singers: &[p(-7.0, 5.8, 23.0), p(3.0, 6.1, 20.0)], formants: ALTO_AH, breath: 0.3 },
-            Section { singers: &[p(-2.0, 5.5, 25.0), p(11.0, 5.9, 21.0)], formants: SOPRANO_AH, breath: 0.3 },
+            Section { singers: &[p(-10.0, 5.1, 20.0), p(5.0, 5.6, 22.0)], formants: BASS_AH, breath: 0.05 },
+            Section { singers: &[p(-4.0, 5.4, 24.0), p(9.0, 5.0, 19.0)], formants: TENOR_AH, breath: 0.05 },
+            Section { singers: &[p(-7.0, 5.8, 23.0), p(3.0, 6.1, 20.0)], formants: ALTO_AH, breath: 0.06 },
+            Section { singers: &[p(-2.0, 5.5, 25.0), p(11.0, 5.9, 21.0)], formants: SOPRANO_AH, breath: 0.06 },
         ]),
         formants: [NONE; 3],
         lp: 6500.0, lp_start: 6500.0, open_s: 0.0,
