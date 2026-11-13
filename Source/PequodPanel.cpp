@@ -239,9 +239,16 @@ float PequodPanel::plain (int p) const
 
 int PequodPanel::stepsOf (int p) const
 {
-    // as the VST3 panel: continuous parameters count as one step
+    // as the VST3 panel: continuous parameters count as one step - except one the panel shows as
+    // a list of choices (a selector or a radio list): a stepped number reports no steps of its
+    // own, so its choices say how many there are (else every click lands on the first or last)
     auto& ps = inst.info().params;
-    return juce::isPositiveAndBelow (p, (int) ps.size()) ? juce::jmax (1, ps[(size_t) p].steps) : 1;
+    const int own = juce::isPositiveAndBelow (p, (int) ps.size()) ? ps[(size_t) p].steps : 0;
+    if (own > 0) return own;
+    for (auto& it : items)
+        if (it.p == p && (it.kind == Kind::radio || it.kind == Kind::selector) && it.labels.size() > 1)
+            return it.labels.size() - 1;
+    return 1;
 }
 
 int PequodPanel::indexOf (int p) const

@@ -19,6 +19,35 @@ pub enum Wave {
     Pulse(f64),
     /// Nearly sine, a little 2nd and 3rd, breath on top.
     Flute,
+    /// Singers: each a glottal pulse with its own pitch drift, jitter and vibrato, through the
+    /// vowel's five formants for their voice part. The `players` and `formants` of the Sound
+    /// aren't used: each Section has its own.
+    Voices(&'static [Section]),
+}
+
+/// A voice part of a choir: its singers, and the five formants of the vowel as that part
+/// sings it (Hz, bandwidth Hz, dB).
+#[derive(Clone, Copy)]
+pub struct Section {
+    pub singers: &'static [Player],
+    pub formants: [(f64, f64, f64); 5],
+    /// Aspiration: air through the folds, riding on each pulse.
+    pub breath: f64,
+}
+
+/// One period of glottal flow (Rosenberg): opens over 40 % of the cycle, closes over 16 %,
+/// then shut. Smooth, with the falling spectrum of a voice rather than a buzzy saw.
+#[inline]
+fn glottal(ph: f64) -> f64 {
+    const OPEN: f64 = 0.40;
+    const CLOSE: f64 = 0.16;
+    if ph < OPEN {
+        0.5 * (1.0 - (std::f64::consts::PI * ph / OPEN).cos())
+    } else if ph < OPEN + CLOSE {
+        (0.5 * std::f64::consts::PI * (ph - OPEN) / CLOSE).cos()
+    } else {
+        0.0
+    }
 }
 
 /// One player: detune (cents), vibrato rate (Hz) and depth (cents), octave.
@@ -46,7 +75,8 @@ pub struct Sound {
     pub gain: f64,
 }
 
-pub const MAX_PLAYERS: usize = 8;
+pub const MAX_PLAYERS: usize = 16;
+const MAX_SECTIONS: usize = 4;
 
 #[inline]
 fn blep(t: f64, dt: f64) -> f64 {
@@ -81,11 +111,23 @@ pub struct TapeVoice {
     lp_a: f64,
     breath: Biquad,
     sound: usize,
+    // singers (Wave::Voices)
+    drift: [f64; MAX_PLAYERS],
+    jitter: [f64; MAX_PLAYERS],
+    shimmer: [f64; MAX_PLAYERS],
+    onset: [f64; MAX_PLAYERS],
+    bank: [[Biquad; 5]; MAX_SECTIONS],
+    radiate: [f64; MAX_SECTIONS],
 }
 
 impl Default for TapeVoice {
     fn default() -> Self {
-        Self { age: 0, f: 440.0, ph: [0.0; MAX_PLAYERS], vph: [0.0; MAX_PLAYERS], form: [Biquad::identity(); 3], lp: [0.0; 2], lp_a: 1.0, breath: Biquad::identity(), sound: 0 }
+        Self {
+            age: 0, f: 440.0, ph: [0.0; MAX_PLAYERS], vph: [0.0; MAX_PLAYERS], form: [Biquad::identity(); 3], lp: [0.0; 2], lp_a: 1.0,
+            breath: Biquad::identity(), sound: 0,
+            drift: [0.0; MAX_PLAYERS], jitter: [0.0; MAX_PLAYERS], shimmer: [1.0; MAX_PLAYERS], onset: [0.0; MAX_PLAYERS],
+            bank: [[Biquad::identity(); 5]; MAX_SECTIONS], radiate: [0.0; MAX_SECTIONS],
+        }
     }
 }
 
@@ -107,6 +149,19 @@ impl TapeVoice {
                 b.set_peak(fs, hz.min(0.45 * fs), *q, *g);
             }
         }
+        if let Wave::Voices(sections) = s.wave {
+            for (bank, sec) in self.bank.iter_mut().zip(sections.iter()) {
+                for (b, (hz, bw, _)) in bank.iter_mut().zip(sec.formants.iter()) {
+                    let hz = hz.min(0.45 * fs);
+                    b.set_bandpass(fs, hz, hz / bw.max(10.0));
+                }
+            }
+            // the singers come in a little apart, and each starts at their own pitch
+            for k in 0..MAX_PLAYERS {
+                self.onset[k] = 0.09 * (0.5 + 0.5 * nz.next());
+                self.drift[k] = 6.0 * nz.next();
+            }
+        }
         if matches!(s.wave, Wave::Flute) || s.breath > 0.0 {
             self.breath.set_bandpass(fs, (2.0 * f).clamp(300.0, 0.4 * fs), 2.0);
         }
@@ -122,6 +177,52 @@ impl TapeVoice {
         let f = self.f * speed;
         let vib_amt = if s.vib_fade > 0.0 { ((t - s.vib_onset) / s.vib_fade).clamp(0.0, 1.0) } else if t >= s.vib_onset { 1.0 } else { 0.0 };
         let mut x = 0.0;
+        if let Wave::Voices(sections) = s.wave {
+            let mut k = 0;
+            for (si, sec) in sections.iter().enumerate().take(MAX_SECTIONS) {
+                let mut flow = 0.0;
+                for Player(det, vr, vd, oct) in sec.singers.iter() {
+                    if k >= MAX_PLAYERS {
+                        break;
+                    }
+                    // each singer: a slow wander in pitch, vibrato that settles in, a tiny
+                    // cycle-to-cycle jitter and shimmer
+                    self.drift[k] += 0.004 * noise.next() - 0.00002 * self.drift[k];
+                    let vib = vd / 1200.0 * (TAU * self.vph[k]).sin() * (0.6 + 0.4 * vib_amt);
+                    let cents = det + self.drift[k] * 1.2 + self.jitter[k];
+                    let dt = (f * 2f64.powf(*oct as f64 + cents / 1200.0 + vib) / fs).min(0.45);
+                    let ph = self.ph[k] + dt;
+                    if ph >= 1.0 {
+                        self.jitter[k] = 4.0 * noise.next();
+                        self.shimmer[k] = 1.0 + 0.06 * noise.next();
+                    }
+                    self.ph[k] = ph.fract();
+                    self.vph[k] = (self.vph[k] + vr * (1.0 + 0.03 * self.drift[k].tanh()) / fs).fract();
+                    let come_in = ((t - self.onset[k]) / s.attack.max(0.001)).clamp(0.0, 1.0);
+                    flow += glottal(self.ph[k]) * self.shimmer[k] * come_in;
+                    k += 1;
+                }
+                // air through the folds, louder as they open
+                let air = noise.next() * sec.breath * (0.25 + flow / sec.singers.len().max(1) as f64);
+                // the lips radiate the change in flow (a gentle rise in the treble)
+                let src = flow + air;
+                let rad = 12.0 * (src - 0.94 * self.radiate[si]);
+                self.radiate[si] = src;
+                let mut y = 0.0;
+                for (b, (_, _, db)) in self.bank[si].iter_mut().zip(sec.formants.iter()) {
+                    y += b.process(rad) * db_to_gain(*db);
+                }
+                x += y;
+            }
+            if self.age % 32 == 1 {
+                self.lp_a = 1.0 - (-TAU * s.lp.min(0.45 * fs) / fs).exp();
+            }
+            self.lp[0] += self.lp_a * (x - self.lp[0]);
+            self.lp[1] += self.lp_a * (self.lp[0] - self.lp[1]);
+            // low notes carry less: keep the keyboard even (about +6 dB at the bottom, -4 at the top)
+            let even = (440.0 / self.f).sqrt().clamp(0.6, 2.0);
+            return self.lp[1] * s.gain * even;
+        }
         match s.wave {
             Wave::Flute => {
                 let Player(_, vr, vd, _) = s.players[0];
@@ -141,7 +242,7 @@ impl TapeVoice {
                         Wave::Saw => 2.0 * ph - 1.0 - blep(ph, dt),
                         Wave::Square => pulse(ph, dt, 0.5),
                         Wave::Pulse(d) => pulse(ph, dt, d),
-                        Wave::Flute => 0.0,
+                        Wave::Flute | Wave::Voices(_) => 0.0,
                     };
                     self.ph[j] = (ph + dt).fract();
                     self.vph[j] = (self.vph[j] + vr / fs).fract();
@@ -194,13 +295,28 @@ pub mod sounds {
         lp: 6000.0, lp_start: 6000.0, open_s: 0.0,
         attack: 0.06, vib_onset: 0.5, vib_fade: 0.4, breath: 0.06, chiff: 6.0, gain: 0.55,
     };
+    // The vowel "aah", part by part (the classic singing formant tables: bass, tenor, alto,
+    // soprano - frequency, bandwidth, level), and the singers in each.
+    const BASS_AH: [(f64, f64, f64); 5] = [(600.0, 60.0, 0.0), (1040.0, 70.0, -7.0), (2250.0, 110.0, -9.0), (2450.0, 120.0, -9.0), (2750.0, 130.0, -20.0)];
+    const TENOR_AH: [(f64, f64, f64); 5] = [(650.0, 80.0, 0.0), (1080.0, 90.0, -6.0), (2650.0, 120.0, -7.0), (2900.0, 130.0, -8.0), (3250.0, 140.0, -22.0)];
+    const ALTO_AH: [(f64, f64, f64); 5] = [(800.0, 80.0, 0.0), (1150.0, 90.0, -4.0), (2800.0, 120.0, -20.0), (3500.0, 130.0, -36.0), (4950.0, 140.0, -60.0)];
+    const SOPRANO_AH: [(f64, f64, f64); 5] = [(800.0, 80.0, 0.0), (1150.0, 90.0, -6.0), (2900.0, 120.0, -32.0), (3900.0, 130.0, -20.0), (4950.0, 140.0, -50.0)];
+
+    const MEN_A: &[Player] = &[p(-9.0, 5.1, 22.0), p(-2.0, 5.6, 18.0), p(6.0, 5.3, 25.0), p(11.0, 5.9, 20.0)];
+    const MEN_B: &[Player] = &[p(-12.0, 5.4, 20.0), p(-5.0, 5.0, 24.0), p(3.0, 5.8, 19.0), p(8.0, 5.2, 23.0)];
+    const WOMEN_A: &[Player] = &[p(-8.0, 5.7, 24.0), p(-1.0, 6.1, 20.0), p(5.0, 5.5, 27.0), p(10.0, 5.9, 22.0)];
+    const WOMEN_B: &[Player] = &[p(-11.0, 5.9, 21.0), p(-4.0, 5.4, 26.0), p(2.0, 6.2, 19.0), p(7.0, 5.6, 24.0)];
+
     pub const CHOIR: Sound = Sound {
         name: "Mixed Choir",
-        players: &[p(-9.0, 5.1, 14.0), p(-3.0, 5.6, 12.0), p(4.0, 5.9, 16.0), p(10.0, 5.4, 13.0)],
-        wave: Wave::Saw,
-        formants: [(720.0, 4.0, 12.0), (1150.0, 5.0, 9.0), (2600.0, 6.0, 7.0)],
-        lp: 3500.0, lp_start: 3500.0, open_s: 0.0,
-        attack: 0.15, vib_onset: 0.0, vib_fade: 0.0, breath: 0.011, chiff: 0.0, gain: 0.2,
+        players: &[],
+        wave: Wave::Voices(&[
+            Section { singers: &[p(-9.0, 5.1, 20.0), p(4.0, 5.6, 18.0)], formants: TENOR_AH, breath: 0.25 },
+            Section { singers: &[p(-3.0, 5.8, 22.0), p(8.0, 5.4, 19.0)], formants: ALTO_AH, breath: 0.25 },
+        ]),
+        formants: [NONE; 3],
+        lp: 6000.0, lp_start: 6000.0, open_s: 0.0,
+        attack: 0.15, vib_onset: 0.25, vib_fade: 0.6, breath: 0.0, chiff: 0.0, gain: 2.2,
     };
     pub const CELLO: Sound = Sound {
         name: "Cello",
@@ -263,30 +379,38 @@ pub mod sounds {
     };
     pub const MALE_CHOIR: Sound = Sound {
         name: "Male Choir",
-        players: &[p(-10.0, 5.0, 15.0), p(-3.0, 5.4, 13.0), p(4.0, 5.7, 16.0), p(9.0, 5.2, 14.0)],
-        wave: Wave::Saw,
-        formants: [(650.0, 5.0, 12.0), (1080.0, 6.0, 9.0), (2450.0, 7.0, 6.0)],
-        lp: 3000.0, lp_start: 3000.0, open_s: 0.0,
-        attack: 0.2, vib_onset: 0.0, vib_fade: 0.0, breath: 0.012, chiff: 0.0, gain: 0.2,
+        players: &[],
+        wave: Wave::Voices(&[
+            Section { singers: MEN_A, formants: TENOR_AH, breath: 0.25 },
+            Section { singers: MEN_B, formants: BASS_AH, breath: 0.25 },
+        ]),
+        formants: [NONE; 3],
+        lp: 5000.0, lp_start: 5000.0, open_s: 0.0,
+        attack: 0.2, vib_onset: 0.3, vib_fade: 0.6, breath: 0.0, chiff: 0.0, gain: 1.75,
     };
     pub const FEMALE_CHOIR: Sound = Sound {
         name: "Female Choir",
-        players: &[p(-8.0, 5.6, 15.0), p(-2.0, 5.9, 12.0), p(3.0, 6.2, 16.0), p(8.0, 5.5, 13.0)],
-        wave: Wave::Saw,
-        formants: [(850.0, 5.0, 12.0), (1250.0, 6.0, 9.0), (2850.0, 7.0, 7.0)],
-        lp: 4500.0, lp_start: 4500.0, open_s: 0.0,
-        attack: 0.18, vib_onset: 0.0, vib_fade: 0.0, breath: 0.012, chiff: 0.0, gain: 0.23,
+        players: &[],
+        wave: Wave::Voices(&[
+            Section { singers: WOMEN_A, formants: SOPRANO_AH, breath: 0.3 },
+            Section { singers: WOMEN_B, formants: ALTO_AH, breath: 0.3 },
+        ]),
+        formants: [NONE; 3],
+        lp: 7000.0, lp_start: 7000.0, open_s: 0.0,
+        attack: 0.18, vib_onset: 0.3, vib_fade: 0.6, breath: 0.0, chiff: 0.0, gain: 1.45,
     };
     pub const EIGHT_CHOIR: Sound = Sound {
         name: "8 Voice Choir",
-        players: &[
-            p(-12.0, 5.0, 14.0), p(-5.0, 5.5, 12.0), p(2.0, 5.8, 16.0), p(9.0, 5.3, 13.0),
-            p8(-9.0, 5.1, 13.0), p8(-2.0, 5.6, 15.0), p8(5.0, 5.9, 12.0), p8(12.0, 5.4, 14.0),
-        ],
-        wave: Wave::Saw,
-        formants: [(560.0, 4.0, 10.0), (900.0, 5.0, 7.0), (2500.0, 6.0, 5.0)],
-        lp: 3200.0, lp_start: 3200.0, open_s: 0.0,
-        attack: 0.3, vib_onset: 0.0, vib_fade: 0.0, breath: 0.012, chiff: 0.0, gain: 0.19,
+        players: &[],
+        wave: Wave::Voices(&[
+            Section { singers: &[p(-10.0, 5.1, 20.0), p(5.0, 5.6, 22.0)], formants: BASS_AH, breath: 0.25 },
+            Section { singers: &[p(-4.0, 5.4, 24.0), p(9.0, 5.0, 19.0)], formants: TENOR_AH, breath: 0.25 },
+            Section { singers: &[p(-7.0, 5.8, 23.0), p(3.0, 6.1, 20.0)], formants: ALTO_AH, breath: 0.3 },
+            Section { singers: &[p(-2.0, 5.5, 25.0), p(11.0, 5.9, 21.0)], formants: SOPRANO_AH, breath: 0.3 },
+        ]),
+        formants: [NONE; 3],
+        lp: 6500.0, lp_start: 6500.0, open_s: 0.0,
+        attack: 0.3, vib_onset: 0.3, vib_fade: 0.8, breath: 0.0, chiff: 0.0, gain: 1.7,
     };
 }
 
@@ -297,7 +421,7 @@ mod tests {
 
     #[test]
     fn every_sound_is_finite_and_audible() {
-        let all = [VIOLINS, FLUTE, CHOIR, CELLO, STRING_SECTION, BRASS, TROMBONE, SAX, OBOE, CLARINET, MALE_CHOIR, FEMALE_CHOIR, EIGHT_CHOIR];
+        let all = [CHOIR, MALE_CHOIR, FEMALE_CHOIR, EIGHT_CHOIR, VIOLINS, FLUTE, CELLO, STRING_SECTION, BRASS, TROMBONE, SAX, OBOE, CLARINET];
         let mut nz = Noise::new(5);
         for (i, s) in all.iter().enumerate() {
             for f in [98.0, 440.0, 1397.0] {
@@ -310,8 +434,65 @@ mod tests {
                     e += y * y;
                 }
                 let r = (e / 24000.0).sqrt();
+                println!("{:16} {f:6}: rms {r:.4}", s.name);
                 assert!(r > 0.01 && r < 1.5, "{} at {f}: rms {r}", s.name);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod listen {
+    use super::sounds::*;
+    use super::*;
+
+    /// (Development: `CHOIR_WAVS=dir cargo test -p vintage choir_wavs -- --ignored` renders each
+    /// choir as a short phrase of chords, to listen to.)
+    #[test]
+    #[ignore]
+    fn choir_wavs() {
+        let dir = std::env::var("CHOIR_WAVS").unwrap_or_else(|_| "/tmp".into());
+        let all = [CHOIR, MALE_CHOIR, FEMALE_CHOIR, EIGHT_CHOIR];
+        let fs = 48000.0;
+        for (i, s) in all.iter().enumerate() {
+            let chords: [&[f64]; 3] = [&[48.0, 55.0, 60.0, 64.0], &[45.0, 52.0, 57.0, 60.0], &[50.0, 57.0, 62.0, 65.0]];
+            let mut out: Vec<f32> = Vec::new();
+            let mut nz = Noise::new(9);
+            for (c, chord) in chords.iter().enumerate() {
+                let mut vs: Vec<TapeVoice> = chord
+                    .iter()
+                    .enumerate()
+                    .map(|(k, n)| {
+                        let mut v = TapeVoice::default();
+                        v.start(&all, i, 440.0 * 2f64.powf((n - 69.0) / 12.0), fs, 11 + (c * 7 + k) as u32);
+                        v
+                    })
+                    .collect();
+                for t in 0..(2.5 * fs) as usize {
+                    let fade = ((2.5 * fs - t as f64) / (0.15 * fs)).min(1.0);
+                    let y: f64 = vs.iter_mut().map(|v| v.next(&all, 1.0, fs, &mut nz)).sum::<f64>() * 0.25 * fade;
+                    out.push(y as f32);
+                }
+            }
+            let path = format!("{dir}/{}.wav", s.name.replace(' ', "_"));
+            let mut b: Vec<u8> = Vec::new();
+            let n = out.len() as u32;
+            b.extend_from_slice(b"RIFF");
+            b.extend_from_slice(&(36 + n * 2).to_le_bytes());
+            b.extend_from_slice(b"WAVEfmt ");
+            b.extend_from_slice(&16u32.to_le_bytes());
+            b.extend_from_slice(&1u16.to_le_bytes());
+            b.extend_from_slice(&1u16.to_le_bytes());
+            b.extend_from_slice(&48000u32.to_le_bytes());
+            b.extend_from_slice(&96000u32.to_le_bytes());
+            b.extend_from_slice(&2u16.to_le_bytes());
+            b.extend_from_slice(&16u16.to_le_bytes());
+            b.extend_from_slice(b"data");
+            b.extend_from_slice(&(n * 2).to_le_bytes());
+            for x in out {
+                b.extend_from_slice(&((x.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+            }
+            std::fs::write(path, b).unwrap();
         }
     }
 }
