@@ -2419,6 +2419,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "kb_rs202"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "kb_solina"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "kb_wurli"
 version = "1.0.1"
 dependencies = [
@@ -3548,6 +3564,8 @@ dependencies = [
  "kb_mellotron",
  "kb_minimoog",
  "kb_rhodes",
+ "kb_rs202",
+ "kb_solina",
  "kb_wurli",
  "le_battery",
  "le_dualdelay",

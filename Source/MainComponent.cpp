@@ -82,6 +82,13 @@ MainComponent::MainComponent()
             currentPresetFile = juce::File (x.getStringAttribute ("irvingPreset"));
             savedChangeCounter = engine.getChangeCounter();
             control.sendRackSummary();
+        },
+        [this] (const melville::NewStudio&)
+        {
+            // a new reel: an empty rack
+            initRack();
+            clearUndo();
+            control.sendRackSummary();
         } });
    #endif
 

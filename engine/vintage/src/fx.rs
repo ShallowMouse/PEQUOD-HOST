@@ -318,3 +318,44 @@ impl Leslie {
         (out[0], out[1])
     }
 }
+
+/// The string machines' ensemble (ARP Solina, Roland RS-202 and their kind): three bucket-
+/// brigade delays, each swept by the same two LFOs - a slow one (about 0.6 Hz) and a fast one
+/// (about 6 Hz) - at 0, 120 and 240 degrees, so the three copies are never in step. That
+/// three-phase wobble is what turns a flat divide-down saw into a string section.
+pub struct StringEnsemble {
+    taps: [Bbd; 3],
+    slow: f64,
+    fast: f64,
+    fs: f64,
+}
+
+impl StringEnsemble {
+    pub fn new(fs: f64) -> Self {
+        let mk = || {
+            let mut b = Bbd::new(fs, 20.0);
+            b.set_bandwidth(9000.0);
+            b
+        };
+        Self { taps: [mk(), mk(), mk()], slow: 0.0, fast: 0.0, fs }
+    }
+    pub fn reset(&mut self) {
+        self.taps.iter_mut().for_each(|t| t.reset());
+    }
+    /// One sample in, stereo out. `slow_hz`/`fast_hz` are the two LFOs, `depth` 0..1 scales
+    /// both sweeps (1 = the Solina's own).
+    #[inline]
+    pub fn process(&mut self, x: f64, slow_hz: f64, fast_hz: f64, depth: f64) -> (f64, f64) {
+        use std::f64::consts::TAU;
+        self.slow = (self.slow + slow_hz / self.fs).fract();
+        self.fast = (self.fast + fast_hz / self.fs).fract();
+        let ms = 0.001 * self.fs;
+        let mut y = [0.0; 3];
+        for (k, (tap, out)) in self.taps.iter_mut().zip(y.iter_mut()).enumerate() {
+            let off = k as f64 / 3.0;
+            let d = 6.0 + depth * (1.6 * (TAU * (self.slow + off)).sin() + 0.25 * (TAU * (self.fast + off)).sin());
+            *out = tap.process(x, d * ms);
+        }
+        (y[0] * 0.7 + y[1] * 0.45, y[2] * 0.7 + y[1] * 0.45)
+    }
+}

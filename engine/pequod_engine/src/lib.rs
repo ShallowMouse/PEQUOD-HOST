@@ -244,6 +244,8 @@ static FNS: &[fn() -> Descriptor] = &[
         kb_mellotron::pequod_native,
         kb_minimoog::pequod_native,
         kb_rhodes::pequod_native,
+        kb_rs202::pequod_native,
+        kb_solina::pequod_native,
         kb_wurli::pequod_native
 ];
 

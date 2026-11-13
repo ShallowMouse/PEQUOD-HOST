@@ -56,3 +56,4 @@ pub mod params {
 }
 pub mod verb;
 pub mod fx;
+pub mod tapes;

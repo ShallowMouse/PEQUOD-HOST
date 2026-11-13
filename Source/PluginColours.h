@@ -47,7 +47,7 @@ namespace PluginColours
                 "Hand Phaser|Harmonic Trem|Pad Chopper|Phase 90|Ring Mod|Rotary Speakers|Rotor|Slicer|Small Clone|Small Stone|"
                 "Tape Flanger|Time Modulator|TR-2 Tremolo|Uni-Vibe|Vibrato|Wall of Sound" },
             { "Synths, keys & instruments", 0x3F6B2A, "6120 Voice|Archtop|B-3 Organ|Bass Voice|Clavi D6|Clavioline|Compact Organ|Electric Grand|FM 7|Juno Six|"
-                "Model 72|P-Bass Voice|Prophet Five|Red Special|Reed 200|Stage 73|Synare 3|Tape 400|Tonewheel Organ|TR-606|"
+                "Model 72|P-Bass Voice|Prophet Five|Red Special|Reed 200|RS-202|Stage 73|String Ensemble|Synare 3|Tape 400|Tonewheel Organ|TR-606|"
                 "Twenty-Six|Upright Slap|VCS3" },
             { "Lo-fi & character", 0x8C2F62, "Car Radio|Cheap Speaker|Lo-Fi Crush|Phone Line|Practice Amp Vocal|Transcription Disc" },
             { "Microphones", 0x444B52, "Mic Pair|Studio Mics" },

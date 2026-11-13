@@ -245,4 +245,6 @@ kb_hammond = { path = "../keys/kb_hammond" }
 kb_mellotron = { path = "../keys/kb_mellotron" }
 kb_minimoog = { path = "../keys/kb_minimoog" }
 kb_rhodes = { path = "../keys/kb_rhodes" }
+kb_rs202 = { path = "../keys/kb_rs202" }
+kb_solina = { path = "../keys/kb_solina" }
 kb_wurli = { path = "../keys/kb_wurli" }
