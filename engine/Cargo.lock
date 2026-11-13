@@ -2371,6 +2371,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kb_chamberlin"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "kb_clav"
 version = "1.0.1"
 dependencies = [
@@ -2379,7 +2387,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "kb_cs80"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "kb_dx7"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "kb_farfisa"
 version = "1.0.1"
 dependencies = [
  "nih_plug",
@@ -2411,6 +2435,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kb_pianet"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "kb_rhodes"
 version = "1.0.1"
 dependencies = [
@@ -2428,6 +2460,22 @@ dependencies = [
 
 [[package]]
 name = "kb_solina"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "kb_taurus"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "kb_tb303"
 version = "1.0.1"
 dependencies = [
  "nih_plug",
@@ -3558,14 +3606,20 @@ dependencies = [
  "jf_studer",
  "jf_synth",
  "jf_tape",
+ "kb_chamberlin",
  "kb_clav",
+ "kb_cs80",
  "kb_dx7",
+ "kb_farfisa",
  "kb_hammond",
  "kb_mellotron",
  "kb_minimoog",
+ "kb_pianet",
  "kb_rhodes",
  "kb_rs202",
  "kb_solina",
+ "kb_taurus",
+ "kb_tb303",
  "kb_wurli",
  "le_battery",
  "le_dualdelay",

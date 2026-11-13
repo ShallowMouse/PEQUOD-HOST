@@ -412,6 +412,24 @@ pub mod sounds {
         lp: 6500.0, lp_start: 6500.0, open_s: 0.0,
         attack: 0.3, vib_onset: 0.3, vib_fade: 0.8, breath: 0.0, chiff: 0.0, gain: 1.7,
     };
+
+    /// The Chamberlin's voices: a few singers, closer to the microphone than the Mellotron's choirs.
+    pub const CH_FEMALE_VOICE: Sound = Sound {
+        name: "Female Voice",
+        players: &[],
+        wave: Wave::Voices(&[Section { singers: &[p(-4.0, 5.8, 26.0), p(5.0, 5.5, 22.0)], formants: SOPRANO_AH, breath: 0.05 }]),
+        formants: [NONE; 3],
+        lp: 8000.0, lp_start: 8000.0, open_s: 0.0,
+        attack: 0.12, vib_onset: 0.25, vib_fade: 0.5, breath: 0.0, chiff: 0.0, gain: 2.4,
+    };
+    pub const CH_MALE_VOICE: Sound = Sound {
+        name: "Male Voice",
+        players: &[],
+        wave: Wave::Voices(&[Section { singers: &[p(-5.0, 5.2, 22.0), p(4.0, 5.6, 20.0)], formants: TENOR_AH, breath: 0.05 }]),
+        formants: [NONE; 3],
+        lp: 6000.0, lp_start: 6000.0, open_s: 0.0,
+        attack: 0.14, vib_onset: 0.25, vib_fade: 0.5, breath: 0.0, chiff: 0.0, gain: 2.6,
+    };
 }
 
 #[cfg(test)]
@@ -421,7 +439,7 @@ mod tests {
 
     #[test]
     fn every_sound_is_finite_and_audible() {
-        let all = [CHOIR, MALE_CHOIR, FEMALE_CHOIR, EIGHT_CHOIR, VIOLINS, FLUTE, CELLO, STRING_SECTION, BRASS, TROMBONE, SAX, OBOE, CLARINET];
+        let all = [CHOIR, MALE_CHOIR, FEMALE_CHOIR, EIGHT_CHOIR, CH_FEMALE_VOICE, CH_MALE_VOICE, VIOLINS, FLUTE, CELLO, STRING_SECTION, BRASS, TROMBONE, SAX, OBOE, CLARINET];
         let mut nz = Noise::new(5);
         for (i, s) in all.iter().enumerate() {
             for f in [98.0, 440.0, 1397.0] {
