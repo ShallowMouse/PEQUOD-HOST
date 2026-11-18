@@ -141,14 +141,13 @@ void SceneBar::timerCallback()
 
 void SceneBar::paint (juce::Graphics& g)
 {
-    g.fillAll (Pequod::Colours::rail);
-    g.setColour (Pequod::Colours::line);
+    Pequod::hw::panel (g, getLocalBounds().toFloat(), Pequod::Colours::rail.brighter (0.05f));
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
     g.fillRect (getLocalBounds().removeFromBottom (1));
 
     auto r = getLocalBounds().reduced (12, 0);
-    g.setColour (Pequod::Colours::mustard);
     g.setFont (Pequod::heading (13.0f));
-    g.drawText ("SCENES", r.removeFromLeft (70), juce::Justification::centredLeft);
+    Pequod::hw::engraved (g, "SCENES", r.removeFromLeft (70).toFloat(), Pequod::Colours::mustard, juce::Justification::centredLeft);
 
     if (engine.getNumScenes() == 0)
     {

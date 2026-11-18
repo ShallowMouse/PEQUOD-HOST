@@ -150,7 +150,8 @@ void ChainMap::mouseUp (const juce::MouseEvent& e)
 
 void ChainMap::paint (juce::Graphics& g)
 {
-    g.fillAll (Pequod::Colours::well);
+    // a little screen of the signal's path
+    Pequod::hw::window (g, getLocalBounds().toFloat().reduced (2.0f), juce::Colour (0xff0b0b0b));
 
     g.setColour (Pequod::Colours::mustardLo);
     for (auto& w : wires)

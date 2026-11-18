@@ -374,8 +374,8 @@ juce::String BrowserPanel::getTooltipForRow (int rowIndex)
 
 void BrowserPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (Pequod::Colours::panel);
-    g.setColour (Pequod::Colours::line);
+    Pequod::hw::panel (g, getLocalBounds().toFloat(), Pequod::Colours::panel);
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
     g.drawVerticalLine (getWidth() - 1, 0.0f, (float) getHeight());
 }
 

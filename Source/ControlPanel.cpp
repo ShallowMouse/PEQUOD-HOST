@@ -156,8 +156,8 @@ void ControlPanel::listBoxItemClicked (int row, const juce::MouseEvent&)
 //==============================================================================
 void ControlPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (Pequod::Colours::panel);
-    g.setColour (Pequod::Colours::line);
+    Pequod::hw::panel (g, getLocalBounds().toFloat(), Pequod::Colours::panel);
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
     g.drawVerticalLine (0, 0.0f, (float) getHeight());
 
     drawSectionTitle (g, mapSection, "MAPPINGS");

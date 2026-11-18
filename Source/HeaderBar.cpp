@@ -28,14 +28,16 @@ void TunerDisplay::mouseDown (const juce::MouseEvent& e)
 void TunerDisplay::paint (juce::Graphics& g)
 {
     auto& r = tuner.getReading();
-    auto bounds = getLocalBounds().toFloat();
+    auto bounds = getLocalBounds().toFloat().reduced (1.5f);
 
-    g.setColour (Pequod::Colours::well);
-    g.fillRoundedRectangle (bounds, 3.0f);
-
+    // the strobe-tuner's window
+    Pequod::hw::window (g, bounds);
     const bool inTune = r.valid && std::abs (r.cents) < 3.0f;
-    g.setColour (inTune ? Pequod::Colours::mustard : Pequod::Colours::line);
-    g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, 1.0f);
+    if (inTune)
+    {
+        g.setColour (Pequod::Colours::mustard.withAlpha (0.5f));
+        g.drawRoundedRectangle (bounds.reduced (1.5f), 3.5f, 1.0f);
+    }
 
     auto area = bounds.reduced (6.0f, 3.0f);
 
@@ -78,17 +80,16 @@ void TunerDisplay::paint (juce::Graphics& g)
             g.fillRoundedRectangle (needle.expanded (3.0f, 1.0f), 3.0f);
         }
     }
+    Pequod::hw::glass (g, bounds);
 }
 
 //==============================================================================
 //==============================================================================
 void TempoDisplay::paint (juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat();
-    g.setColour (Pequod::Colours::well);
-    g.fillRoundedRectangle (r, 4.0f);
-    g.setColour (transport.clickOn.load() ? Pequod::Colours::mustardLo : Pequod::Colours::line);
-    g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
+    // a display window: lit digits, the beat lamps under them
+    auto r = getLocalBounds().toFloat().reduced (1.5f);
+    Pequod::hw::window (g, r);
 
     auto inner = r.reduced (8.0f, 4.0f);
     auto top = inner.removeFromTop (12.0f);
@@ -110,13 +111,14 @@ void TempoDisplay::paint (juce::Graphics& g)
         g.fillEllipse (x, dots.getCentreY() - d * 0.5f, d, d);
     }
 
-    g.setColour (Pequod::Colours::mustard);
     g.setFont (Pequod::heading (19.0f));
     auto bpmText = juce::String (transport.bpm.load(), 1);
-    g.drawText (bpmText, inner.withTrimmedRight (2.0f), juce::Justification::centredLeft);
+    Pequod::hw::lit (g, bpmText, inner.withTrimmedRight (2.0f), Pequod::Colours::mustard.brighter (0.3f), juce::Justification::centredLeft,
+                     transport.bpm.load() >= 100.0 ? "888.8" : "88.8");
     g.setColour (Pequod::Colours::textDim);
     g.setFont (Pequod::heading (10.0f, false));
     g.drawText ("BPM", inner, juce::Justification::centredRight);
+    Pequod::hw::glass (g, r);
 }
 
 void TempoDisplay::timerCallback()

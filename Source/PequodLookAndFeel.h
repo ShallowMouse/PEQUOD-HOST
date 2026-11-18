@@ -98,6 +98,8 @@ namespace Pequod
     }
 }
 
+#include "Hardware.h"
+
 //==============================================================================
 class PequodLookAndFeel : public juce::LookAndFeel_V4
 {
@@ -177,15 +179,16 @@ public:
     void drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour& bgColour,
                                bool highlighted, bool down) override
     {
-        auto r = b.getLocalBounds().toFloat().reduced (0.5f);
-        const auto onColour = b.findColour (juce::TextButton::buttonOnColourId);
-        auto c = b.getToggleState() ? onColour : bgColour;
-        if (down)             c = c.brighter (0.15f);
-        else if (highlighted) c = c.brighter (0.07f);
-        g.setColour (c);
-        g.fillRoundedRectangle (r, 2.0f);
-        g.setColour (b.getToggleState() ? onColour : Pequod::Colours::line);
-        g.drawRoundedRectangle (r, 2.0f, 1.0f);
+        // a key standing proud of the panel; a latched one lights up
+        auto r = b.getLocalBounds().toFloat().reduced (1.0f);
+        auto cap = bgColour;
+        if (highlighted && ! down) cap = cap.brighter (0.08f);
+        Pequod::hw::key (g, r, cap, down, b.getToggleState(), b.findColour (juce::TextButton::buttonOnColourId));
+        if (! b.isEnabled())
+        {
+            g.setColour (Pequod::Colours::bg.withAlpha (0.35f));
+            g.fillRoundedRectangle (r, 2.5f);
+        }
     }
 
     void drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos,
@@ -207,16 +210,23 @@ public:
         g.setColour (s.isEnabled() ? Pequod::Colours::mustard : Pequod::Colours::textDim);
         g.strokePath (arc, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
+        // a black knob with a skirt, its cap spun aluminium
         auto knobR = radius - 5.0f;
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.fillEllipse (c.x - knobR + 1.0f, c.y - knobR + 2.0f, knobR * 2, knobR * 2);
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3c3c3c), c.x, c.y - knobR,
-                                                 juce::Colour (0xff141414), c.x, c.y + knobR, false));
+                                                 juce::Colour (0xff101010), c.x, c.y + knobR, false));
         g.fillEllipse (c.x - knobR, c.y - knobR, knobR * 2, knobR * 2);
-        g.setColour (Pequod::Colours::line);
-        g.drawEllipse (c.x - knobR, c.y - knobR, knobR * 2, knobR * 2, 1.0f);
+        const float capR = knobR * 0.62f;
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe0e0dc), c.x - capR * 0.5f, c.y - capR,
+                                                 juce::Colour (0xff6a6a68), c.x + capR * 0.5f, c.y + capR, false));
+        g.fillEllipse (c.x - capR, c.y - capR, capR * 2, capR * 2);
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.drawEllipse (c.x - capR, c.y - capR, capR * 2, capR * 2, 0.8f);
 
         juce::Path pointer;
-        pointer.addRoundedRectangle (-1.25f, -knobR + 2.0f, 2.5f, knobR * 0.55f, 1.0f);
-        g.setColour (Pequod::Colours::text);
+        pointer.addRoundedRectangle (-1.25f, -knobR + 1.5f, 2.5f, knobR * 0.75f, 1.0f);
+        g.setColour (juce::Colour (0xff1a1a1a));
         g.fillPath (pointer, juce::AffineTransform::rotation (angle).translated (c.x, c.y));
     }
 
@@ -226,18 +236,31 @@ public:
         if (style != juce::Slider::LinearHorizontal)
             return LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, 0, 0, style, s);
 
+        // a fader: a slot in the panel with a scale, and a metal cap with a line across it
         auto r = juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h);
-        auto track = r.withSizeKeepingCentre (r.getWidth(), 4.0f);
-        g.setColour (Pequod::Colours::well);
-        g.fillRoundedRectangle (track, 2.0f);
-        g.setColour (Pequod::Colours::line);
-        g.drawLine (r.getCentreX(), track.getY() - 4, r.getCentreX(), track.getBottom() + 4, 1.0f);
-
-        auto thumb = juce::Rectangle<float> (10.0f, juce::jmin (18.0f, r.getHeight())).withCentre ({ pos, r.getCentreY() });
+        Pequod::hw::slot (g, r.withSizeKeepingCentre (r.getWidth(), 4.0f));
+        g.setColour (Pequod::Colours::textDim.withAlpha (0.5f));
+        for (int k = 0; k <= 10; ++k)
+        {
+            const float tx = r.getX() + r.getWidth() * (float) k / 10.0f;
+            const float len = k == 0 || k == 10 || k == 5 ? 5.0f : 3.0f;
+            g.drawVerticalLine (juce::roundToInt (tx), r.getCentreY() - 6.0f - len, r.getCentreY() - 6.0f);
+        }
+        if (s.getDoubleClickReturnValue() == 0.0 && s.getMinimum() < 0.0)
+        {
+            const float zx = (float) s.getPositionOfValue (0.0);
+            g.setColour (Pequod::Colours::mustard.withAlpha (0.7f));
+            g.drawVerticalLine (juce::roundToInt (zx), r.getCentreY() - 12.0f, r.getCentreY() - 5.0f);
+        }
+        auto cap = juce::Rectangle<float> (12.0f, juce::jmin (22.0f, r.getHeight())).withCentre ({ pos, r.getCentreY() });
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.fillRoundedRectangle (cap.translated (1.0f, 2.0f), 2.0f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffd0d0cc), cap.getX(), cap.getY(), juce::Colour (0xff5a5a58), cap.getX(), cap.getBottom(), false));
+        g.fillRoundedRectangle (cap, 2.0f);
+        g.setColour (juce::Colour (0xff202020));
+        g.fillRect (cap.withSizeKeepingCentre (cap.getWidth(), 2.0f));
         g.setColour (Pequod::Colours::mustard);
-        g.fillRoundedRectangle (thumb, 2.0f);
-        g.setColour (Pequod::Colours::bg);
-        g.drawLine (thumb.getCentreX(), thumb.getY() + 3, thumb.getCentreX(), thumb.getBottom() - 3, 1.0f);
+        g.fillRect (cap.withSizeKeepingCentre (cap.getWidth() - 4.0f, 1.0f));
     }
 
     void drawPopupMenuBackground (juce::Graphics& g, int w, int h) override
@@ -291,20 +314,14 @@ public:
 
     void paintButton (juce::Graphics& g, bool over, bool) override
     {
-        auto r = getLocalBounds().toFloat().withSizeKeepingCentre (14.0f, 14.0f);
-        if (getToggleState())
+        // the unit's pilot lamp: amber glass, lit when it's on
+        const float rad = juce::jmin (getWidth(), getHeight()) * 0.3f;
+        Pequod::hw::lamp (g, getLocalBounds().toFloat().getCentre(), rad, juce::Colour (0xffffb040), getToggleState());
+        if (over)
         {
-            g.setColour (Pequod::Colours::mustard.withAlpha (0.25f));
-            g.fillEllipse (r.expanded (3.0f));
-            g.setColour (Pequod::Colours::mustard);
+            g.setColour (juce::Colours::white.withAlpha (0.08f));
+            g.fillEllipse (getLocalBounds().toFloat().withSizeKeepingCentre (rad * 2.6f, rad * 2.6f));
         }
-        else
-        {
-            g.setColour (over ? juce::Colour (0xff4a4a4a) : juce::Colour (0xff333333));
-        }
-        g.fillEllipse (r);
-        g.setColour (Pequod::Colours::rail);
-        g.drawEllipse (r, 1.5f);
     }
 };
 
@@ -353,12 +370,7 @@ public:
         for (int ch = 0; ch < 2; ++ch)
         {
             auto bar = juce::Rectangle<float> (r.getX() + (float) ch * (barW + 2.0f), r.getY(), barW, r.getHeight());
-            g.setColour (Pequod::Colours::well);
-            g.fillRect (bar);
-            auto lvl = ch == 0 ? levelL : levelR;
-            auto filled = bar.withTop (bar.getBottom() - bar.getHeight() * lvl);
-            g.setColour (lvl > 0.9f ? Pequod::Colours::danger : Pequod::Colours::mustard);
-            g.fillRect (filled);
+            Pequod::hw::ledLadder (g, bar, ch == 0 ? levelL : levelR, juce::jlimit (6, 24, (int) (bar.getHeight() / 5.0f)), juce::Colour (0xff60c050));
         }
     }
 

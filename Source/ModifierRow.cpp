@@ -825,11 +825,9 @@ void ModifierRow::paint (juce::Graphics& g)
 {
     g.fillAll (Pequod::Colours::bg);
     auto bar = getLocalBounds().removeFromTop (barHeight);
-    g.setColour (Pequod::Colours::rail);
-    g.fillRect (bar);
-    g.setColour (Pequod::Colours::mustard);
+    Pequod::hw::panel (g, bar.toFloat(), Pequod::Colours::rail.brighter (0.05f));
     g.setFont (Pequod::heading (13.0f));
-    g.drawText ("MODIFIERS", bar.reduced (12, 0), juce::Justification::centredLeft);
+    Pequod::hw::engraved (g, "MODIFIERS", bar.reduced (12, 0).toFloat(), Pequod::Colours::mustard, juce::Justification::centredLeft);
     g.setColour (Pequod::Colours::textDim);
     g.setFont (Pequod::body (12.0f));
     const int n = engine.getNumModifiers();

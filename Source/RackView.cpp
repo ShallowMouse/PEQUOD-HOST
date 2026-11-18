@@ -794,30 +794,27 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (Pequod::Colours::rail);
-
-        // Rack rails with mounting holes, Guitar Rig style (along the top and bottom on the pedalboard).
         if (horizontal)
         {
-            for (int y : { 2, getHeight() - 8 })
+            // a pedalboard: slats of black aluminium with gaps between them, Pedaltrain style
+            g.fillAll (juce::Colour (0xff0b0b0c));
+            const int slat = 46, gapH = 14;
+            for (int y = 4; y < getHeight(); y += slat + gapH)
             {
-                g.setColour (juce::Colour (0xff1d1d1d));
-                g.fillRect (0, y, getWidth(), 6);
-                g.setColour (juce::Colour (0xff0a0a0a));
-                for (int x = 8; x < getWidth(); x += 22)
-                    g.fillRect (x, y + 1, 8, 4);
+                auto r = juce::Rectangle<float> (0.0f, (float) y, (float) getWidth(), (float) slat);
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c2d30), 0.0f, r.getY(), juce::Colour (0xff17181a), 0.0f, r.getBottom(), false));
+                g.fillRect (r);
+                g.setColour (juce::Colours::white.withAlpha (0.08f));
+                g.drawHorizontalLine (y, 0.0f, (float) getWidth());
             }
         }
         else
         {
-            for (int x : { 2, getWidth() - 8 })
-            {
-                g.setColour (juce::Colour (0xff1d1d1d));
-                g.fillRect (x, 0, 6, getHeight());
-                g.setColour (juce::Colour (0xff0a0a0a));
-                for (int y = 8; y < getHeight(); y += 22)
-                    g.fillRect (x + 1, y, 4, 8);
-            }
+            // inside a rack cabinet: dark, the two rails running down it with their holes
+            g.fillAll (juce::Colour (0xff0d0d0e));
+            const float railW = juce::jmax (10.0f, (float) ear);
+            for (float x : { 0.0f, (float) getWidth() - railW })
+                Pequod::hw::rail (g, { x, 0.0f, railW, (float) getHeight() }, 44.0f, 0.0f);
         }
 
         g.setColour (dragOver && insertIndex == (int) order.size() ? Pequod::Colours::mustard : Pequod::Colours::line);
