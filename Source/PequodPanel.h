@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PequodNative.h"
+#include "NearestTooltips.h"
 
 //==============================================================================
 /** The panel of a built-in PEQUOD plugin, drawn by the host from the layout the
@@ -80,7 +81,7 @@ private:
     float dragStartValue = 0, selectorAcc = 0;
     juce::Point<float> dragStart, lastDrag, lastMouse;
     bool dragged = false;
-    juce::TooltipWindow tooltips { this, 600 };
+    NearestTooltips tooltips { this, 600 };
     std::unique_ptr<juce::FileChooser> chooser;
 
     juce::AudioProcessorParameter* paramObj (int p) const;

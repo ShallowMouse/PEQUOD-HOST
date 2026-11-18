@@ -13,6 +13,7 @@
 #include "PresetLibrary.h"
 #include "ControllerManager.h"
 #include "Updater.h"
+#include "NearestTooltips.h"
 
 class ControllerWindow;
 
@@ -77,7 +78,7 @@ private:
     bool waitingForCrashAnswer = false;
     void askAfterCrash (const CrashGuard::LastRun&);
     void setPedalboardView (bool);
-    juce::TooltipWindow tooltips { this, 600 };
+    NearestTooltips tooltips { this, 600 };
 
     std::map<int, std::unique_ptr<PluginWindow>> windows;
 
