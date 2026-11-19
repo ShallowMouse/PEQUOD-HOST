@@ -30,8 +30,8 @@ namespace PluginColours
                 "Level Loc|Listen Mic|Opto Comp|Room Crush|Owen Upright|RS124|Twang Booster|Vari-Mu|Vatos Kit" },
             { "Expanders, gates & levellers", 0x66661C, "Evenhand|Expander|Slow Gear|Smart Gate" },
             { "Tape & saturation", 0x6B4A2E, "A800 Bus|Ampex 350|Analog Tape|Backwards|Multitrack Tape|Repro Head|Studer 169|Tape Loop|Tape Machine|"
-                "Twin-Track Tape|Varispeed|Warmer" },
-            { "Consoles, preamps & strips", 0x46596B, "Ampex 351|Croon Vocal|Elfman Vocal|Gold Star Desk|Mystic Horns|Neotek Channel|Orchestra Bus|Plank Console|"
+                "Tretow Varispeed|Twin-Track Tape|Varispeed|Warmer" },
+            { "Consoles, preamps & strips", 0x46596B, "Ampex 351|Polar Acoustic|Croon Vocal|Elfman Vocal|Gold Star Desk|Mystic Horns|Neotek Channel|Orchestra Bus|Plank Console|"
                 "TG Channel|TG Strip|V72 V76|Valve Desk|Valve Mixer|Vocal Chain" },
             { "EQ & filters", 0x2C4A9A, "Black Box EQ|Envelope Filter|GE-7 EQ|Position 4|Studio EQ|Talk Box|Wah" },
             { "Delays & echoes", 0x1E5A84, "AMS 15-80S|Analog Delay|Brighton Rock Delay|Chorus Echo|Copicat|DD-3|Digital Delay|DL4|DM-1 Delay|Doubler|"
@@ -42,7 +42,7 @@ namespace PluginColours
             { "Rooms, chambers & spaces", 0x1F5E4A, "Albini Rooms|Antonoff Rooms|Black Box Rooms|blink Rooms|Boingo Rooms|Deltalab Rooms|Echo Chamber|Finn Rooms|"
                 "Floyd Spaces|Ford Rooms|Gold Star Chamber|Hannett Rooms|Hollywood Chamber|Lanham Rooms|Meek Rooms|"
                 "Monkeys Rooms|Montserrat Rooms|Phoenix Rooms|Plank Rooms|Queen Rooms|Sing Sing Rooms|sombr Rooms|"
-                "Spector Rooms|Stray Cats Rooms|Strokes Rooms|Studio Spaces|Townhouse Rooms|Water Tank" },
+                "Spector Rooms|Stray Cats Rooms|Strokes Rooms|Studio Spaces|Synth Room|Townhouse Rooms|Water Tank" },
             { "Modulation", 0x5C2E7A, "Auto-Pan|Bi-Phase|Bigsby|CE-1 Chorus Ensemble|CE-2 Chorus|Deja Vibe|Dimension|Electric Mistress|Flanger|"
                 "Hand Phaser|Harmonic Trem|Pad Chopper|Phase 90|Ring Mod|Rotary Speakers|Rotor|Slicer|Small Clone|Small Stone|"
                 "Tape Flanger|Time Modulator|TR-2 Tremolo|Uni-Vibe|Vibrato|Wall of Sound" },

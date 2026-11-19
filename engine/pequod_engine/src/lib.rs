@@ -252,7 +252,10 @@ static FNS: &[fn() -> Descriptor] = &[
         kb_solina::pequod_native,
         kb_taurus::pequod_native,
         kb_tb303::pequod_native,
-        kb_wurli::pequod_native
+        kb_wurli::pequod_native,
+        ab_acoustic::pequod_native,
+        ab_synthroom::pequod_native,
+        ab_varispeed::pequod_native
 ];
 
 struct Entry {

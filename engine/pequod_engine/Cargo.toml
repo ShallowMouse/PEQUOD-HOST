@@ -254,3 +254,6 @@ kb_solina = { path = "../keys/kb_solina" }
 kb_taurus = { path = "../keys/kb_taurus" }
 kb_tb303 = { path = "../keys/kb_tb303" }
 kb_wurli = { path = "../keys/kb_wurli" }
+ab_acoustic = { path = "../polar/ab_acoustic" }
+ab_synthroom = { path = "../polar/ab_synthroom" }
+ab_varispeed = { path = "../polar/ab_varispeed" }

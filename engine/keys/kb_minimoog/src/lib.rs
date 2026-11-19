@@ -459,6 +459,7 @@ fn presets() -> Vec<Preset> {
         Preset { name: "Wheel Vibrato Lead", values: &[(O3CTRL, 0.0), (R3, 0.0), (W3, 0.0), (D3, 2.0), (L3, 0.0), (OSCMOD, 1.0), (W1, 2.0), (W2, 2.0), (CUTOFF, 2000.0), (EMPH, 3.0)] },
         Preset { name: "Screaming Filter", values: &[(W1, 2.0), (W2, 2.0), (L1, 10.0), (L2, 10.0), (CUTOFF, 700.0), (EMPH, 8.5), (CONTOUR, 6.0), (FD, 900.0), (FS, 4.0)] },
         Preset { name: "Three-Osc Brass", values: &[(W1, 2.0), (W2, 2.0), (W3, 2.0), (R3, 2.0), (L1, 8.0), (L2, 8.0), (L3, 8.0), (D2, 0.08), (D3, -0.1), (CUTOFF, 500.0), (EMPH, 1.5), (CONTOUR, 7.0), (FA, 60.0), (FD, 500.0), (FS, 6.0), (LA, 20.0)] },
+        Preset { name: "Lay All Your Love (ending lead)", values: &[(R1, 3.0), (R2, 4.0), (W1, 2.0), (W2, 2.0), (D2, 0.05), (L1, 9.0), (L2, 6.0), (L3, 0.0), (CUTOFF, 2400.0), (EMPH, 3.0), (CONTOUR, 5.0), (FA, 3.0), (FD, 350.0), (FS, 5.0), (LA, 2.0), (LD, 300.0), (LS, 8.0), (GLIDE, 0.08), (DECAYSW, 1.0)] },
         Preset { name: "Wind and Noise", values: &[(L1, 0.0), (L2, 0.0), (LN, 10.0), (CUTOFF, 800.0), (EMPH, 9.0), (CONTOUR, 3.0), (FA, 800.0), (LA, 800.0), (LD, 2000.0)] },
     ]
 }

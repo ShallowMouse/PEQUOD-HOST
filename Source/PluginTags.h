@@ -40,6 +40,7 @@ namespace PluginTags
             { "roylanham",                { "Roy Lanham", "Sizzling Strings" } },
             { "finnbrothers",             { "Finn Brothers", "Karekare" } },
             { "duaneeddy",                { "Duane Eddy", "Phoenix" } },
+            { "abba",                     { "ABBA", "Polar" } },
             { "amps",                     { "PEQUOD Amps", nullptr } },
             { "cabs",                     { "PEQUOD Cabs", nullptr } },
             { "pedals",                   { "PEQUOD Pedals", nullptr } },

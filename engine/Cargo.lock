@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "ab_acoustic"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "ab_glyph"
 version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -17,6 +25,22 @@ name = "ab_glyph_rasterizer"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
+
+[[package]]
+name = "ab_synthroom"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "ab_varispeed"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
 
 [[package]]
 name = "addr2line"
@@ -3462,6 +3486,9 @@ dependencies = [
 name = "pequod_engine"
 version = "1.0.1"
 dependencies = [
+ "ab_acoustic",
+ "ab_synthroom",
+ "ab_varispeed",
  "ah_ac100",
  "ah_ac30",
  "ah_bassman",

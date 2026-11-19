@@ -359,3 +359,82 @@ impl StringEnsemble {
         (y[0] * 0.7 + y[1] * 0.45, y[2] * 0.7 + y[1] * 0.45)
     }
 }
+
+/// Most takes a `VarispeedTakes` makes.
+pub const MAX_TAKES: usize = 4;
+/// Each take's character: (how late it leans, as a fraction of the looseness; which way its
+/// tuning sits; how fast it drifts, Hz). Take 0 is the part as played.
+pub const TAKE: [(f64, f64, f64); MAX_TAKES] = [(0.0, 0.0, 0.0), (0.6, 1.0, 0.27), (-0.35, -1.0, 0.33), (0.85, 0.6, 0.21)];
+
+/// Michael B. Tretow's varispeed overdubs (ABBA, Polar Music): the part played again with the
+/// tape running a little faster or slower and the instrument (or voice) retuned to match, so on
+/// playback each take is in tune but not the same - its timbre shifted by the speed difference,
+/// its tuning never perfectly matched, its timing its own. Modelled per take: its own lean and
+/// drift in time, a few cents of residual detune (a drifting delay), and a tone shift that grows
+/// with the speed difference (brighter and thinner for a take made faster).
+pub struct VarispeedTakes {
+    fs: f64,
+    line: DelayLine,
+    push: Vec<Wander>,
+    drift: Vec<Wander>,
+    tone: Vec<Biquad>,
+    thin: Vec<Biquad>,
+    /// The speed difference now (percent).
+    pub speed: f64,
+}
+
+impl VarispeedTakes {
+    pub fn new(fs: f64) -> Self {
+        let mut t = Self {
+            fs,
+            line: DelayLine::new((fs * 0.08) as usize),
+            push: (0..MAX_TAKES).map(|i| Wander::new(fs, 0.4, 211 + i as u32 * 19)).collect(),
+            drift: (0..MAX_TAKES).map(|i| Wander::new(fs, TAKE[i].2.max(0.1), 401 + i as u32 * 23)).collect(),
+            tone: vec![Biquad::identity(); MAX_TAKES],
+            thin: vec![Biquad::identity(); MAX_TAKES],
+            speed: -1.0,
+        };
+        t.set_speed(3.3);
+        t
+    }
+    pub fn reset(&mut self) {
+        self.line.reset();
+        self.tone.iter_mut().for_each(|b| b.reset());
+        self.thin.iter_mut().for_each(|b| b.reset());
+    }
+    /// The speed difference between the takes, in percent.
+    pub fn set_speed(&mut self, pct: f64) {
+        if (pct - self.speed).abs() < 1e-3 {
+            return;
+        }
+        self.speed = pct;
+        for i in 1..MAX_TAKES {
+            // a take made faster (and retuned down) comes back brighter and thinner; one made slower, a little darker
+            let dir = if TAKE[i].1 >= 0.0 { 1.0 } else { -0.6 };
+            self.tone[i].set_high_shelf(self.fs, 2500.0, 0.7, dir * pct * 0.7);
+            self.thin[i].set_low_shelf(self.fs, 220.0, 0.7, -dir * pct * 0.5);
+        }
+    }
+    pub fn write(&mut self, x: f64) {
+        self.line.write(x);
+    }
+    /// Take `i` this sample: `loose` in samples, `cents` = how far retuning by ear leaves it off.
+    #[inline]
+    pub fn take(&mut self, i: usize, loose: f64, cents: f64) -> f64 {
+        if i == 0 {
+            return self.line.read(4.0);
+        }
+        let lean = (0.5 + 0.5 * TAKE[i].0) * loose;
+        let push = 0.2 * loose * self.push[i].next();
+        // the tuning: a delay drifting at the take's own rate, its slope the pitch offset
+        let rate = TAKE[i].2.max(0.1);
+        let depth = (cents / 1731.0) / (2.0 * std::f64::consts::PI * rate) * self.fs;
+        let d = 4.0 + lean + push.abs() + depth * (1.0 + self.drift[i].next());
+        let y = self.line.read(d.max(1.0));
+        self.thin[i].process(self.tone[i].process(y))
+    }
+    /// How many cents off a retuned take sits, for a speed difference in percent (by ear: a few cents at most).
+    pub fn residual_cents(pct: f64) -> f64 {
+        1.0 + pct * 1.1
+    }
+}
