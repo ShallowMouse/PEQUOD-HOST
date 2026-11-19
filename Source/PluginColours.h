@@ -22,7 +22,7 @@ namespace PluginColours
                 "Magnatone Head|Mark IIB|Mark IIB Head|Matchless 2x12|Mesa 1x12 EV|Mesa 4x12 V30|Music Man 2x12|ODS Head|"
                 "Plexi Head|Rectified|Rectifier Head|Selmer TB50|Showman AB763|Showman Head|Silverface Twin|SLO Head|SVT 8x10|"
                 "SVT Bass|T60 Bass|Traynor YBA-1|Twin Head|Twin Reverb|UL730|Valve Jr Celestion|Valve Jr V30|Vox 2x12 Blue|"
-                "Vox 4x12 Horns|Wizard 2x12|Wizard Head|Wizard MC" },
+                "Vox 4x12 Horns|Wizard 2x12|Wizard Head|Wizard MC|Backstage 30" },
             { "Drive, fuzz & boost", 0xC2611B, "Big Muff|Blues Driver|Centaur|Dead Battery TS|Distortion+|DS-1|EP Booster|First Fuzz|Fuzz Face|Fuzz Factory|"
                 "Harmonic Percolator|Hotcake|Jekyll & Hyde|Low Drive|Micro Amp|Mudhoney|Muff R22|Octavia|OS-2|Power Boost|"
                 "Rangemaster|RAT|Tone Bender|Treble Booster|TS-808" },
@@ -32,7 +32,7 @@ namespace PluginColours
             { "Tape & saturation", 0x6B4A2E, "A800 Bus|Ampex 350|Analog Tape|Backwards|Multitrack Tape|Repro Head|Studer 169|Tape Loop|Tape Machine|"
                 "Tretow Varispeed|Twin-Track Tape|Varispeed|Warmer" },
             { "Consoles, preamps & strips", 0x46596B, "Ampex 351|Polar Acoustic|Croon Vocal|Elfman Vocal|Gold Star Desk|Mystic Horns|Neotek Channel|Orchestra Bus|Plank Console|"
-                "TG Channel|TG Strip|V72 V76|Valve Desk|Valve Mixer|Vocal Chain" },
+                "TG Channel|TG Strip|V72 V76|Valve Desk|Valve Mixer|Vocal Chain|Helios Channel" },
             { "EQ & filters", 0x2C4A9A, "Black Box EQ|Envelope Filter|GE-7 EQ|Position 4|Studio EQ|Talk Box|Wah" },
             { "Delays & echoes", 0x1E5A84, "AMS 15-80S|Analog Delay|Brighton Rock Delay|Chorus Echo|Copicat|DD-3|Digital Delay|DL4|DM-1 Delay|Doubler|"
                 "Dual Delay|Echorec|Ford Space Station|Memory Man|Ping-Pong Delay|Plank Echo|Quad Tracker|RE-301|Revox Loop|"
@@ -42,13 +42,13 @@ namespace PluginColours
             { "Rooms, chambers & spaces", 0x1F5E4A, "Albini Rooms|Antonoff Rooms|Black Box Rooms|blink Rooms|Boingo Rooms|Deltalab Rooms|Echo Chamber|Finn Rooms|"
                 "Floyd Spaces|Ford Rooms|Gold Star Chamber|Hannett Rooms|Hollywood Chamber|Lanham Rooms|Meek Rooms|"
                 "Monkeys Rooms|Montserrat Rooms|Phoenix Rooms|Plank Rooms|Queen Rooms|Sing Sing Rooms|sombr Rooms|"
-                "Spector Rooms|Stray Cats Rooms|Strokes Rooms|Studio Spaces|Synth Room|Townhouse Rooms|Water Tank" },
+                "Spector Rooms|Stray Cats Rooms|Strokes Rooms|Studio Spaces|Synth Room|Townhouse Rooms|Water Tank|Iron Room|Jam Rooms" },
             { "Modulation", 0x5C2E7A, "Auto-Pan|Bi-Phase|Bigsby|CE-1 Chorus Ensemble|CE-2 Chorus|Deja Vibe|Dimension|Electric Mistress|Flanger|"
                 "Hand Phaser|Harmonic Trem|Pad Chopper|Phase 90|Ring Mod|Rotary Speakers|Rotor|Slicer|Small Clone|Small Stone|"
                 "Tape Flanger|Time Modulator|TR-2 Tremolo|Uni-Vibe|Vibrato|Wall of Sound" },
             { "Synths, keys & instruments", 0x3F6B2A, "6120 Voice|Archtop|B-3 Organ|Bass Line|Bass Pedals|Bass Voice|Clavi D6|Clavioline|Combo Compact|Compact Organ|Dream Machine|Electric Grand|FM 7|Juno Six|"
                 "Model 72|Music Master|P-Bass Voice|Pianet|Prophet Five|Red Special|Reed 200|RS-202|Stage 73|String Ensemble|Synare 3|Tape 400|Tonewheel Organ|TR-606|"
-                "Twenty-Six|Upright Slap|VCS3" },
+                "Twenty-Six|Upright Slap|VCS3|Continental|Foxton Bass|Ricky 330" },
             { "Lo-fi & character", 0x8C2F62, "Car Radio|Cheap Speaker|Lo-Fi Crush|Phone Line|Practice Amp Vocal|Transcription Disc" },
             { "Microphones", 0x444B52, "Mic Pair|Studio Mics" },
             { "Experimental & pitch", 0x3B336B, "Drop Tune|Feedback|Freeze|Guitar Orchestra|Harmonizer|HOG|POG|Sympathy|Whammy" },

@@ -241,6 +241,7 @@ de_tank = { path = "../eddy/de_tank" }
 de_twang = { path = "../eddy/de_twang" }
 kb_chamberlin = { path = "../keys/kb_chamberlin" }
 kb_clav = { path = "../keys/kb_clav" }
+kb_continental = { path = "../keys/kb_continental" }
 kb_cs80 = { path = "../keys/kb_cs80" }
 kb_dx7 = { path = "../keys/kb_dx7" }
 kb_farfisa = { path = "../keys/kb_farfisa" }
@@ -257,3 +258,9 @@ kb_wurli = { path = "../keys/kb_wurli" }
 ab_acoustic = { path = "../polar/ab_acoustic" }
 ab_synthroom = { path = "../polar/ab_synthroom" }
 ab_varispeed = { path = "../polar/ab_varispeed" }
+tj_330 = { path = "../jam/tj_330" }
+tj_backstage = { path = "../jam/tj_backstage" }
+tj_foxton = { path = "../jam/tj_foxton" }
+tj_helios = { path = "../jam/tj_helios" }
+tj_iron = { path = "../jam/tj_iron" }
+tj_rooms = { path = "../jam/tj_rooms" }

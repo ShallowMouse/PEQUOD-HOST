@@ -238,6 +238,7 @@ fn presets() -> Vec<Preset> {
         Preset { name: "Tight 80s Toms", values: &[(ROOM, 2.0), (SQUASH, 0.8), (HOLD, 200.0), (RELEASE, 20.0)] },
         Preset { name: "Room Only (for a bus)", values: &[(DRY, -60.0)] },
         Preset { name: "Gentle Room Lift", values: &[(SQUASH, 0.4), (HOLD, 600.0), (RELEASE, 200.0), (ROOMLVL, -8.0)] },
+        Preset { name: "Eton Rifles Crowd (fans in the stone room)", values: &[(ROOM, 0.0), (SQUASH, 0.9), (THRESH, -60.0), (HOLD, 2000.0), (RELEASE, 400.0), (ROOMLVL, 0.0), (DRY, -60.0)] },
     ]
 }
 

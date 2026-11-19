@@ -41,6 +41,7 @@ namespace PluginTags
             { "finnbrothers",             { "Finn Brothers", "Karekare" } },
             { "duaneeddy",                { "Duane Eddy", "Phoenix" } },
             { "abba",                     { "ABBA", "Polar" } },
+            { "thejam",                   { "The Jam", "Woking" } },
             { "amps",                     { "PEQUOD Amps", nullptr } },
             { "cabs",                     { "PEQUOD Cabs", nullptr } },
             { "pedals",                   { "PEQUOD Pedals", nullptr } },

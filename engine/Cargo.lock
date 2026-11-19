@@ -2411,6 +2411,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kb_continental"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "kb_cs80"
 version = "1.0.1"
 dependencies = [
@@ -3635,6 +3643,7 @@ dependencies = [
  "jf_tape",
  "kb_chamberlin",
  "kb_clav",
+ "kb_continental",
  "kb_cs80",
  "kb_dx7",
  "kb_farfisa",
@@ -3722,6 +3731,12 @@ dependencies = [
  "sz_upright",
  "tape_echo",
  "tape_machine",
+ "tj_330",
+ "tj_backstage",
+ "tj_foxton",
+ "tj_helios",
+ "tj_iron",
+ "tj_rooms",
  "tp_dyn",
  "tp_jc",
  "tp_listen",
@@ -4655,6 +4670,54 @@ checksum = "7e689342a48d2ea927c87ea50cabf8594854bf940e9310208848d680d668ed85"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "tj_330"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "tj_backstage"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "tj_foxton"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "tj_helios"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "tj_iron"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "tj_rooms"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
 ]
 
 [[package]]

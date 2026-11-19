@@ -493,6 +493,10 @@ fn presets() -> Vec<Preset> {
         Preset { name: "Squabble 008 000 008", values: &[(0, 0.0), (1, 0.0), (2, 8.0), (3, 0.0), (4, 0.0), (5, 0.0), (6, 0.0), (7, 0.0), (8, 8.0), (PERC, 1.0), (PERC_HARM, 1.0), (VIB, 0.0), (SPEED, 1.0)] },
         Preset { name: "Jazz Soft Slow Perc", values: &[(0, 8.0), (1, 8.0), (2, 8.0), (PERC, 1.0), (PERC_DECAY, 1.0), (PERC_SOFT, 1.0), (VIB, 4.0)] },
         Preset { name: "Dry, No Leslie", values: &[(LESLIE, 0.0), (VIB, 0.0), (DRIVE, 0.0)] },
+        Preset { name: "Town Called Malice 888 000 000 Fast", values: &[(0, 8.0), (1, 8.0), (2, 8.0), (3, 0.0), (4, 0.0), (5, 0.0), (6, 0.0), (7, 0.0), (8, 0.0), (PERC, 0.0), (VIB, 0.0), (DRIVE, 0.35), (SPEED, 1.0)] },
+        Preset { name: "Eton Rifles Stabs 888 800 000", values: &[(0, 8.0), (1, 8.0), (2, 8.0), (3, 8.0), (4, 0.0), (5, 0.0), (6, 0.0), (7, 0.0), (8, 0.0), (PERC, 0.0), (VIB, 0.0), (DRIVE, 0.6), (CLICK, 0.8), (SPEED, 0.0)] },
+        Preset { name: "Mod Grind 888 000 000 Perc 3rd", values: &[(0, 8.0), (1, 8.0), (2, 8.0), (3, 0.0), (4, 0.0), (5, 0.0), (6, 0.0), (7, 0.0), (8, 0.0), (PERC, 1.0), (PERC_HARM, 1.0), (PERC_DECAY, 0.0), (VIB, 6.0), (DRIVE, 0.65), (SPEED, 0.0)] },
+        Preset { name: "Mod Jazz Club 838 000 000 Perc", values: &[(0, 8.0), (1, 3.0), (2, 8.0), (3, 0.0), (4, 0.0), (5, 0.0), (6, 0.0), (7, 0.0), (8, 0.0), (PERC, 1.0), (PERC_HARM, 1.0), (PERC_DECAY, 0.0), (PERC_SOFT, 0.0), (VIB, 4.0), (DRIVE, 0.3), (SPEED, 1.0)] },
     ]
 }
 
