@@ -3,9 +3,9 @@
 //! Six sine-wave operators, each with its own frequency ratio, detune, output level, envelope
 //! and velocity sensitivity. Some are carriers (you hear them); the rest are modulators, which
 //! bend their carriers' phase to make the harmonics. Which is which is set by the algorithm:
-//! eight of the DX7's 32 are here, with their own numbers, covering the patches people use
-//! most (the electric piano is 5, brass 22, the organ 32). One operator in each feeds back on
-//! itself, from a pure tone up to a buzzing saw and noise.
+//! all 32 of the DX7's, with their own numbers (the electric piano is 5, brass 22, the organ
+//! 32). One operator in each feeds back on itself, from a pure tone up to a buzzing saw and
+//! noise; in 4 and 6 the feedback runs from a lower operator back up to 6 instead.
 //!
 //! As on the DX7, levels run 0-99 with about 0.75 dB a step, so envelopes fall in straight
 //! lines of decibels, and velocity can cut a modulator for soft, dull notes and bright hard ones.
@@ -108,7 +108,7 @@ impl Default for P {
         Self {
             editor_state: ui::editor_state((W, H)),
             saved: Arc::new(RwLock::new(Vec::new())),
-            algorithm: steps("Algorithm".into(), 2.0, 0.0, 7.0),
+            algorithm: steps("Algorithm".into(), 5.0, 1.0, 32.0),
             feedback: steps("Feedback".into(), 6.0, 0.0, 7.0),
             volume: db("Volume", -6.0, -30.0, 6.0),
             ops: [OpParams::new(1), OpParams::new(2), OpParams::new(3), OpParams::new(4), OpParams::new(5), OpParams::new(6)],
@@ -166,7 +166,10 @@ struct Algorithm {
     number: u8,
     mods: [u8; OPS],
     carriers: u8,
+    /// The operator the feedback goes into, and the one it is taken from: the same one, a
+    /// self-loop, except in algorithms 4 (4 back to 6) and 6 (5 back to 6).
     feedback: usize,
+    fb_from: usize,
 }
 
 const fn b(ops: &[usize]) -> u8 {
@@ -179,15 +182,40 @@ const fn b(ops: &[usize]) -> u8 {
     m
 }
 
-const ALGORITHMS: [Algorithm; 8] = [
-    Algorithm { number: 1, mods: [b(&[2]), 0, b(&[4]), b(&[5]), b(&[6]), 0], carriers: b(&[1, 3]), feedback: 6 },
-    Algorithm { number: 2, mods: [b(&[2]), 0, b(&[4]), b(&[5]), b(&[6]), 0], carriers: b(&[1, 3]), feedback: 2 },
-    Algorithm { number: 5, mods: [b(&[2]), 0, b(&[4]), 0, b(&[6]), 0], carriers: b(&[1, 3, 5]), feedback: 6 },
-    Algorithm { number: 7, mods: [b(&[2]), 0, b(&[4, 5]), 0, b(&[6]), 0], carriers: b(&[1, 3]), feedback: 6 },
-    Algorithm { number: 16, mods: [b(&[2, 3, 5]), 0, b(&[4]), 0, b(&[6]), 0], carriers: b(&[1]), feedback: 6 },
-    Algorithm { number: 19, mods: [b(&[2]), b(&[3]), 0, b(&[6]), b(&[6]), 0], carriers: b(&[1, 4, 5]), feedback: 6 },
-    Algorithm { number: 22, mods: [b(&[2]), 0, b(&[6]), b(&[6]), b(&[6]), 0], carriers: b(&[1, 3, 4, 5]), feedback: 6 },
-    Algorithm { number: 32, mods: [0; OPS], carriers: b(&[1, 2, 3, 4, 5, 6]), feedback: 6 },
+/// All 32 of the DX7's algorithms, as printed on its panel.
+const ALGORITHMS: [Algorithm; 32] = [
+    Algorithm { number: 1, mods: [b(&[2]), 0, b(&[4]), b(&[5]), b(&[6]), 0], carriers: b(&[1, 3]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 2, mods: [b(&[2]), 0, b(&[4]), b(&[5]), b(&[6]), 0], carriers: b(&[1, 3]), feedback: 2, fb_from: 2 },
+    Algorithm { number: 3, mods: [b(&[2]), b(&[3]), 0, b(&[5]), b(&[6]), 0], carriers: b(&[1, 4]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 4, mods: [b(&[2]), b(&[3]), 0, b(&[5]), b(&[6]), 0], carriers: b(&[1, 4]), feedback: 6, fb_from: 4 },
+    Algorithm { number: 5, mods: [b(&[2]), 0, b(&[4]), 0, b(&[6]), 0], carriers: b(&[1, 3, 5]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 6, mods: [b(&[2]), 0, b(&[4]), 0, b(&[6]), 0], carriers: b(&[1, 3, 5]), feedback: 6, fb_from: 5 },
+    Algorithm { number: 7, mods: [b(&[2]), 0, b(&[4, 5]), 0, b(&[6]), 0], carriers: b(&[1, 3]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 8, mods: [b(&[2]), 0, b(&[4, 5]), 0, b(&[6]), 0], carriers: b(&[1, 3]), feedback: 4, fb_from: 4 },
+    Algorithm { number: 9, mods: [b(&[2]), 0, b(&[4, 5]), 0, b(&[6]), 0], carriers: b(&[1, 3]), feedback: 2, fb_from: 2 },
+    Algorithm { number: 10, mods: [b(&[2]), b(&[3]), 0, b(&[5, 6]), 0, 0], carriers: b(&[1, 4]), feedback: 3, fb_from: 3 },
+    Algorithm { number: 11, mods: [b(&[2]), b(&[3]), 0, b(&[5, 6]), 0, 0], carriers: b(&[1, 4]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 12, mods: [b(&[2]), 0, b(&[4, 5, 6]), 0, 0, 0], carriers: b(&[1, 3]), feedback: 2, fb_from: 2 },
+    Algorithm { number: 13, mods: [b(&[2]), 0, b(&[4, 5, 6]), 0, 0, 0], carriers: b(&[1, 3]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 14, mods: [b(&[2]), 0, b(&[4]), b(&[5, 6]), 0, 0], carriers: b(&[1, 3]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 15, mods: [b(&[2]), 0, b(&[4]), b(&[5, 6]), 0, 0], carriers: b(&[1, 3]), feedback: 2, fb_from: 2 },
+    Algorithm { number: 16, mods: [b(&[2, 3, 5]), 0, b(&[4]), 0, b(&[6]), 0], carriers: b(&[1]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 17, mods: [b(&[2, 3, 5]), 0, b(&[4]), 0, b(&[6]), 0], carriers: b(&[1]), feedback: 2, fb_from: 2 },
+    Algorithm { number: 18, mods: [b(&[2, 3, 4]), 0, 0, b(&[5]), b(&[6]), 0], carriers: b(&[1]), feedback: 3, fb_from: 3 },
+    Algorithm { number: 19, mods: [b(&[2]), b(&[3]), 0, b(&[6]), b(&[6]), 0], carriers: b(&[1, 4, 5]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 20, mods: [b(&[3]), b(&[3]), 0, b(&[5, 6]), 0, 0], carriers: b(&[1, 2, 4]), feedback: 3, fb_from: 3 },
+    Algorithm { number: 21, mods: [b(&[3]), b(&[3]), 0, b(&[6]), b(&[6]), 0], carriers: b(&[1, 2, 4, 5]), feedback: 3, fb_from: 3 },
+    Algorithm { number: 22, mods: [b(&[2]), 0, b(&[6]), b(&[6]), b(&[6]), 0], carriers: b(&[1, 3, 4, 5]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 23, mods: [0, b(&[3]), 0, b(&[6]), b(&[6]), 0], carriers: b(&[1, 2, 4, 5]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 24, mods: [0, 0, b(&[6]), b(&[6]), b(&[6]), 0], carriers: b(&[1, 2, 3, 4, 5]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 25, mods: [0, 0, 0, b(&[6]), b(&[6]), 0], carriers: b(&[1, 2, 3, 4, 5]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 26, mods: [0, b(&[3]), 0, b(&[5, 6]), 0, 0], carriers: b(&[1, 2, 4]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 27, mods: [0, b(&[3]), 0, b(&[5, 6]), 0, 0], carriers: b(&[1, 2, 4]), feedback: 3, fb_from: 3 },
+    Algorithm { number: 28, mods: [b(&[2]), 0, b(&[4]), b(&[5]), 0, 0], carriers: b(&[1, 3, 6]), feedback: 5, fb_from: 5 },
+    Algorithm { number: 29, mods: [0, 0, b(&[4]), 0, b(&[6]), 0], carriers: b(&[1, 2, 3, 5]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 30, mods: [0, 0, b(&[4]), b(&[5]), 0, 0], carriers: b(&[1, 2, 3, 6]), feedback: 5, fb_from: 5 },
+    Algorithm { number: 31, mods: [0, 0, 0, 0, b(&[6]), 0], carriers: b(&[1, 2, 3, 4, 5]), feedback: 6, fb_from: 6 },
+    Algorithm { number: 32, mods: [0, 0, 0, 0, 0, 0], carriers: b(&[1, 2, 3, 4, 5, 6]), feedback: 6, fb_from: 6 },
 ];
 
 /// DX7 output level (0-99) to amplitude: about 0.75 dB a step, 99 = full.
@@ -275,7 +303,7 @@ impl VintageDsp for Dsp {
         let n = chans.first().map(|c| c.len()).unwrap_or(0);
         let fs = self.fs;
         let p = self.v;
-        let alg = &ALGORITHMS[(p[ALG].round().clamp(0.0, 7.0)) as usize];
+        let alg = &ALGORITHMS[(p[ALG].round().clamp(1.0, 32.0)) as usize - 1];
         let fb_n = p[FB].round();
         let beta = if fb_n < 1.0 { 0.0 } else { std::f64::consts::PI * 2f64.powf(fb_n as f64 - 7.0) * 1.6 };
         let ncar = alg.carriers.count_ones() as f64;
@@ -358,7 +386,7 @@ impl VintageDsp for Dsp {
                     let s = &mut vc.ops[o];
                     let y = amp * (TAU * s.ph + m).sin();
                     s.ph = (s.ph + vc.f * bend * ratio[o] / fs).fract();
-                    if o + 1 == alg.feedback {
+                    if o + 1 == alg.fb_from {
                         vc.fb = [y, vc.fb[0]];
                     }
                     // a full-level modulator swings its carrier's phase by about 4 pi
@@ -396,8 +424,7 @@ macro_rules! patch {
 
 fn presets() -> Vec<Preset> {
     vec![
-        // algorithm index: 0=1 1=2 2=5 3=7 4=16 5=19 6=22 7=32
-        Preset { name: "Tine E.Piano (alg 5)", values: patch!(2.0, 6.0, -6.0, [
+        Preset { name: "Tine E.Piano (alg 5)", values: patch!(5.0, 6.0, -6.0, [
             1 => (1.0, 3.0, 99.0, 1.0, 4000.0, 0.0, 400.0, 2.0),
             2 => (14.0, 0.0, 60.0, 1.0, 350.0, 0.0, 300.0, 7.0),
             3 => (1.0, 0.0, 99.0, 1.0, 5000.0, 0.0, 400.0, 2.0),
@@ -405,7 +432,7 @@ fn presets() -> Vec<Preset> {
             5 => (1.0, -3.0, 95.0, 1.0, 4000.0, 0.0, 400.0, 2.0),
             6 => (1.0, 0.0, 70.0, 1.0, 1500.0, 0.0, 400.0, 6.0),
         ]) },
-        Preset { name: "Solid Bass (alg 16)", values: patch!(4.0, 6.0, -6.0, [
+        Preset { name: "Solid Bass (alg 16)", values: patch!(16.0, 6.0, -6.0, [
             1 => (0.5, 0.0, 99.0, 1.0, 3000.0, 70.0, 120.0, 2.0),
             2 => (0.5, 0.0, 80.0, 1.0, 400.0, 40.0, 120.0, 5.0),
             3 => (1.0, 0.0, 70.0, 1.0, 250.0, 0.0, 120.0, 5.0),
@@ -413,7 +440,7 @@ fn presets() -> Vec<Preset> {
             5 => (0.5, 1.0, 75.0, 1.0, 600.0, 50.0, 120.0, 4.0),
             6 => (1.0, 0.0, 60.0, 1.0, 300.0, 20.0, 120.0, 3.0),
         ]) },
-        Preset { name: "Brass (alg 22)", values: patch!(6.0, 7.0, -6.0, [
+        Preset { name: "Brass (alg 22)", values: patch!(22.0, 7.0, -6.0, [
             1 => (1.0, 0.0, 99.0, 60.0, 800.0, 85.0, 250.0, 2.0),
             2 => (1.0, 0.0, 80.0, 90.0, 900.0, 70.0, 250.0, 4.0),
             3 => (1.0, 2.0, 95.0, 70.0, 800.0, 85.0, 250.0, 2.0),
@@ -421,7 +448,7 @@ fn presets() -> Vec<Preset> {
             5 => (1.0, 1.0, 93.0, 70.0, 800.0, 85.0, 250.0, 2.0),
             6 => (1.0, 0.0, 70.0, 80.0, 900.0, 70.0, 250.0, 4.0),
         ]) },
-        Preset { name: "Tubular Bells (alg 5)", values: patch!(2.0, 0.0, -6.0, [
+        Preset { name: "Tubular Bells (alg 5)", values: patch!(5.0, 0.0, -6.0, [
             1 => (1.0, 0.0, 99.0, 1.0, 9000.0, 0.0, 3000.0, 2.0),
             2 => (3.5, 0.0, 75.0, 1.0, 6000.0, 0.0, 3000.0, 4.0),
             3 => (1.0, 2.0, 95.0, 1.0, 8000.0, 0.0, 3000.0, 2.0),
@@ -429,7 +456,7 @@ fn presets() -> Vec<Preset> {
             5 => (2.0, -2.0, 85.0, 1.0, 7000.0, 0.0, 3000.0, 2.0),
             6 => (5.19, 0.0, 65.0, 1.0, 3000.0, 0.0, 3000.0, 4.0),
         ]) },
-        Preset { name: "Marimba (alg 7)", values: patch!(3.0, 0.0, -6.0, [
+        Preset { name: "Marimba (alg 7)", values: patch!(7.0, 0.0, -6.0, [
             1 => (1.0, 0.0, 99.0, 1.0, 900.0, 0.0, 400.0, 3.0),
             2 => (3.98, 0.0, 60.0, 1.0, 150.0, 0.0, 200.0, 6.0),
             3 => (4.0, 0.0, 70.0, 1.0, 350.0, 0.0, 200.0, 3.0),
@@ -437,7 +464,7 @@ fn presets() -> Vec<Preset> {
             5 => (1.0, 0.0, 50.0, 1.0, 200.0, 0.0, 100.0, 6.0),
             6 => (1.0, 0.0, 0.0, 1.0, 100.0, 0.0, 100.0, 0.0),
         ]) },
-        Preset { name: "Drawbar Organ (alg 32)", values: patch!(7.0, 0.0, -6.0, [
+        Preset { name: "Drawbar Organ (alg 32)", values: patch!(32.0, 0.0, -6.0, [
             1 => (0.5, 0.0, 95.0, 5.0, 100.0, 99.0, 60.0, 0.0),
             2 => (1.0, 0.0, 95.0, 5.0, 100.0, 99.0, 60.0, 0.0),
             3 => (1.5, 0.0, 90.0, 5.0, 100.0, 99.0, 60.0, 0.0),
@@ -445,7 +472,7 @@ fn presets() -> Vec<Preset> {
             5 => (3.0, 0.0, 80.0, 5.0, 100.0, 99.0, 60.0, 0.0),
             6 => (4.0, 0.0, 78.0, 5.0, 100.0, 99.0, 60.0, 0.0),
         ]) },
-        Preset { name: "Glass Pad (alg 1)", values: patch!(0.0, 4.0, -6.0, [
+        Preset { name: "Glass Pad (alg 1)", values: patch!(1.0, 4.0, -6.0, [
             1 => (1.0, 2.0, 99.0, 900.0, 3000.0, 85.0, 2500.0, 1.0),
             2 => (2.0, 0.0, 70.0, 1200.0, 3000.0, 60.0, 2500.0, 2.0),
             3 => (1.0, -2.0, 97.0, 1000.0, 3000.0, 85.0, 2500.0, 1.0),
@@ -453,7 +480,7 @@ fn presets() -> Vec<Preset> {
             5 => (3.0, 0.0, 60.0, 1200.0, 4000.0, 50.0, 2500.0, 2.0),
             6 => (1.0, 1.0, 50.0, 2000.0, 4000.0, 50.0, 2500.0, 2.0),
         ]) },
-        Preset { name: "Feedback Saw Lead (alg 32)", values: patch!(7.0, 7.0, 2.0, [
+        Preset { name: "Feedback Saw Lead (alg 32)", values: patch!(32.0, 7.0, 2.0, [
             1 => (1.0, 0.0, 0.0, 1.0, 100.0, 0.0, 100.0, 0.0),
             2 => (1.0, 0.0, 0.0, 1.0, 100.0, 0.0, 100.0, 0.0),
             3 => (1.0, 0.0, 0.0, 1.0, 100.0, 0.0, 100.0, 0.0),
@@ -465,14 +492,38 @@ fn presets() -> Vec<Preset> {
 }
 
 const ROUTES: &[&str] = &[
-    "1:  6>5>4>3, 2>1   ·  carriers 1, 3  ·  feedback on 6",
-    "2:  6>5>4>3, 2>1   ·  carriers 1, 3  ·  feedback on 2",
-    "5:  6>5, 4>3, 2>1   ·  carriers 1, 3, 5  ·  feedback on 6",
-    "7:  6>5, 5+4>3, 2>1   ·  carriers 1, 3  ·  feedback on 6",
-    "16:  6>5, 4>3, 5+3+2>1   ·  carrier 1  ·  feedback on 6",
-    "19:  3>2>1, 6>4, 6>5   ·  carriers 1, 4, 5  ·  feedback on 6",
-    "22:  2>1, 6>3, 6>4, 6>5   ·  carriers 1, 3, 4, 5  ·  feedback on 6",
-    "32:  all six are carriers  ·  feedback on 6",
+    "1:  6>5, 5>4, 4>3, 2>1  ·  carriers 1, 3  ·  feedback on 6",
+    "2:  6>5, 5>4, 4>3, 2>1  ·  carriers 1, 3  ·  feedback on 2",
+    "3:  6>5, 5>4, 3>2, 2>1  ·  carriers 1, 4  ·  feedback on 6",
+    "4:  6>5, 5>4, 3>2, 2>1  ·  carriers 1, 4  ·  feedback 4>6",
+    "5:  6>5, 4>3, 2>1  ·  carriers 1, 3, 5  ·  feedback on 6",
+    "6:  6>5, 4>3, 2>1  ·  carriers 1, 3, 5  ·  feedback 5>6",
+    "7:  6>5, 5+4>3, 2>1  ·  carriers 1, 3  ·  feedback on 6",
+    "8:  6>5, 5+4>3, 2>1  ·  carriers 1, 3  ·  feedback on 4",
+    "9:  6>5, 5+4>3, 2>1  ·  carriers 1, 3  ·  feedback on 2",
+    "10:  6+5>4, 3>2, 2>1  ·  carriers 1, 4  ·  feedback on 3",
+    "11:  6+5>4, 3>2, 2>1  ·  carriers 1, 4  ·  feedback on 6",
+    "12:  6+5+4>3, 2>1  ·  carriers 1, 3  ·  feedback on 2",
+    "13:  6+5+4>3, 2>1  ·  carriers 1, 3  ·  feedback on 6",
+    "14:  6+5>4, 4>3, 2>1  ·  carriers 1, 3  ·  feedback on 6",
+    "15:  6+5>4, 4>3, 2>1  ·  carriers 1, 3  ·  feedback on 2",
+    "16:  6>5, 4>3, 5+3+2>1  ·  carrier 1  ·  feedback on 6",
+    "17:  6>5, 4>3, 5+3+2>1  ·  carrier 1  ·  feedback on 2",
+    "18:  6>5, 5>4, 4+3+2>1  ·  carrier 1  ·  feedback on 3",
+    "19:  6>5, 6>4, 3>2, 2>1  ·  carriers 1, 4, 5  ·  feedback on 6",
+    "20:  6+5>4, 3>2, 3>1  ·  carriers 1, 2, 4  ·  feedback on 3",
+    "21:  6>5, 6>4, 3>2, 3>1  ·  carriers 1, 2, 4, 5  ·  feedback on 3",
+    "22:  6>5, 6>4, 6>3, 2>1  ·  carriers 1, 3, 4, 5  ·  feedback on 6",
+    "23:  6>5, 6>4, 3>2  ·  carriers 1, 2, 4, 5  ·  feedback on 6",
+    "24:  6>5, 6>4, 6>3  ·  carriers 1, 2, 3, 4, 5  ·  feedback on 6",
+    "25:  6>5, 6>4  ·  carriers 1, 2, 3, 4, 5  ·  feedback on 6",
+    "26:  6+5>4, 3>2  ·  carriers 1, 2, 4  ·  feedback on 6",
+    "27:  6+5>4, 3>2  ·  carriers 1, 2, 4  ·  feedback on 3",
+    "28:  5>4, 4>3, 2>1  ·  carriers 1, 3, 6  ·  feedback on 5",
+    "29:  6>5, 4>3  ·  carriers 1, 2, 3, 5  ·  feedback on 6",
+    "30:  5>4, 4>3  ·  carriers 1, 2, 3, 6  ·  feedback on 5",
+    "31:  6>5  ·  carriers 1, 2, 3, 4, 5  ·  feedback on 6",
+    "32:  no modulators  ·  carriers 1, 2, 3, 4, 5, 6  ·  feedback on 6",
 ];
 
 fn panel() -> Panel {
@@ -489,7 +540,7 @@ fn panel() -> Panel {
     ];
     const OPNAMES: [&str; 6] = ["OP 1", "OP 2", "OP 3", "OP 4", "OP 5", "OP 6"];
     let mut items = vec![
-        Item::Selector { p: ALG, x: 90.0, y: 150.0, label: "ALGORITHM", positions: &["1", "2", "5", "7", "16", "19", "22", "32"], tip: "How the six operators connect: which modulate which, which you hear, which feeds back." },
+        Item::Knob { p: ALG, x: 90.0, y: 150.0, r: 24.0, label: "ALGORITHM", active: None, tip: "How the six operators connect: which modulate which, which you hear, which feeds back." },
         Item::Knob { p: FB, x: 210.0, y: 150.0, r: 24.0, label: "FEEDBACK", tip: "One operator modulating itself: 0 is a pure tone, 7 a buzzing saw on the edge of noise.", active: None },
         Item::Caption { p: ALG, x: 270.0, y: 130.0, w: 230.0, size: 11.0, texts: ROUTES },
         Item::Knob { p: VOLUME, x: 570.0, y: 150.0, r: 24.0, label: "VOLUME", tip: "Output level.", active: None },
@@ -504,7 +555,7 @@ fn panel() -> Panel {
     }
     Panel {
         title: "FM 7",
-        subtitle: ("IN THE MANNER OF THE YAMAHA DX7", "6 OPERATORS · 8 ALGORITHMS · FEEDBACK · 16 VOICES"),
+        subtitle: ("IN THE MANNER OF THE YAMAHA DX7", "6 OPERATORS · 32 ALGORITHMS · FEEDBACK · 16 VOICES"),
         accent: ui::MOSS,
         size: (W, H),
         items,
@@ -525,7 +576,7 @@ mod tests {
 
     fn tune_params() -> Vec<f32> {
         let mut p = defaults();
-        p[ALG] = 7.0;
+        p[ALG] = 32.0;
         p[FB] = 0.0;
         for o in 1..=OPS {
             p[op(o, LEVEL)] = if o == 1 { 99.0 } else { 0.0 };
@@ -552,7 +603,7 @@ mod tests {
     #[test]
     fn modulation_adds_harmonics() {
         let sine = tune_params();
-        let fm = with(sine.clone(), &[(ALG, 2.0), (op(2, LEVEL), 80.0), (op(2, RATIO), 1.0), (op(2, VELSENS), 0.0)]);
+        let fm = with(sine.clone(), &[(ALG, 5.0), (op(2, LEVEL), 80.0), (op(2, RATIO), 1.0), (op(2, VELSENS), 0.0)]);
         let bright = |p: &[f32]| {
             let (l, _) = render(p, &[(0, Midi::On { note: 57, vel: 1.0 })], 12000);
             let x = &l[2400..];
@@ -562,5 +613,29 @@ mod tests {
         let (a, b) = (bright(&sine), bright(&fm));
         println!("sine {a:.4} fm {b:.4}");
         assert!(b > 2.0 * a);
+    }
+}
+
+#[cfg(test)]
+mod algorithm_tests {
+    use super::*;
+    /// Every algorithm is numbered in order, has a carrier, and every operator either is a
+    /// carrier or modulates something (no operator left unconnected).
+    #[test]
+    fn all_32_are_wired() {
+        for (i, a) in ALGORITHMS.iter().enumerate() {
+            assert_eq!(a.number as usize, i + 1);
+            assert!(a.carriers != 0);
+            let modulators = a.mods.iter().fold(0u8, |m, x| m | x);
+            for o in 0..OPS {
+                let bit = 1u8 << o;
+                assert!(a.carriers & bit != 0 || modulators & bit != 0, "alg {}: op {} goes nowhere", a.number, o + 1);
+                assert!(a.carriers & bit == 0 || modulators & bit == 0, "alg {}: op {} is both", a.number, o + 1);
+            }
+            assert!(a.feedback >= 1 && a.fb_from >= 1 && a.feedback <= 6 && a.fb_from <= 6);
+        }
+        // the published carrier counts
+        let n = |k: usize| ALGORITHMS[k - 1].carriers.count_ones();
+        assert_eq!((n(1), n(5), n(16), n(19), n(22), n(32)), (2, 3, 1, 3, 4, 6));
     }
 }
