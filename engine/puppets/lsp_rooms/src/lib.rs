@@ -134,23 +134,23 @@ pub fn spaces() -> [RoomSpec; 6] {
             mic_height: 2.0,
             open_air: None,
         },
-        // RAK Studio 1, London: estimated
+        // RAK Studio 1, London: live area 100 m2 (Sound On Sound Studio File, 2014); height and decay estimated
         RoomSpec {
-            dims: [12.0, 9.0, 5.5],
+            dims: [12.0, 8.4, 5.5],
             rt_live: [0.8, 0.66, 0.5],
             rt_damped: [0.55, 0.46, 0.36],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [3.5, 4.5, 1.3],
+            src: [3.5, 4.2, 1.3],
             mic_height: 2.2,
             open_air: None,
         },
-        // British Grove, London: estimated
+        // British Grove, London: a double-height live room (British Grove; Sound On Sound); floor area and decay estimated
         RoomSpec {
-            dims: [14.0, 11.0, 6.0],
+            dims: [13.0, 10.0, 7.0],
             rt_live: [1.0, 0.85, 0.65],
             rt_damped: [0.7, 0.6, 0.46],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [4.0, 5.5, 1.4],
+            src: [3.71, 5.0, 1.4],
             mic_height: 2.6,
             open_air: None,
         },
@@ -189,8 +189,8 @@ pub fn spaces() -> [RoomSpec; 6] {
 
 pub const PLANS: &[Plan] = &[
     Plan { length: 10.0, width: 8.0, src: (3.0, 3.8), open_air: false, far_wall: "" },
-    Plan { length: 12.0, width: 9.0, src: (3.5, 4.5), open_air: false, far_wall: "" },
-    Plan { length: 14.0, width: 11.0, src: (4.0, 5.5), open_air: false, far_wall: "" },
+    Plan { length: 12.0, width: 8.4, src: (3.5, 4.2), open_air: false, far_wall: "" },
+    Plan { length: 13.0, width: 10.0, src: (3.71, 5.0), open_air: false, far_wall: "" },
     Plan { length: 18.0, width: 10.0, src: (4.0, 6.0), open_air: false, far_wall: "" },
     Plan { length: 20.0, width: 10.0, src: (3.5, 6.0), open_air: false, far_wall: "" },
     Plan { length: 40.0, width: 25.0, src: (6.0, 12.0), open_air: false, far_wall: "" },
@@ -207,8 +207,8 @@ const NAMES: &[&str] = &[
 
 const ABOUT: &[&str] = &[
     "Black Box Studios in the Loire countryside, where the album was mostly recorded in about two weeks (August 2007). Size and decay estimated.",
-    "RAK Studios in St John's Wood, where Separate and Ever Deadly was recorded. Size and decay estimated.",
-    "British Grove Studios in Chiswick, where the London Metropolitan Orchestra was recorded (December 2007). Size and decay estimated.",
+    "RAK Studios in St John's Wood, where Separate and Ever Deadly was recorded. Live area 100 square metres (Sound On Sound); height and decay estimated.",
+    "British Grove Studios in Chiswick, where the London Metropolitan Orchestra was recorded (December 2007). A double-height live room (British Grove); floor area and decay estimated.",
     "A converted church studio like the one in Quebec where Owen Pallett recorded his parts. Generic; size and decay estimated.",
     "A wooden-floored village hall for a roomy 60s sound. Generic; size and decay estimated.",
     "A concert hall for the full orchestra. Generic; size and decay estimated.",

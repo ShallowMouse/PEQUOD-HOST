@@ -134,13 +134,13 @@ pub fn spaces() -> [RoomSpec; 6] {
             mic_height: 2.2,
             open_air: None,
         },
-        // Rockfield, Monmouth: estimated
+        // Rockfield, Monmouth: the Quadrangle's carpeted live room, about 12 x 6 m (twice the 6 x 6 m drum room, Mix); stone farm building; height and decay estimated
         RoomSpec {
-            dims: [9.0, 7.0, 4.0],
-            rt_live: [0.6, 0.5, 0.4],
-            rt_damped: [0.42, 0.35, 0.28],
+            dims: [12.0, 6.0, 4.0],
+            rt_live: [0.55, 0.45, 0.36],
+            rt_damped: [0.39, 0.32, 0.25],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [2.8, 3.5, 1.2],
+            src: [3.73, 3.0, 1.2],
             mic_height: 2.0,
             open_air: None,
         },
@@ -189,7 +189,7 @@ pub fn spaces() -> [RoomSpec; 6] {
 
 pub const PLANS: &[Plan] = &[
     Plan { length: 11.0, width: 8.0, src: (3.0, 4.0), open_air: false, far_wall: "" },
-    Plan { length: 9.0, width: 7.0, src: (2.8, 3.5), open_air: false, far_wall: "" },
+    Plan { length: 12.0, width: 6.0, src: (3.73, 3.0), open_air: false, far_wall: "" },
     Plan { length: 9.0, width: 6.0, src: (2.5, 3.0), open_air: false, far_wall: "" },
     Plan { length: 15.0, width: 10.0, src: (4.0, 5.0), open_air: false, far_wall: "" },
     Plan { length: 10.0, width: 8.0, src: (3.0, 4.0), open_air: false, far_wall: "" },
@@ -207,7 +207,7 @@ const NAMES: &[&str] = &[
 
 const ABOUT: &[&str] = &[
     "St Anne's Court, Soho: Queen's first albums (Queen, Queen II, much of Sheer Heart Attack) were made here with Roy Thomas Baker. Size and decay estimated.",
-    "The residential farm studio in Wales where A Night at the Opera's sessions, Bohemian Rhapsody included, began in 1975. Size and decay estimated.",
+    "The residential farm studio in Wales where A Night at the Opera's sessions, Bohemian Rhapsody included, began in 1975. The Quadrangle's carpeted live room, about 12 x 6 m, in a stone farm building (Mix). Decay estimated.",
     "Whitechapel: Sheer Heart Attack and A Night at the Opera overdubs and mixes. Size and decay estimated.",
     "A converted church hall in Highbury, used for News of the World (1977): a big, high, live room. Size and decay estimated.",
     "In the basement of the Arabella Hotel: The Game, Hot Space and The Works were made here with Mack. Size and decay estimated.",

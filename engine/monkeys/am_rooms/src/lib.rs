@@ -154,13 +154,13 @@ pub fn spaces() -> [RoomSpec; 6] {
             mic_height: 2.0,
             open_air: None,
         },
-        // Electric Lady, New York: estimated
+        // Electric Lady, New York: Studio A, 35 x 38 ft (electricladystudios.com), ceiling 13 to 17 ft (Kramer, Mix); low-frequency-absorbing ceiling (Storyk); decay estimated
         RoomSpec {
-            dims: [10.0, 7.0, 4.0],
-            rt_live: [0.7, 0.6, 0.45],
-            rt_damped: [0.5, 0.42, 0.32],
+            dims: [11.58, 10.67, 4.57],
+            rt_live: [0.5, 0.6, 0.45],
+            rt_damped: [0.36, 0.42, 0.32],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [3.0, 3.5, 1.2],
+            src: [3.47, 5.33, 1.2],
             mic_height: 2.0,
             open_air: None,
         },
@@ -191,7 +191,7 @@ pub const PLANS: &[Plan] = &[
     Plan { length: 12.0, width: 8.0, src: (3.5, 4.0), open_air: false, far_wall: "" },
     Plan { length: 6.5, width: 5.0, src: (2.0, 2.5), open_air: false, far_wall: "" },
     Plan { length: 9.0, width: 7.0, src: (2.8, 3.5), open_air: false, far_wall: "" },
-    Plan { length: 10.0, width: 7.0, src: (3.0, 3.5), open_air: false, far_wall: "" },
+    Plan { length: 11.58, width: 10.67, src: (3.47, 5.33), open_air: false, far_wall: "" },
     Plan { length: 11.0, width: 7.0, src: (3.2, 3.5), open_air: false, far_wall: "" },
     Plan { length: 14.0, width: 8.0, src: (4.0, 4.0), open_air: false, far_wall: "" },
 ];
@@ -209,7 +209,7 @@ const ABOUT: &[&str] = &[
     "A converted chapel in the Lincolnshire Wolds: Whatever People Say I Am, That's What I'm Not (2005). Size and decay estimated.",
     "A ranch house in the desert with Josh Homme: much of Humbug and part of AM were made here. Small, warm rooms. Size and decay estimated.",
     "Hollywood: where most of AM was recorded with James Ford (2012-13). Size and decay estimated.",
-    "Greenwich Village: used for Humbug and Tranquility Base Hotel & Casino. Size and decay estimated.",
+    "Greenwich Village: used for Humbug and Tranquility Base Hotel & Casino. Studio A: 35 x 38 ft, the ceiling dropping from 17 to 13 ft and soaking up the lows (Electric Lady; Eddie Kramer; John Storyk). Decay estimated.",
     "A 19th-century house outside Paris with wooden floors: Tranquility Base Hotel & Casino and The Car. Size and decay estimated.",
     "A medieval gatehouse in Suffolk where The Car's sessions began: stone, high and long-decaying. Size and decay estimated.",
 ];

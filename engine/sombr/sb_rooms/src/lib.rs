@@ -130,23 +130,23 @@ pub fn spaces() -> [RoomSpec; 4] {
             mic_height: 1.5,
             open_air: None,
         },
-        // Sound City Studio A: estimated
+        // Sound City Studio A: live area 185 m2 (Sound On Sound, Fairfax Recording, formerly Sound City A); height and decay estimated
         RoomSpec {
-            dims: [16.0, 12.0, 6.0],
+            dims: [15.2, 12.2, 5.0],
             rt_live: [0.95, 0.8, 0.62],
             rt_damped: [0.7, 0.58, 0.45],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [4.5, 6.0, 1.2],
+            src: [4.27, 6.1, 1.2],
             mic_height: 2.2,
             open_air: None,
         },
-        // Live Room Corner: estimated
+        // Live Room Corner: the same room (185 m2), source in a corner; height and decay estimated
         RoomSpec {
-            dims: [16.0, 12.0, 6.0],
+            dims: [15.2, 12.2, 5.0],
             rt_live: [0.95, 0.8, 0.62],
             rt_damped: [0.7, 0.58, 0.45],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [1.5, 1.5, 1.2],
+            src: [1.0, 1.0, 1.0],
             mic_height: 1.8,
             open_air: None,
         },
@@ -165,8 +165,8 @@ pub fn spaces() -> [RoomSpec; 4] {
 
 pub const PLANS: &[Plan] = &[
     Plan { length: 3.6, width: 3.0, src: (1.2, 1.5), open_air: false, far_wall: "" },
-    Plan { length: 16.0, width: 12.0, src: (4.5, 6.0), open_air: false, far_wall: "" },
-    Plan { length: 16.0, width: 12.0, src: (1.5, 1.5), open_air: false, far_wall: "" },
+    Plan { length: 15.2, width: 12.2, src: (4.27, 6.1), open_air: false, far_wall: "" },
+    Plan { length: 15.2, width: 12.2, src: (1.0, 1.0), open_air: false, far_wall: "" },
     Plan { length: 4.0, width: 2.6, src: (1.2, 1.3), open_air: false, far_wall: "" },
 ];
 
@@ -179,7 +179,7 @@ const NAMES: &[&str] = &[
 
 const ABOUT: &[&str] = &[
     "A small New York bedroom like the one where sombr wrote and recorded Back to Friends and Undressed alone. Size and decay estimated.",
-    "Sound City, Van Nuys: where Tony Berg's players added layers to sombr's songs (12 to 12). Size and decay estimated.",
+    "Sound City, Van Nuys: where Tony Berg's players added layers to sombr's songs (12 to 12). Live area 185 square metres, linoleum on concrete (Sound On Sound); height and decay estimated.",
     "An amp or piano pushed into a corner of the big room, for more low-end build-up and close reflections. Size and decay estimated.",
     "A hard New York stairwell: free natural reverb for a bedroom producer. Size and decay estimated.",
 ];

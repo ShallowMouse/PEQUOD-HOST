@@ -144,13 +144,13 @@ pub fn spaces() -> [RoomSpec; 6] {
             mic_height: 2.5,
             open_air: None,
         },
-        // RAK Studio 1: estimated
+        // RAK Studio 1: live area 100 m2 (Sound On Sound Studio File, 2014); height and decay estimated
         RoomSpec {
-            dims: [13.0, 9.0, 6.0],
+            dims: [12.0, 8.4, 6.0],
             rt_live: [0.9, 0.75, 0.6],
             rt_damped: [0.62, 0.52, 0.42],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [4.0, 4.5, 1.3],
+            src: [3.69, 4.2, 1.3],
             mic_height: 2.5,
             open_air: None,
         },
@@ -190,7 +190,7 @@ pub fn spaces() -> [RoomSpec; 6] {
 pub const PLANS: &[Plan] = &[
     Plan { length: 9.0, width: 7.0, src: (2.5, 3.50), open_air: false, far_wall: "" },
     Plan { length: 14.0, width: 10.0, src: (4.0, 5.00), open_air: false, far_wall: "" },
-    Plan { length: 13.0, width: 9.0, src: (4.0, 4.50), open_air: false, far_wall: "" },
+    Plan { length: 12.0, width: 8.4, src: (3.69, 4.2), open_air: false, far_wall: "" },
     Plan { length: 11.0, width: 8.0, src: (3.5, 4.00), open_air: false, far_wall: "" },
     Plan { length: 9.0, width: 6.5, src: (3.0, 3.25), open_air: false, far_wall: "" },
     Plan { length: 15.0, width: 10.0, src: (2.0, 5.00), open_air: false, far_wall: "" },
@@ -208,7 +208,7 @@ const NAMES: &[&str] = &[
 const ABOUT: &[&str] = &[
     "Polydor's own studio off Oxford Street, where In the City (1977) was cut, mostly live, in a few days. A medium, fairly dry room. Size and decay estimated.",
     "Island's big Studio 1 in Notting Hill, a converted church hall: This Is the Modern World (1977). Size and decay estimated.",
-    "Mickie Most's RAK in St John's Wood, its high-ceilinged Studio 1: All Mod Cons (1978), Down in the Tube Station at Midnight. Size and decay estimated.",
+    "Mickie Most's RAK in St John's Wood, its high-ceilinged Studio 1: All Mod Cons (1978), Down in the Tube Station at Midnight. Live area 100 square metres (Sound On Sound); height and decay estimated.",
     "The Townhouse, Shepherd's Bush: Setting Sons, Sound Affects and The Gift. Buckler's kit on a riser at the back behind glass, the Helios desk. Size and decay estimated.",
     "The Townhouse's stone-walled room in Studio Two, where the fans' Eton Rifles chorus was recorded. Size and decay estimated.",
     "A Woking working men's club hall of the kind the young Jam played: wide, low, a hard floor and a bar. Generic; size and decay estimated.",

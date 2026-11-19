@@ -134,33 +134,33 @@ pub fn spaces() -> [RoomSpec; 6] {
             mic_height: 2.0,
             open_air: None,
         },
-        // Power Station, New York: estimated
+        // Power Station, New York: Studio A, about 48 x 52 ft, ceiling to 35 ft at its highest (Sound On Sound, Avatar Studio File); mean height and decay estimated
         RoomSpec {
-            dims: [16.0, 12.0, 8.0],
+            dims: [15.85, 14.63, 9.0],
             rt_live: [1.2, 1.0, 0.75],
             rt_damped: [0.8, 0.68, 0.52],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [4.0, 5.5, 1.3],
+            src: [3.96, 6.71, 1.3],
             mic_height: 2.6,
             open_air: None,
         },
-        // AIR Montserrat: estimated
+        // AIR Montserrat: about 30 x 30 ft, one area dead with a low ceiling, the other live (Studio Sound, May 1979); height and decay estimated
         RoomSpec {
-            dims: [13.0, 10.0, 5.0],
-            rt_live: [0.8, 0.68, 0.52],
-            rt_damped: [0.55, 0.47, 0.37],
+            dims: [9.14, 9.14, 3.5],
+            rt_live: [0.6, 0.5, 0.38],
+            rt_damped: [0.41, 0.35, 0.27],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [3.5, 4.5, 1.3],
+            src: [2.46, 4.11, 1.3],
             mic_height: 2.2,
             open_air: None,
         },
-        // British Grove, London: estimated
+        // British Grove, London: a double-height live room (British Grove; Sound On Sound); floor area and decay estimated
         RoomSpec {
-            dims: [12.0, 9.0, 5.5],
+            dims: [13.0, 10.0, 7.0],
             rt_live: [0.75, 0.62, 0.48],
             rt_damped: [0.5, 0.42, 0.33],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [3.2, 4.2, 1.2],
+            src: [3.47, 4.67, 1.2],
             mic_height: 2.2,
             open_air: None,
         },
@@ -189,9 +189,9 @@ pub fn spaces() -> [RoomSpec; 6] {
 
 pub const PLANS: &[Plan] = &[
     Plan { length: 11.0, width: 8.0, src: (3.0, 4.0), open_air: false, far_wall: "" },
-    Plan { length: 16.0, width: 12.0, src: (4.0, 5.5), open_air: false, far_wall: "" },
-    Plan { length: 13.0, width: 10.0, src: (3.5, 4.5), open_air: false, far_wall: "" },
-    Plan { length: 12.0, width: 9.0, src: (3.2, 4.2), open_air: false, far_wall: "" },
+    Plan { length: 15.85, width: 14.63, src: (3.96, 6.71), open_air: false, far_wall: "" },
+    Plan { length: 9.14, width: 9.14, src: (2.46, 4.11), open_air: false, far_wall: "" },
+    Plan { length: 13.0, width: 10.0, src: (3.47, 4.67), open_air: false, far_wall: "" },
     Plan { length: 12.0, width: 8.0, src: (2.0, 4.0), open_air: false, far_wall: "" },
     Plan { length: 80.0, width: 60.0, src: (10.0, 20.0), open_air: false, far_wall: "" },
 ];
@@ -207,9 +207,9 @@ const NAMES: &[&str] = &[
 
 const ABOUT: &[&str] = &[
     "Basing Street Studios (Island), Notting Hill: where the first Dire Straits album was recorded in 1978. Size and decay estimated.",
-    "The Power Station's tall Studio A: Making Movies and Love Over Gold, and the Brothers in Arms overdubs and mix. Size and decay estimated.",
-    "George Martin's AIR Studios on Montserrat, where Brothers in Arms was recorded in 1984-85. Size and decay estimated.",
-    "Mark Knopfler's own British Grove Studios in Chiswick (opened 2005). Size and decay estimated.",
+    "The Power Station's tall Studio A: Making Movies and Love Over Gold, and the Brothers in Arms overdubs and mix. About 48 x 52 ft with a ceiling up to 35 ft (Sound On Sound). Decay estimated.",
+    "George Martin's AIR Studios on Montserrat, where Brothers in Arms was recorded in 1984-85. About 30 x 30 ft, a dead low-ceilinged end and a live one (Studio Sound, 1979). Decay estimated.",
+    "Mark Knopfler's own British Grove Studios in Chiswick (opened 2005). A double-height live room (British Grove); floor area and decay estimated.",
     "A south London pub back room of the kind the band started in (1977). Generic; size and decay estimated.",
     "A stadium, for Live Aid (1985) and the Brothers in Arms tour. Generic; size and decay estimated.",
 ];

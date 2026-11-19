@@ -122,13 +122,13 @@ const FT: f64 = 0.3048;
 /// and README; estimates are marked there.
 pub fn spaces() -> [RoomSpec; 5] {
     [
-        // Sound City Studio A: estimated
+        // Sound City Studio A: live area 185 m2 (Sound On Sound, Fairfax Recording, formerly Sound City A); height and decay estimated
         RoomSpec {
-            dims: [16.0, 12.0, 6.0],
+            dims: [15.2, 12.2, 5.0],
             rt_live: [0.95, 0.8, 0.62],
             rt_damped: [0.7, 0.58, 0.45],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [4.5, 6.0, 1.2],
+            src: [4.27, 6.1, 1.2],
             mic_height: 2.2,
             open_air: None,
         },
@@ -176,7 +176,7 @@ pub fn spaces() -> [RoomSpec; 5] {
 }
 
 pub const PLANS: &[Plan] = &[
-    Plan { length: 16.0, width: 12.0, src: (4.5, 6.0), open_air: false, far_wall: "" },
+    Plan { length: 15.2, width: 12.2, src: (4.27, 6.1), open_air: false, far_wall: "" },
     Plan { length: 9.0, width: 7.0, src: (2.6, 3.5), open_air: false, far_wall: "" },
     Plan { length: 6.0, width: 4.5, src: (1.8, 2.2), open_air: false, far_wall: "" },
     Plan { length: 7.0, width: 5.5, src: (2.0, 2.7), open_air: false, far_wall: "" },
@@ -192,7 +192,7 @@ const NAMES: &[&str] = &[
 ];
 
 const ABOUT: &[&str] = &[
-    "Sound City, Van Nuys: the big room where Suck It and See was tracked live, the band facing each other, Matt Helders' kit miked minimally with U67s in the room. Size and decay estimated.",
+    "Sound City, Van Nuys: the big room where Suck It and See was tracked live, the band facing each other, Matt Helders' kit miked minimally with U67s in the room. Live area 185 square metres, linoleum on concrete (Sound On Sound); height and decay estimated.",
     "Sunset Sound, Hollywood: Studio 2, where Suck It and See was mixed. Size and decay estimated.",
     "One Inch Studios, east London: an all-analogue room (1960s one-inch eight-track) where the Submarine songs were cut on one mic. Size and decay estimated.",
     "A small desert-ranch studio of the kind Arctic Monkeys worked in for Humbug and AM. Size and decay estimated.",

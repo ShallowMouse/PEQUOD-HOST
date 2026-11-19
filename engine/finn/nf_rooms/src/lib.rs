@@ -154,11 +154,11 @@ pub fn spaces() -> [RoomSpec; 6] {
             mic_height: 1.9,
             open_air: None,
         },
-        // Auckland Town Hall: estimated
+        // Auckland Town Hall: Great Hall, occupied reverberation time 1.8 s (Auckland Live); shoebox after the Leipzig Gewandhaus; dimensions estimated
         RoomSpec {
             dims: [45.0, 25.0, 18.0],
-            rt_live: [2.4, 2.1, 1.6],
-            rt_damped: [1.8, 1.6, 1.2],
+            rt_live: [2.1, 1.8, 1.5],
+            rt_damped: [1.58, 1.37, 1.12],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
             src: [6.0, 12.0, 1.6],
             mic_height: 4.0,
@@ -209,7 +209,7 @@ const ABOUT: &[&str] = &[
     "Armstrong Studios in Melbourne, where Split Enz recorded True Colours with David Tickle (June to November 1979). Size and decay estimated.",
     "Roundhead Studios, Neil Finn's studio in Auckland. Size and decay estimated.",
     "A wooden beach house at Karekare on Auckland's west coast, like the one Crowded House recorded Together Alone in (1993). Size and decay estimated.",
-    "A big Victorian concert hall like the Auckland Town Hall. Generic; size and decay estimated.",
+    "A big Victorian concert hall like the Auckland Town Hall. The Great Hall: occupied reverberation time 1.8 s (Auckland Live); a shoebox modelled on Leipzig's Gewandhaus. Dimensions estimated.",
     "A crowded Auckland pub venue of the late 70s and 80s. Generic; size and decay estimated.",
     "A Los Angeles tracking room for the early Crowded House records. Generic; size and decay estimated.",
 ];

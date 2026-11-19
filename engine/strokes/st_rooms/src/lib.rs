@@ -164,13 +164,13 @@ pub fn spaces() -> [RoomSpec; 6] {
             mic_height: 1.9,
             open_air: None,
         },
-        // Electric Lady, New York: estimated
+        // Electric Lady, New York: Studio A, 35 x 38 ft (electricladystudios.com), ceiling 13 to 17 ft (Kramer, Mix); low-frequency-absorbing ceiling (Storyk); decay estimated
         RoomSpec {
-            dims: [10.0, 7.0, 4.0],
-            rt_live: [0.7, 0.6, 0.45],
-            rt_damped: [0.5, 0.42, 0.32],
+            dims: [11.58, 10.67, 4.57],
+            rt_live: [0.5, 0.6, 0.45],
+            rt_damped: [0.36, 0.42, 0.32],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [3.0, 3.5, 1.2],
+            src: [3.47, 5.33, 1.2],
             mic_height: 2.0,
             open_air: None,
         },
@@ -192,7 +192,7 @@ pub const PLANS: &[Plan] = &[
     Plan { length: 9.0, width: 6.5, src: (2.7, 3.2), open_air: false, far_wall: "" },
     Plan { length: 11.0, width: 8.0, src: (3.2, 4.0), open_air: false, far_wall: "" },
     Plan { length: 8.0, width: 6.0, src: (2.5, 3.0), open_air: false, far_wall: "" },
-    Plan { length: 10.0, width: 7.0, src: (3.0, 3.5), open_air: false, far_wall: "" },
+    Plan { length: 11.58, width: 10.67, src: (3.47, 5.33), open_air: false, far_wall: "" },
     Plan { length: 9.0, width: 7.0, src: (2.8, 3.5), open_air: false, far_wall: "" },
 ];
 
@@ -210,7 +210,7 @@ const ABOUT: &[&str] = &[
     "New York: Room on Fire (2003), again with Gordon Raphael. Size and decay estimated.",
     "SoHo: First Impressions of Earth (2005) with David Kahne, a bigger, more polished room. Size and decay estimated.",
     "Albert Hammond Jr.'s own studio upstate, where much of Angles (2011) was made. Size and decay estimated.",
-    "Greenwich Village: Comedown Machine (2013). Size and decay estimated.",
+    "Greenwich Village: Comedown Machine (2013). Studio A: 35 x 38 ft, the ceiling dropping from 17 to 13 ft and soaking up the lows (Electric Lady; Eddie Kramer; John Storyk). Decay estimated.",
     "Rick Rubin's studio in Malibu: The New Abnormal (2020). Wooden, warm. Size and decay estimated.",
 ];
 

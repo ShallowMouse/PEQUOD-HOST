@@ -154,13 +154,13 @@ pub fn spaces() -> [RoomSpec; 6] {
             mic_height: 2.2,
             open_air: None,
         },
-        // Electric Lady, New York: estimated
+        // Electric Lady, New York: Studio A, 35 x 38 ft (electricladystudios.com), ceiling 13 to 17 ft (Kramer, Mix); low-frequency-absorbing ceiling (Storyk); decay estimated
         RoomSpec {
-            dims: [10.0, 7.0, 4.0],
-            rt_live: [0.7, 0.6, 0.45],
-            rt_damped: [0.5, 0.42, 0.32],
+            dims: [11.58, 10.67, 4.57],
+            rt_live: [0.5, 0.6, 0.45],
+            rt_damped: [0.36, 0.42, 0.32],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [3.0, 3.5, 1.2],
+            src: [3.47, 5.33, 1.2],
             mic_height: 2.0,
             open_air: None,
         },
@@ -191,7 +191,7 @@ pub const PLANS: &[Plan] = &[
     Plan { length: 10.0, width: 7.0, src: (3.0, 3.5), open_air: false, far_wall: "" },
     Plan { length: 8.0, width: 6.0, src: (2.5, 3.0), open_air: false, far_wall: "" },
     Plan { length: 11.0, width: 8.0, src: (3.2, 4.0), open_air: false, far_wall: "" },
-    Plan { length: 10.0, width: 7.0, src: (3.0, 3.5), open_air: false, far_wall: "" },
+    Plan { length: 11.58, width: 10.67, src: (3.47, 5.33), open_air: false, far_wall: "" },
     Plan { length: 6.0, width: 4.5, src: (2.0, 2.2), open_air: false, far_wall: "" },
     Plan { length: 14.0, width: 9.0, src: (2.0, 4.5), open_air: false, far_wall: "" },
 ];
@@ -209,7 +209,7 @@ const ABOUT: &[&str] = &[
     "Copenhagen, 2004: Silent Alarm, 15 tracks in 22 days with Paul Epworth, mostly live takes. Size and decay estimated.",
     "London: where Silent Alarm's vocal overdubs were done. Size and decay estimated.",
     "A residential studio in the Irish countryside, used for A Weekend in the City (2007) with Jacknife Lee. Size and decay estimated.",
-    "Greenwich Village: where Four (2012) was made with Alex Newport. Size and decay estimated.",
+    "Greenwich Village: where Four (2012) was made with Alex Newport. Studio A: 35 x 38 ft, the ceiling dropping from 17 to 13 ft and soaking up the lows (Electric Lady; Eddie Kramer; John Storyk). Decay estimated.",
     "A small, hard-walled London rehearsal room of the kind the songs were written in. Generic; size and decay estimated.",
     "A mid-sized indie club, as on the 2005 tours. Generic; size and decay estimated.",
 ];

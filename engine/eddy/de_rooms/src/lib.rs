@@ -134,13 +134,13 @@ pub fn spaces() -> [RoomSpec; 6] {
             mic_height: 1.9,
             open_air: None,
         },
-        // Gold Star, Hollywood: estimated
+        // Gold Star, Hollywood: Studio A, 19 x 24 ft, 13 ft ceiling (Sound On Sound), as in Spector Rooms
         RoomSpec {
-            dims: [7.5, 7.0, 4.2],
-            rt_live: [0.7, 0.6, 0.46],
-            rt_damped: [0.48, 0.42, 0.33],
+            dims: [7.32, 5.79, 3.96],
+            rt_live: [0.75, 0.62, 0.48],
+            rt_damped: [0.51, 0.43, 0.34],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [2.2, 3.0, 1.2],
+            src: [2.15, 2.48, 1.2],
             mic_height: 2.0,
             open_air: None,
         },
@@ -189,7 +189,7 @@ pub fn spaces() -> [RoomSpec; 6] {
 
 pub const PLANS: &[Plan] = &[
     Plan { length: 9.0, width: 7.0, src: (2.6, 3.4), open_air: false, far_wall: "" },
-    Plan { length: 7.5, width: 7.0, src: (2.2, 3.0), open_air: false, far_wall: "" },
+    Plan { length: 7.32, width: 5.79, src: (2.15, 2.48), open_air: false, far_wall: "" },
     Plan { length: 30.0, width: 18.0, src: (3.0, 8.0), open_air: false, far_wall: "" },
     Plan { length: 25.0, width: 18.0, src: (4.0, 8.0), open_air: false, far_wall: "" },
     Plan { length: 16.0, width: 10.0, src: (2.0, 5.0), open_air: false, far_wall: "" },
@@ -207,7 +207,7 @@ const NAMES: &[&str] = &[
 
 const ABOUT: &[&str] = &[
     "Floyd Ramsey's Audio Recorders in Phoenix, where Lee Hazlewood and Jack Miller cut Duane Eddy's hits on three- and four-track tape. Size and decay estimated.",
-    "Gold Star Studio A in Hollywood, whose echo Hazlewood sometimes mixed in, and where the sax overdubs went. Size and decay estimated.",
+    "Gold Star Studio A in Hollywood, whose echo Hazlewood sometimes mixed in, and where the sax overdubs went. Studio A: 19 x 24 ft with a 13 ft ceiling (Sound On Sound). Decay estimated.",
     "A school gymnasium teen dance, 1958. Generic; size and decay estimated.",
     "A late-50s TV studio for the dance shows. Generic; size and decay estimated.",
     "A wooden desert roadhouse with a band in the corner. Generic; size and decay estimated.",

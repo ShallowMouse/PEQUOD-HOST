@@ -134,13 +134,13 @@ pub fn spaces() -> [RoomSpec; 6] {
             mic_height: 2.2,
             open_air: None,
         },
-        // United Western, Hollywood: estimated
+        // United Western, Hollywood: United Studio A, about 45 x 65 x 22 ft (Bill Putnam's design); decay estimated
         RoomSpec {
-            dims: [15.0, 11.0, 6.0],
+            dims: [19.81, 13.72, 6.71],
             rt_live: [1.0, 0.85, 0.65],
             rt_damped: [0.7, 0.6, 0.46],
             bias: [1.0, 1.0, 1.0, 1.0, 0.45, 1.2],
-            src: [4.0, 5.5, 1.3],
+            src: [5.28, 6.86, 1.3],
             mic_height: 2.5,
             open_air: None,
         },
@@ -189,7 +189,7 @@ pub fn spaces() -> [RoomSpec; 6] {
 
 pub const PLANS: &[Plan] = &[
     Plan { length: 12.0, width: 9.0, src: (3.5, 4.5), open_air: false, far_wall: "" },
-    Plan { length: 15.0, width: 11.0, src: (4.0, 5.5), open_air: false, far_wall: "" },
+    Plan { length: 19.81, width: 13.72, src: (5.28, 6.86), open_air: false, far_wall: "" },
     Plan { length: 11.0, width: 8.0, src: (3.0, 4.0), open_air: false, far_wall: "" },
     Plan { length: 9.0, width: 7.0, src: (2.6, 3.5), open_air: false, far_wall: "" },
     Plan { length: 18.0, width: 11.0, src: (2.5, 5.5), open_air: false, far_wall: "" },
@@ -207,7 +207,7 @@ const NAMES: &[&str] = &[
 
 const ABOUT: &[&str] = &[
     "Record Plant in Los Angeles, one of the four studios Only a Lad was recorded in (1980-81). Size and decay estimated.",
-    "United Western Recorders on Sunset Boulevard: big live rooms built for bands and orchestras. Size and decay estimated.",
+    "United Western Recorders on Sunset Boulevard: big live rooms built for bands and orchestras. Studio A about 45 x 65 ft with a 22 ft ceiling, as Bill Putnam built it. Decay estimated.",
     "Cherokee Studios in Hollywood, another of the album's rooms. Size and decay estimated.",
     "Westlake Audio in West Hollywood: tight, controlled rooms. Size and decay estimated.",
     "A packed LA club of the kind the band played in 1980-81. Generic; size and decay estimated.",
