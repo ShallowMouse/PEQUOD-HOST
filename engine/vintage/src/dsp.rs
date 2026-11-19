@@ -78,6 +78,18 @@ impl Biquad {
         );
     }
 
+    /// First-order (RC) low-pass at f, 6 dB/octave.
+    pub fn set_lowpass1(&mut self, fs: f64, f: f64) {
+        let w = 2.0 * PI * f.min(fs * 0.49);
+        self.set_analog(fs, [0.0, 0.0, w], [0.0, 1.0, w]);
+    }
+
+    /// First-order (RC) high-pass at f, 6 dB/octave.
+    pub fn set_highpass1(&mut self, fs: f64, f: f64) {
+        let w = 2.0 * PI * f.min(fs * 0.49);
+        self.set_analog(fs, [0.0, 1.0, 0.0], [0.0, 1.0, w]);
+    }
+
     fn w(fs: f64, f: f64) -> (f64, f64) {
         let w = 2.0 * PI * (f / fs).clamp(1e-5, 0.49);
         w.sin_cos()

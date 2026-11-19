@@ -46,8 +46,8 @@ impl Default for P {
         Self {
             editor_state: ui::editor_state((W, H)),
             saved: Arc::new(RwLock::new(Vec::new())),
-            freq: hz("Frequency", 440.0, 20.0, 4000.0),
-            lforate: rate("LFO Rate", 1.0, 0.05, 15.0),
+            freq: hz("Frequency", 440.0, 0.6, 4000.0),
+            lforate: rate("LFO Rate", 1.0, 0.1, 25.0),
             lfoamt: pct("LFO Amount", 0.0),
             mix: pct("Mix", 1.0),
             drive: pct("Drive", 0.2),

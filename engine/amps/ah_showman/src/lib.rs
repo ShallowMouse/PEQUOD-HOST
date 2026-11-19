@@ -1,4 +1,4 @@
-//! Showman Head: the Fender Showman (AB763 circuit, two 6L6s) on its own. Amp only: no speaker or cabinet, so follow it with a PEQUOD Cabs plugin (or an IR).
+//! Showman Head: the Fender Showman (AB763 circuit, four 6L6GCs, 85 watts) on its own. Amp only: no speaker or cabinet, so follow it with a PEQUOD Cabs plugin (or an IR).
 
 #![allow(clippy::excessive_precision)]
 use nih_plug::prelude::*;
@@ -150,7 +150,7 @@ fn presets() -> Vec<Preset> {
 fn panel() -> Panel {
     Panel {
         title: "SHOWMAN HEAD",
-        subtitle: ("FENDER SHOWMAN AB763, AMP ONLY", "2 x 6L6 · SURF CLEAN"),
+        subtitle: ("FENDER SHOWMAN AB763, AMP ONLY", "4 x 6L6 · 85 W · SURF CLEAN"),
         accent: ui::OXBLOOD,
         size: (W, H),
         items: vec![

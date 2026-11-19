@@ -46,7 +46,7 @@ impl Default for P {
             saved: Arc::new(RwLock::new(Vec::new())),
             manual: pct("Manual", 0.5),
             width: pct("Width", 0.5),
-            speed: rate("Speed", 0.3, 0.03, 6.0),
+            speed: rate("Speed", 0.3, 0.1, 10.0),
             regen: FloatParam::new("Regen", 0.45, FloatRange::Linear { min: -0.9, max: 0.9 }).with_step_size(0.01),
             output: db("Output", 0.0, -24.0, 12.0),
         }
@@ -89,7 +89,8 @@ pub fn defaults() -> Vec<f32> {
 
 /// the delay (ms) for a manual setting, LFO value (-1..1) and width
 pub fn delay_ms(manual: f64, lfo: f64, width: f64) -> f64 {
-    0.25 * 2f64.powf(manual * 4.8 + width * 2.2 * lfo)
+    // the M117R's bucket brigade: at most 12.8 ms
+    (0.25 * 2f64.powf(manual * 4.0 + width * 1.68 * lfo)).clamp(0.25, 12.8)
 }
 
 pub struct Dsp {

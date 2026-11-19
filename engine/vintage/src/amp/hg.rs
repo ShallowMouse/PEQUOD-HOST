@@ -291,12 +291,12 @@ pub fn rectifier() -> HgSpec {
 }
 
 /// Soldano SLO-100 overdrive channel, 1987: four cascaded stages, tight lows,
-/// smooth sustaining lead, EL34s.
+/// smooth sustaining lead, four 5881s (6L6 family).
 pub fn slo() -> HgSpec {
     HgSpec {
         stages: 4, gain_lo: -1.1, gain_hi: 1.4, stage_gain: 5.0, bias: [0.1, 0.15, 0.2, 0.1],
         couple_hp: [120.0, 200.0, 180.0, 100.0], stage_lp: 9000.0, in_hp: 90.0, bright: (2200.0, 3.0),
-        cold: true, diode: false, stack: MARSHALL, power: Power::El34, headroom: 1.1, sag: 0.2, master: true, ot: (45.0, 11000.0),
+        cold: true, diode: false, stack: MARSHALL, power: Power::L6L6, headroom: 1.1, sag: 0.2, master: true, ot: (45.0, 11000.0),
     }
 }
 

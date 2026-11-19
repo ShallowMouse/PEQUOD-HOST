@@ -109,7 +109,7 @@ impl Dsp {
             st.hp.set_highpass(ofs, 250.0, 0.7);
             st.mid.set_peak(ofs, 1000.0, 0.7, 4.0);
             st.lp.set_lowpass(ofs, 9000.0, 0.7);
-            st.treb.set_high_shelf(ofs, 1800.0, 0.7, (v[TREBLE] as f64 - 0.5) * 18.0);
+            st.treb.set_high_shelf(ofs, 1100.0, 0.6, (v[TREBLE] as f64 - 0.5) * 18.0);
         }
     }
 }

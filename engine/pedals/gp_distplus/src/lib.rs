@@ -74,8 +74,10 @@ pub fn defaults() -> Vec<f32> {
 
 #[derive(Clone, Default)]
 struct St {
-    hp: Biquad,
+    hp: OnePole,
+    gbw: OnePole,
     lp: Biquad,
+    gain: f64,
 }
 
 struct Chan {
@@ -97,10 +99,21 @@ impl Dsp {
         let ofs = fs * OS as f64;
         let v = self.v;
         let _ = (fs, ofs, v);
+        // the DISTORTION pot (1M, reverse audio) in series with 4.7k and 47nF to ground in the
+        // 741's feedback: gain 1 + 1M / Rg above the corner 1 / (2 pi Rg C): 3.4 Hz at minimum,
+        // 720 Hz at maximum, where the gain is about 213 (46.6 dB)
+        let d = (v[DIST] as f64).clamp(0.0, 1.0);
+        let rg = 4.7e3 + 1.0e6 * (1.0 - d).powf(2.5);
+        let fc = 1.0 / (2.0 * std::f64::consts::PI * rg * 47e-9);
+        let gain = 1.0e6 / rg;
         for c in self.ch.iter_mut() {
             let st = &mut c.st;
-            st.hp.set_highpass(ofs, 720.0, 0.6);
-            st.lp.set_lowpass(ofs, 7000.0, 0.7);
+            st.hp.set_lowpass(ofs, fc);
+            // the 741's 1 MHz gain-bandwidth: the more gain, the less top
+            st.gbw.set_lowpass(ofs, (1.0e6 / (1.0 + gain)).min(20000.0));
+            st.gain = gain;
+            // 10k and 1nF at the germanium diodes: 15.9 kHz
+            st.lp.set_lowpass(ofs, 15900.0, 0.707);
         }
     }
 }
@@ -149,8 +162,8 @@ impl VintageDsp for Dsp {
                 let x = chn[k] as f64;
                 let st = &mut c.st;
                 let y = c.os.process(x, |u| {
-                    let d = v[DIST] as f64;
-                    let s = u + st.hp.process(u) * (1.0 + 400.0 * d * d);
+                    let s = u + st.gbw.lp(st.hp.hp(u) * st.gain);
+                    // 1N270 germanium diodes to ground: soft, about 0.3 V
                     let s = s / (1.0 + (s / 0.3).powi(2)).sqrt() * 0.3;
                     st.lp.process(s) * 2.0
                 });
@@ -285,10 +298,19 @@ pub mod tests {
     }
 
     #[test]
+    fn the_gain_corner_follows_the_knob() {
+        // at full distortion only the highs get the gain: 100 Hz is much cleaner than 2 kHz
+        let p = with(defaults(), &[(DIST, 1.0)]);
+        let (lo, hi) = (thd(&p, 100.0, 0.005), thd(&p, 2000.0, 0.005));
+        println!("full: harmonics at 100 Hz {lo:.1} / 2 kHz {hi:.1}");
+        assert!(hi > lo + 10.0);
+    }
+    #[test]
     fn highs_distort_more_than_lows() {
-        let p = with(defaults(), &[(DIST, 0.3)]);
-        let lo = thd(&p, 100.0, 0.05);
-        let hi = thd(&p, 1000.0, 0.05);
+        // well up the knob the corner is a few hundred hertz (at low settings everything clips alike)
+        let p = with(defaults(), &[(DIST, 0.8)]);
+        let lo = thd(&p, 80.0, 0.004);
+        let hi = thd(&p, 1500.0, 0.004);
         println!("harmonics at 100 Hz {lo:.1} / 1 kHz {hi:.1}");
         assert!(hi > lo + 6.0);
     }

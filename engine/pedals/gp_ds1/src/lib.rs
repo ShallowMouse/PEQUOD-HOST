@@ -109,9 +109,12 @@ impl Dsp {
             let st = &mut c.st;
             st.hp.set_highpass(ofs, 120.0, 0.7);
             st.pre.set_peak(ofs, 900.0, 0.7, 3.0);
-            st.tlo.set_lowpass(ofs, 700.0, 0.6);
-            st.thi.set_highpass(ofs, 1500.0, 0.6);
-            st.lp.set_lowpass(ofs, 9000.0, 0.7);
+            // the tone control: a fixed RC low-pass at 234 Hz and RC high-pass at 1.06 kHz,
+            // blended by the pot, so noon scoops the mids around 500 Hz
+            st.tlo.set_lowpass1(ofs, 234.0);
+            st.thi.set_highpass1(ofs, 1063.0);
+            // C10 across the op-amp: the top rolled off from 7.2 kHz
+            st.lp.set_lowpass1(ofs, 7200.0);
         }
     }
 }
@@ -165,7 +168,7 @@ impl VintageDsp for Dsp {
                     let s = st.pre.process(st.hp.process(u)) * (5.0 + 600.0 * d * d);
                     let s = s / (1.0 + (s / 0.55).abs().powf(6.0)).powf(1.0 / 6.0);
                     let s = st.lp.process(s);
-                    (st.thi.process(s) * t * 1.6 + st.tlo.process(s) * (1.0 - t)) * 0.8
+                    (st.thi.process(s) * t + st.tlo.process(s) * (1.0 - t)) * 1.1
                 });
 
                 most = most.max(y.abs());

@@ -2,7 +2,7 @@
 //!
 //! Fender Showman, AB763 blackface: normal channel with the full
 //! treble/middle/bass stack and bright switch, 12AT7 long-tail phase
-//! inverter, two 6L6s in fixed bias, silicon rectifier, 820R/47R feedback,
+//! inverter, four 6L6GCs (85 watts) in fixed bias, silicon rectifier, 820R/47R feedback,
 //! into 2x15 JBL D130Fs.
 use nih_plug::prelude::*;
 use std::sync::{Arc, RwLock};
@@ -170,7 +170,7 @@ fn presets() -> Vec<Preset> {
 fn panel() -> Panel {
     Panel {
         title: "SHOWMAN",
-        subtitle: ("AFTER THE FENDER SHOWMAN AB763", "2 x 6L6  ·  BLACKFACE  ·  2 x 15\" JBL"),
+        subtitle: ("AFTER THE FENDER SHOWMAN AB763", "4 x 6L6  ·  BLACKFACE  ·  2 x 15\" JBL"),
         accent: ui::OXBLOOD,
         size: (W, H),
         items: vec![

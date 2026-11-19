@@ -243,15 +243,15 @@ pub fn twin_reverb() -> AmpSpec {
     }
 }
 
-/// Fender Showman, AB763 blackface: like the Twin's circuit with two 6L6s.
+/// Fender (Dual) Showman, AB763 blackface: the Twin's circuit, four 6L6GCs, 85 watts.
 pub fn showman() -> AmpSpec {
-    let raa = 4000.0;
+    let raa = 2000.0;
     AmpSpec {
         pre: PreSpec::Fender(AB763_PRE),
         pi: ab763_pi(450.0),
         power: PowerSpec {
             valve: L6L6,
-            per_side: 1,
+            per_side: 2,
             b_plus: 465.0,
             screen_ratio: 0.97,
             ultralinear: 0.0,
@@ -272,7 +272,7 @@ pub fn showman() -> AmpSpec {
 }
 
 /// Fender Bassman 6G6-B blonde piggyback (typical values): 7025 input, deep
-/// 1M bass pot, two 6L6s fixed bias, silicon rectifier.
+/// 1M bass pot, two 6L6s fixed bias, silicon rectifier: about 50 watts.
 pub fn bassman() -> AmpSpec {
     let raa = 4000.0;
     AmpSpec {
@@ -294,7 +294,7 @@ pub fn bassman() -> AmpSpec {
         },
         alt_rk: None,
         nfb: AB763_NFB,
-        ot: TransformerSpec { f_low: 30.0, f_sat: 35.0, v_full: v_full(40.0, raa), f_high: 18000.0, q_high: 0.7, ratio: ratio(4.0, raa) },
+        ot: TransformerSpec { f_low: 30.0, f_sat: 35.0, v_full: v_full(50.0, raa), f_high: 18000.0, q_high: 0.7, ratio: ratio(4.0, raa) },
         speaker: SpeakerSpec { f_res: 85.0, z_peak: 6.0, q_res: 3.0, f_coil: 1000.0 },
         current_drive: 0.85,
     }

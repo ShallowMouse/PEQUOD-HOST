@@ -205,7 +205,7 @@ fn presets() -> Vec<Preset> {
 fn panel() -> Panel {
     Panel {
         title: "SLO HEAD",
-        subtitle: ("SOLDANO SLO-100 OVERDRIVE, AMP ONLY", "4 CASCADED STAGES · EL34"),
+        subtitle: ("SOLDANO SLO-100 OVERDRIVE, AMP ONLY", "4 CASCADED STAGES · 5881"),
         accent: ui::OXBLOOD,
         size: (W, H),
         items: vec![

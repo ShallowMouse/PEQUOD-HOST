@@ -42,9 +42,9 @@ impl Default for P {
         Self {
             editor_state: ui::editor_state((W, H)),
             saved: Arc::new(RwLock::new(Vec::new())),
-            rate: rate("Rate", 5.0, 0.5, 12.0),
+            rate: rate("Rate", 5.0, 2.0, 15.0),
             depth: pct("Depth", 0.4),
-            rise: ms("Rise Time", 0.0, 0.0, 2000.0),
+            rise: ms("Rise Time", 0.0, 0.0, 5000.0),
             output: db("Output", 0.0, -24.0, 12.0),
         }
     }
@@ -113,7 +113,7 @@ impl VintageDsp for Dsp {
     }
     fn process(&mut self, chans: &mut [&mut [f32]], _meters: &mut [f32]) {
         let n = chans.first().map(|c| c.len()).unwrap_or(0);
-        let depth = (self.v[DEPTH] as f64) * 0.0045 * self.fs;
+        let depth = (self.v[DEPTH] as f64) * 0.004 * self.fs; // (VB-2: 4 ms at full depth)
         let rt = self.v[RISE] as f64 * 0.001 * self.fs;
         let step = if rt < 1.0 { 1.0 } else { 1.0 / rt };
         let cr = coeff(self.fs, 50.0);
@@ -149,10 +149,10 @@ impl VintageDsp for Dsp {
 fn presets() -> Vec<Preset> {
     vec![
         Preset { name: "Singer's Vibrato", values: &[] },
-        Preset { name: "Deep and Slow", values: &[(RATE, 2.0), (DEPTH, 0.8)] },
+        Preset { name: "Deep and Slow", values: &[(RATE, 2.5), (DEPTH, 0.8)] },
         Preset { name: "Warble", values: &[(RATE, 8.0), (DEPTH, 0.3)] },
         Preset { name: "Rising Vibrato", values: &[(RISE, 700.0), (DEPTH, 0.5)] },
-        Preset { name: "Seasick", values: &[(RATE, 1.2), (DEPTH, 1.0)] },
+        Preset { name: "Seasick", values: &[(RATE, 2.0), (DEPTH, 1.0)] },
         Preset { name: "Subtle Shimmer", values: &[(RATE, 6.0), (DEPTH, 0.15)] },
     ]
 }
