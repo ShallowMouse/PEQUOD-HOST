@@ -1,4 +1,7 @@
 #pragma once
+// (the same file is in several parts: one guard, so a file that sees two copies gets one set)
+#ifndef SHALLOWMOUSE_HARDWARE_H
+#define SHALLOWMOUSE_HARDWARE_H
 
 // Drawing the rack as metal: powder-coated panels, the rails with their holes, keys that stand
 // proud of the panel, lamps behind glass and the LED ladders of a meter. Everything is drawn
@@ -216,3 +219,5 @@ namespace Pequod::hw
         g.drawFittedText (text, box, j, 1, 0.8f);
     }
 }
+
+#endif

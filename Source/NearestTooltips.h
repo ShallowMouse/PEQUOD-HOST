@@ -1,4 +1,7 @@
 #pragma once
+// (the same file is in every part: one guard, so a file that sees two copies gets one class)
+#ifndef SHALLOWMOUSE_NEAREST_TOOLTIPS_H
+#define SHALLOWMOUSE_NEAREST_TOOLTIPS_H
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -26,3 +29,5 @@ public:
         return nullptr;
     }
 };
+
+#endif
