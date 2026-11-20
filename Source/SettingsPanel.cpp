@@ -326,7 +326,8 @@ SettingsPanel::SettingsPanel (HostEngine& e, ControlSurface& c)
     tabs.setColour (juce::TabbedComponent::backgroundColourId, Pequod::Colours::panel);
     tabs.addTab ("AUDIO & MIDI", Pequod::Colours::panel, new AudioPage (e), true);
     tabs.addTab ("OSC", Pequod::Colours::panel, new OscPage (c), true);
-    tabs.addTab ("NETWORK", Pequod::Colours::panel, new NetworkPage (e), true);
+    if (! melville::isHosted())     // (inside MELVILLE, MELVILLE does all the network linking between PCs)
+        tabs.addTab ("NETWORK", Pequod::Colours::panel, new NetworkPage (e), true);
     addAndMakeVisible (tabs);
     setSize (620, 640);
 }
