@@ -264,3 +264,11 @@ tj_foxton = { path = "../jam/tj_foxton" }
 tj_helios = { path = "../jam/tj_helios" }
 tj_iron = { path = "../jam/tj_iron" }
 tj_rooms = { path = "../jam/tj_rooms" }
+ti_165a = { path = "../impala/ti_165a" }
+ti_diamond = { path = "../impala/ti_diamond" }
+ti_dynacomp = { path = "../impala/ti_dynacomp" }
+ti_fuzzface = { path = "../impala/ti_fuzzface" }
+ti_holygrail = { path = "../impala/ti_holygrail" }
+ti_octbass = { path = "../impala/ti_octbass" }
+ti_rooms = { path = "../impala/ti_rooms" }
+ti_vocal = { path = "../impala/ti_vocal" }

@@ -262,7 +262,15 @@ static FNS: &[fn() -> Descriptor] = &[
         tj_foxton::pequod_native,
         tj_helios::pequod_native,
         tj_iron::pequod_native,
-        tj_rooms::pequod_native
+        tj_rooms::pequod_native,
+        ti_165a::pequod_native,
+        ti_diamond::pequod_native,
+        ti_dynacomp::pequod_native,
+        ti_fuzzface::pequod_native,
+        ti_holygrail::pequod_native,
+        ti_octbass::pequod_native,
+        ti_rooms::pequod_native,
+        ti_vocal::pequod_native
 ];
 
 struct Entry {

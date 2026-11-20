@@ -42,6 +42,7 @@ namespace PluginTags
             { "duaneeddy",                { "Duane Eddy", "Phoenix" } },
             { "abba",                     { "ABBA", "Polar" } },
             { "thejam",                   { "The Jam", "Woking" } },
+            { "tameimpala",               { "Tame Impala", "Perth" } },
             { "amps",                     { "PEQUOD Amps", nullptr } },
             { "cabs",                     { "PEQUOD Cabs", nullptr } },
             { "pedals",                   { "PEQUOD Pedals", nullptr } },

@@ -3731,6 +3731,14 @@ dependencies = [
  "sz_upright",
  "tape_echo",
  "tape_machine",
+ "ti_165a",
+ "ti_diamond",
+ "ti_dynacomp",
+ "ti_fuzzface",
+ "ti_holygrail",
+ "ti_octbass",
+ "ti_rooms",
+ "ti_vocal",
  "tj_330",
  "tj_backstage",
  "tj_foxton",
@@ -4638,6 +4646,70 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.8",
+]
+
+[[package]]
+name = "ti_165a"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "ti_diamond"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "ti_dynacomp"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "ti_fuzzface"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "ti_holygrail"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "ti_octbass"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "ti_rooms"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "ti_vocal"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
 ]
 
 [[package]]
