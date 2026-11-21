@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["vintage", "plugins/*", "spector/*", "hannett/*", "plank/*", "townhouse/*", "ford/*", "sombr/*", "pequod/*", "antonoff/*", "setzer/*", "may/*", "monkeys/*", "strokes/*", "blocparty/*", "blink/*", "pedals/*", "boingo/*", "amps/*", "cabs/*", "straits/*", "livingend/*", "puppets/*", "lanham/*", "finn/*", "eddy/*", "keys/*", "polar/*", "jam/*", "impala/*", "pequod_engine"]
+members = ["vintage", "plugins/*", "spector/*", "hannett/*", "plank/*", "townhouse/*", "ford/*", "sombr/*", "pequod/*", "antonoff/*", "setzer/*", "may/*", "monkeys/*", "strokes/*", "blocparty/*", "blink/*", "pedals/*", "boingo/*", "amps/*", "cabs/*", "straits/*", "livingend/*", "puppets/*", "lanham/*", "finn/*", "eddy/*", "keys/*", "polar/*", "jam/*", "impala/*", "pequod_engine", "tools/*", "floyd/*", "albini/*", "meek/*"]
 
 [workspace.package]
 version = "1.0.1"
@@ -16,3 +16,9 @@ vintage = { path = "vintage" }
 lto = "thin"
 strip = "symbols"
 opt-level = 3
+
+# quick builds of the standalone panel previews (rebuild checks only)
+[profile.preview]
+inherits = "release"
+lto = false
+codegen-units = 16
