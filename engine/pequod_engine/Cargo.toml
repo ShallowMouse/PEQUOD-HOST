@@ -319,3 +319,12 @@ jm_mixer = { path = "../meek/jm_mixer" }
 jm_rooms = { path = "../meek/jm_rooms" }
 jm_spring = { path = "../meek/jm_spring" }
 jm_tape = { path = "../meek/jm_tape" }
+mu_bassrig = { path = "../muse/mu_bassrig" }
+mu_echopro = { path = "../muse/mu_echopro" }
+mu_fuzzfactory = { path = "../muse/mu_fuzzfactory" }
+mu_kaoss = { path = "../muse/mu_kaoss" }
+mu_piano = { path = "../muse/mu_piano" }
+mu_rooms = { path = "../muse/mu_rooms" }
+mu_vh4 = { path = "../muse/mu_vh4" }
+mu_vocal = { path = "../muse/mu_vocal" }
+mu_whammy = { path = "../muse/mu_whammy" }

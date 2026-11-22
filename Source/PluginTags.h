@@ -43,6 +43,7 @@ namespace PluginTags
             { "abba",                     { "ABBA", "Polar" } },
             { "thejam",                   { "The Jam", "Woking" } },
             { "tameimpala",               { "Tame Impala", "Perth" } },
+            { "muse",                     { "Muse", "Teignmouth" } },
             { "amps",                     { "PEQUOD Amps", nullptr } },
             { "cabs",                     { "PEQUOD Cabs", nullptr } },
             { "pedals",                   { "PEQUOD Pedals", nullptr } },

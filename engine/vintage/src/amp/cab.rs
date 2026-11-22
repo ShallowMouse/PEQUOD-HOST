@@ -130,6 +130,8 @@ cab!(MAGNATONE_1X15_HORN, "Modified Magnatone 1x15 JBL + tweeter", 60.0, 0.9, fa
 cab!(EH150_1X12, "Gibson EH-150 1x12 open back, field-coil Jensen", 100.0, 0.8, true, [(220.0, 1.0, 2.5), (700.0, 1.0, -1.0), (1600.0, 1.2, 3.0), (2800.0, 2.0, 2.0)], 4200.0, None);
 cab!(AMPEG_8X10, "Ampeg SVT 8x10 closed back", 50.0, 1.1, false, [(80.0, 1.0, 3.0), (400.0, 1.0, -2.0), (1500.0, 1.2, 3.0), (3000.0, 2.0, -2.0)], 4500.0, None);
 cab!(AMPEG_B15_1X15, "Ampeg B-15 Portaflex 1x15", 45.0, 1.2, false, [(70.0, 1.1, 4.0), (350.0, 1.0, -2.0), (1200.0, 1.2, 2.0), (2500.0, 2.0, -3.0)], 3500.0, None);
+cab!(MARSHALL_DBS_4X10, "Marshall DBS 4x10 bass cabinet, closed back", 48.0, 0.9, false, [(90.0, 1.0, 2.5), (700.0, 1.0, -1.5), (2200.0, 1.4, 2.5), (4500.0, 2.0, -3.0)], 4800.0, None);
+cab!(DIEZEL_4X12_V30, "Diezel 4x12 closed back, Celestion Vintage 30", 75.0, 1.1, false, [(110.0, 1.2, 3.0), (450.0, 1.0, -2.0), (2500.0, 1.5, 5.5), (4500.0, 2.5, 3.0)], 5600.0, None);
 cab!(WIZARD_2X12_V30, "Wizard 2x12 closed back, Celestion Vintage 30", 80.0, 1.0, false, [(125.0, 1.1, 2.5), (450.0, 1.0, -2.0), (2500.0, 1.5, 5.5), (4500.0, 2.5, 3.5)], 5800.0, None);
 
 /// A close-miked cabinet. `mic` moves the microphone from the cone centre

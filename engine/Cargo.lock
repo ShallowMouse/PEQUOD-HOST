@@ -2906,6 +2906,78 @@ dependencies = [
 ]
 
 [[package]]
+name = "mu_bassrig"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "mu_echopro"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "mu_fuzzfactory"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "mu_kaoss"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "mu_piano"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "mu_rooms"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "mu_vh4"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "mu_vocal"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "mu_whammy"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "ndk"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3869,6 +3941,15 @@ dependencies = [
  "mh_rooms",
  "mh_space",
  "mh_synare",
+ "mu_bassrig",
+ "mu_echopro",
+ "mu_fuzzfactory",
+ "mu_kaoss",
+ "mu_piano",
+ "mu_rooms",
+ "mu_vh4",
+ "mu_vocal",
+ "mu_whammy",
  "nf_dd3",
  "nf_hotcake",
  "nf_mudhoney",

@@ -317,7 +317,16 @@ static FNS: &[fn() -> Descriptor] = &[
         jm_mixer::pequod_native,
         jm_rooms::pequod_native,
         jm_spring::pequod_native,
-        jm_tape::pequod_native
+        jm_tape::pequod_native,
+        mu_bassrig::pequod_native,
+        mu_echopro::pequod_native,
+        mu_fuzzfactory::pequod_native,
+        mu_kaoss::pequod_native,
+        mu_piano::pequod_native,
+        mu_rooms::pequod_native,
+        mu_vh4::pequod_native,
+        mu_vocal::pequod_native,
+        mu_whammy::pequod_native
 ];
 
 struct Entry {

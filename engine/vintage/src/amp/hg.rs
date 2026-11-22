@@ -319,6 +319,26 @@ pub fn wizard() -> HgSpec {
     }
 }
 
+/// Diezel's stack: mids held up (the VH4's "tight but not scooped" voice).
+const DIEZEL: Stack = Stack { bass_f: 100.0, mid_f: 800.0, mid_q: 0.8, treble_f: 2800.0, scoop: -1.0, range: 8.0 };
+
+/// Diezel VH4 (1990s-2000s), its four channels: four KT77s (EL34 family) with a big, stiff
+/// supply. Channel 1 clean, 2 crunch, 3 lead (Matt Bellamy's), 4 the mega-gain channel.
+/// Voicing estimated from the amp's layout and recordings.
+pub fn vh4(channel: usize) -> HgSpec {
+    let base = HgSpec {
+        stages: 4, gain_lo: -1.1, gain_hi: 1.5, stage_gain: 5.5, bias: [0.08, 0.15, 0.18, 0.1],
+        couple_hp: [110.0, 220.0, 260.0, 150.0], stage_lp: 9500.0, in_hp: 80.0, bright: (2400.0, 2.0),
+        cold: true, diode: false, stack: DIEZEL, power: Power::El34, headroom: 1.3, sag: 0.12, master: true, ot: (35.0, 12000.0),
+    };
+    match channel {
+        0 => HgSpec { stages: 2, gain_lo: -1.5, gain_hi: 0.3, stage_gain: 3.0, couple_hp: [40.0, 80.0, 0.0, 0.0], bright: (2000.0, 5.0), cold: false, headroom: 1.8, ..base },
+        1 => HgSpec { stages: 3, gain_lo: -1.3, gain_hi: 1.0, stage_gain: 4.5, couple_hp: [70.0, 160.0, 180.0, 0.0], cold: false, ..base },
+        2 => base,
+        _ => HgSpec { gain_lo: -1.0, gain_hi: 1.8, stage_gain: 6.5, stack: Stack { scoop: -3.5, ..DIEZEL }, couple_hp: [130.0, 240.0, 280.0, 180.0], ..base },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
