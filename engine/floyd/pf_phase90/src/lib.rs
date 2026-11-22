@@ -83,27 +83,64 @@ pub fn defaults() -> Vec<f32> {
 
 // -------------------------------------------------------------------- dsp --
 
-/// First-order all-pass with a moving corner.
-#[derive(Clone, Copy, Default)]
-struct Ap {
-    z: f64,
-}
-impl Ap {
-    #[inline]
-    fn process(&mut self, x: f64, a: f64) -> f64 {
-        let y = a * x + self.z;
-        self.z = x - a * y;
-        y
+use vintage::circuit::{self, Circuit, Solver};
+
+const VREF: f64 = 5.1;
+/// The JFETs' gate-source voltage across the sweep: near pinch-off (slow end) to the fast end,
+/// as the bias trimmer sets it for 2N5952s.
+const VGS_LO: f64 = -1.58;
+const VGS_HI: f64 = -1.12;
+const N_SUM: usize = 21;
+const MIX_GAIN: f64 = 1.34;
+
+/// The audio path of the Phase 90 at `fs`.
+///
+/// 10n in, 470k to the 5.1 V reference, a unity-gain buffer; four TL06x all-pass stages (10k in, 10k feedback, 47n to
+/// the + input, which goes to Vref through 24k in parallel with a 2N5952's channel); the dry
+/// signal and the fourth stage's output mixed through 150k each into the output transistor.
+/// `block`: the block-logo's 24k from the last stage back into the second stage.
+/// Input 0 is the guitar, input 1 the gate voltage from the LFO.
+fn phase90(block: bool, fs: f64) -> Solver {
+    let j = circuit::J2N5952;
+    let mut c = Circuit::new()
+        .input(1, 7e3)
+        .dc(2, VREF, 10.0)
+        .input(30, 1.0)
+        .c(1, 31, 10e-9)
+        .r(31, 2, 470e3)
+        // unity-gain input buffer
+        .linamp(31, 3, 3, 2e5);
+    let mut inp = 3;
+    let mut outs = [0usize; 4];
+    for k in 0..4 {
+        let (m, p, o) = (4 + 4 * k, 5 + 4 * k, 6 + 4 * k);
+        c = c.r(inp, m, 10e3).r(o, m, 10e3).c(inp, p, 47e-9).r(p, 2, 24e3).jfet(p, 30, 2, j).linamp(p, m, o, 2e5);
+        outs[k] = o;
+        inp = o;
     }
+    if block {
+        c = c.r(outs[3], 9, 24e3);
+    }
+    c.r(outs[3], N_SUM, 150e3).r(3, N_SUM, 150e3).r(N_SUM, 2, 470e3).output(N_SUM).build(fs)
 }
 
 pub struct Dsp {
     fs: f64,
     v: [f32; NPARAMS],
-    ap: [[Ap; 4]; 2],
-    fb: [f64; 2],
+    ckt: [Solver; 2],
+    os: [Oversampler2; 2],
+    dc: [DcBlock; 2],
+    block: bool,
     ph: f64,
     out: Smooth,
+}
+
+impl Dsp {
+    fn rebuild(&mut self) {
+        self.block = self.v[LOGO] > 0.5;
+        let c = phase90(self.block, self.fs * 2.0);
+        self.ckt = [c.clone(), c];
+    }
 }
 
 impl VintageDsp for Dsp {
@@ -112,45 +149,106 @@ impl VintageDsp for Dsp {
         let fs = sample_rate as f64;
         let mut v = [0.0; NPARAMS];
         v.copy_from_slice(&defaults());
-        Self { fs, v, ap: [[Ap::default(); 4]; 2], fb: [0.0; 2], ph: 0.0, out: Smooth::new(fs, 20.0, 1.0) }
+        let c = phase90(false, fs * 2.0);
+        let mut d = Self { fs, v, ckt: [c.clone(), c], os: [Oversampler2::new(), Oversampler2::new()], dc: [DcBlock::new(fs), DcBlock::new(fs)], block: false, ph: 0.0, out: Smooth::new(fs, 20.0, 1.0) };
+        d.rebuild();
+        d
+    }
+    fn latency(&self) -> u32 {
+        OS_LATENCY as u32
     }
     fn reset(&mut self) {
-        self.ap = [[Ap::default(); 4]; 2];
-        self.fb = [0.0; 2];
         self.ph = 0.0;
+        self.rebuild();
+        for c in 0..2 {
+            self.os[c].reset();
+            self.dc[c] = DcBlock::new(self.fs);
+        }
     }
     fn set_params(&mut self, v: &[f32]) {
         self.v.copy_from_slice(&v[..NPARAMS]);
+        if (v[LOGO] > 0.5) != self.block {
+            self.rebuild();
+        }
         self.out.set(db_to_gain(v[OUTPUT] as f64));
     }
     fn process(&mut self, chans: &mut [&mut [f32]], meters: &mut [f32]) {
         let n = chans.first().map(|c| c.len()).unwrap_or(0);
         let rate = self.v[SPEED] as f64;
-        let fbk = if self.v[LOGO] > 0.5 { 0.45 } else { 0.0 };
         let nch = chans.len().min(2);
         let mut m = 0.0;
         for k in 0..n {
+            // the LFO: an integrator and Schmitt trigger, so a triangle on the gates
             self.ph = (self.ph + rate / self.fs).fract();
-            // the LFO: a triangle bent by the JFETs' square-law into an exponential sweep, about 200 Hz to 2.5 kHz
             let tri = 1.0 - 2.0 * (self.ph - 0.5).abs();
             m = tri;
-            let f = 200.0 * (12.5f64).powf(tri * tri * 0.4 + tri * 0.6);
-            let t = (std::f64::consts::PI * f / self.fs).tan();
-            let a = (t - 1.0) / (t + 1.0);
+            let vg = VREF + VGS_LO + (VGS_HI - VGS_LO) * tri;
             let o = self.out.next();
             for c in 0..nch {
                 let x = chans[c][k] as f64;
-                // the JFET stages aren't quite linear
-                let x = x + 0.015 * x * x;
-                let mut w = x + fbk * self.fb[c];
-                for s in self.ap[c].iter_mut() {
-                    w = s.process(w, a);
-                }
-                self.fb[c] = w;
-                chans[c][k] = ((x + w) * 0.67 * o) as f32;
+                let ckt = &mut self.ckt[c];
+                // the output transistor: about 2.5 dB over the mixer's halving
+                let y = self.os[c].process(x, |u| (ckt.step(&[u, vg]) - VREF) * MIX_GAIN);
+                chans[c][k] = (self.dc[c].process(y) * o) as f32;
             }
         }
         meters[0] = m as f32;
+    }
+}
+
+#[cfg(test)]
+mod circuit_tests {
+    use super::*;
+
+    /// Level through the pedal at `f` Hz with the gates held at sweep position `tri`.
+    fn gain_at(block: bool, tri: f64, f: f64) -> f64 {
+        let fs = 96000.0;
+        let mut c = phase90(block, fs);
+        let vg = VREF + VGS_LO + (VGS_HI - VGS_LO) * tri;
+        let (mut a, mut b) = (0.0, 0.0);
+        let n = (fs * 0.25) as usize;
+        for k in 0..n {
+            let x = 0.05 * (k as f64 * 2.0 * std::f64::consts::PI * f / fs).sin();
+            let y = (c.step(&[x, vg]) - VREF) * MIX_GAIN;
+            if k > n / 2 {
+                a += x * x;
+                b += y * y;
+            }
+        }
+        10.0 * (b / a).log10()
+    }
+
+    #[test]
+    fn notches_sweep() {
+        for block in [false, true] {
+            for tri in [0.0, 0.5, 1.0] {
+                // local minima on a log grid: the notches
+                let mut g = vec![];
+                let mut f = 60.0;
+                while f < 16000.0 {
+                    g.push((f, gain_at(block, tri, f)));
+                    f *= 2f64.powf(1.0 / 12.0);
+                }
+                let mut line = String::new();
+                for i in 1..g.len() - 1 {
+                    if g[i].1 < g[i - 1].1 && g[i].1 < g[i + 1].1 && g[i].1 < -6.0 {
+                        line += &format!(" notch {:.0} Hz ({:.0} dB)", g[i].0, g[i].1);
+                    }
+                }
+                let peak = g.iter().map(|x| x.1).fold(f64::MIN, f64::max);
+                let (best, fbest) = (peak, 0.0);
+                let _ = fbest;
+                eprintln!("block {block} sweep {tri}: peak {best:.1} dB |{line}");
+            }
+        }
+        let fs = 96000.0;
+        let mut c = phase90(false, fs);
+        let t = std::time::Instant::now();
+        for k in 0..96000 {
+            let tri = (k as f64 / 96000.0 * 2.0).fract();
+            c.step(&[0.2 * (k as f64 * 0.03).sin(), VREF + VGS_LO + (VGS_HI - VGS_LO) * tri]);
+        }
+        eprintln!("1 s at 2x in {:.0} ms", t.elapsed().as_secs_f64() * 1e3);
     }
 }
 

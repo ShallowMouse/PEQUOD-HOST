@@ -1,4 +1,8 @@
-//! Fuzz Face: the Dallas Arbiter Fuzz Face as David Gilmour used it from 1970 (2 x BC108 silicon), or the earlier AC128 germanium. Two transistors with feedback; the low input impedance loads the pickup, so the guitar's volume cleans it up.
+//! Fuzz Face: the Dallas Arbiter Fuzz Face as David Gilmour used it from 1970 (two BC108 silicon transistors), or the
+//! earlier AC128 germanium one (positive ground). The circuit itself, solved from the schematic's part values: the two
+//! transistors with the 100k feedback, the 1k Fuzz pot and its bypass cap, the 470R / 8k2 collector load (BIAS trims the
+//! 8k2, as the internal trimmer on later units), the 500k volume pot, and the guitar in front: pickup coil, cable and
+//! the guitar's own volume pot, which the Fuzz Face's low input impedance loads (that's why it cleans up).
 
 #![allow(clippy::excessive_precision)]
 use nih_plug::prelude::*;
@@ -112,124 +116,130 @@ pub fn defaults() -> Vec<f32> {
 
 // -------------------------------------------------------------------- dsp --
 
+use vintage::amp::net::Taper;
+use vintage::circuit::{self, BjtModel, Circuit, Solver};
+
 const OS: usize = 4;
+const C_VOL: usize = 0;
+const C_FUZZ: usize = 1;
+const C_GUITAR: usize = 2;
+const C_BIAS: usize = 3;
 
-#[derive(Clone, Default)]
-struct St {
-    pick: Biquad,
-    inp: Biquad,
-    mid: Biquad,
-    lp: Biquad,
-    post: Biquad,
-    sag: f64,
-}
-
-struct Chan {
-    os: Oversampler,
-    st: St,
+/// The guitar and the pedal, from the pickup to the volume pot's wiper.
+fn fuzz_face(ge: bool, pickup: i32, fs: f64) -> Solver {
+    // pickup: (DC resistance, inductance); a buffer has neither
+    let (rp, lp) = match pickup {
+        0 => (6.5e3, 2.6),
+        1 => (8.5e3, 4.2),
+        _ => (100.0, 0.0),
+    };
+    let mut c = Circuit::new().input(1, rp);
+    c = if lp > 0.0 { c.l(1, 2, lp) } else { c.r(1, 2, 1.0) };
+    // the pickup's own capacitance and a 3 m cable
+    c = c.c(2, 0, 450e-12);
+    if pickup < 2 {
+        // the guitar's 250k audio volume pot (wiper to the jack)
+        c = c.pot(0, 3, 2, 250e3, Taper::Audio, C_GUITAR);
+    } else {
+        c = c.r(2, 3, 1.0).r(3, 0, 1e6);
+    }
+    // selected transistors, as in a good unit: a lower-gain Q1 and a higher-gain Q2
+    let (vcc, q1, q2, ce) = if ge {
+        (-9.0, BjtModel { bf: 70.0, ..circuit::AC128 }, BjtModel { bf: 110.0, ..circuit::NKT275 }, 22e-6)
+    } else {
+        (9.0, BjtModel { bf: 100.0, ..circuit::BC108 }, BjtModel { bf: 130.0, ..circuit::BC108 }, 20e-6)
+    };
+    c = c
+        .dc(10, vcc, 2.0)
+        // input cap into Q1's base, the 100k feedback from Q2's emitter
+        .c(3, 4, 2.2e-6)
+        .r(6, 4, 100e3)
+        // Q1: collector load 33k, emitter to ground; Q2's base on Q1's collector
+        .r(10, 5, 33e3)
+        // Q2: emitter through the 1k Fuzz pot to ground, its wiper bypassed by the electrolytic
+        .pot(0, 7, 6, 1e3, Taper::Linear, C_FUZZ)
+        .c(7, 0, ce)
+        // collector load: 470R to the supply, the output tap, then the 8k2 (trimmable) to the collector
+        .r(10, 9, 470.0)
+        // (noon sets Q2's collector near half the supply for the transistors fitted)
+        .rheo(9, 8, if ge { 19e3 } else { 11e3 }, Taper::Linear, C_BIAS, 2.2e3)
+        // output: 10n into the 500k audio volume, wiper into the next input (1M)
+        .c(9, 11, 10e-9)
+        .pot(0, 12, 11, 500e3, Taper::Audio, C_VOL)
+        .r(12, 0, 1e6)
+        .output(12);
+    c = if ge { c.pnp(5, 4, 0, q1).pnp(8, 5, 6, q2) } else { c.npn(5, 4, 0, q1).npn(8, 5, 6, q2) };
+    c.build(fs)
 }
 
 pub struct Dsp {
     fs: f64,
     v: [f32; NPARAMS],
-    ch: Vec<Chan>,
-    key: Vec<i32>,
-    out: Smooth,
+    ckt: Solver,
+    os: Oversampler,
+    dc: DcBlock,
+    key: (i32, i32),
     inp: Smooth,
 }
 
 impl Dsp {
-    fn design(&mut self) {
-        let ofs = self.fs * OS as f64;
-        let ge = self.v[TRANSISTORS] > 0.5;
-        let pickup = self.v[PICKUP].round() as i32;
-        let gv = self.v[GUITAR_VOL] as f64 / 10.0;
-        for c in self.ch.iter_mut() {
-            let st = &mut c.st;
-            // the pickup's inductance into the pedal's low input impedance: a resonance pulled down and damped,
-            // less so as the guitar's volume pot adds series resistance; a buffer sees none of it
-            match pickup {
-                0 => st.pick.set_lowpass(ofs, 3200.0 + 1500.0 * (1.0 - gv), 0.8),
-                1 => st.pick.set_lowpass(ofs, 2000.0 + 1000.0 * (1.0 - gv), 0.75),
-                _ => st.pick = Biquad::identity(),
-            }
-            st.inp.set_highpass(ofs, 90.0, 0.6);
-            st.mid.set_peak(ofs, 900.0, 0.7, if ge { 1.0 } else { 2.0 });
-            st.lp.set_lowpass(ofs, if ge { 5000.0 } else { 7500.0 }, 0.7);
-            st.post.set_highpass(ofs, 25.0, 0.7);
-        }
+    fn controls(&mut self) {
+        let v = self.v;
+        self.ckt.set_ctl(C_VOL, v[VOLUME] as f64 / 10.0);
+        self.ckt.set_ctl(C_FUZZ, v[FUZZ] as f64 / 10.0);
+        self.ckt.set_ctl(C_GUITAR, v[GUITAR_VOL] as f64 / 10.0);
+        self.ckt.set_ctl(C_BIAS, v[BIAS] as f64 / 10.0);
+    }
+    fn rebuild(&mut self) {
+        let k = (self.v[TRANSISTORS].round() as i32, self.v[PICKUP].round() as i32);
+        self.ckt = fuzz_face(k.0 == 1, k.1, self.fs * OS as f64);
+        self.key = k;
+        self.controls();
+        self.ckt.reset();
     }
 }
 
 impl VintageDsp for Dsp {
     const METERS: usize = 1;
-    fn new(sample_rate: f32, ch: usize) -> Self {
+    fn new(sample_rate: f32, _ch: usize) -> Self {
         let fs = sample_rate as f64;
         let mut v = [0.0; NPARAMS];
         v.copy_from_slice(&defaults());
-        let mut d = Self { fs, v, ch: (0..ch.max(2)).map(|_| Chan { os: Oversampler::new(), st: St::default() }).collect(), key: vec![], out: Smooth::new(fs, 20.0, 1.0), inp: Smooth::new(fs, 20.0, 1.0) };
-        d.design();
+        let mut d = Self { fs, v, ckt: fuzz_face(false, 0, fs * OS as f64), os: Oversampler::new(), dc: DcBlock::new(fs), key: (-1, -1), inp: Smooth::new(fs, 20.0, 1.0) };
+        d.rebuild();
         d
     }
     fn latency(&self) -> u32 {
         OS_LATENCY as u32
     }
     fn reset(&mut self) {
-        for c in self.ch.iter_mut() {
-            c.os.reset();
-            c.st = St::default();
-        }
-        self.design();
-        let vol = self.v[VOLUME] as f64 / 10.0;
-        self.out.snap(vol * vol);
+        self.os.reset();
+        self.dc.reset();
+        self.rebuild();
         self.inp.snap(db_to_gain(self.v[LEVEL] as f64));
     }
     fn set_params(&mut self, v: &[f32]) {
         self.v.copy_from_slice(&v[..NPARAMS]);
-        let k: Vec<i32> = vec![v[TRANSISTORS].round() as i32, v[PICKUP].round() as i32, (v[GUITAR_VOL] * 10.0).round() as i32];
-        if k != self.key {
-            self.key = k;
-            self.design();
+        if (v[TRANSISTORS].round() as i32, v[PICKUP].round() as i32) != self.key {
+            self.rebuild();
+        } else {
+            self.controls();
         }
-        let vol = v[VOLUME] as f64 / 10.0;
-        self.out.set(vol * vol);
         self.inp.set(db_to_gain(v[LEVEL] as f64));
     }
     fn process(&mut self, chans: &mut [&mut [f32]], meters: &mut [f32]) {
         let n = chans.first().map(|c| c.len()).unwrap_or(0);
-        let v = self.v;
-        let ge = v[TRANSISTORS] > 0.5;
-        let fuzz = v[FUZZ] as f64 / 10.0;
-        // the guitar's volume pot against the pedal's low input impedance: turning it down cuts
-        // the drive far more than the level, which is why a Fuzz Face cleans up
-        let gv = v[GUITAR_VOL] as f64 / 10.0;
-        let into = gv.powf(2.2);
-        let gain = (if ge { 55.0 } else { 120.0 }) * (0.08 + 0.92 * fuzz * fuzz) * into + 1.0;
-        // the bias trimmer (Q2's collector load): noon is right, low starves it (gated, splatty), high is smoother
-        let bias = (v[BIAS] as f64 / 10.0 - 0.5) * if ge { 0.7 } else { 0.3 };
-        let sag_c = coeff(self.fs * OS as f64, 40.0);
-        let last = self.ch.len() - 1;
+        let nch = chans.len().max(1);
         let mut peak = 0.0f64;
         for k in 0..n {
-            let o = self.out.next();
-            let gi = self.inp.next();
-            for (ci, chn) in chans.iter_mut().enumerate() {
-                let c = &mut self.ch[ci.min(last)];
-                let x = chn[k] as f64 * gi;
-                let st = &mut c.st;
-                let y = c.os.process(x, |u| {
-                    let s = st.inp.process(st.pick.process(u) * (0.25 + 0.75 * gv));
-                    let a = s.abs();
-                    st.sag = a + sag_c * (st.sag - a);
-                    let b = bias + if ge { 0.35 * st.sag.min(1.0) } else { 0.0 };
-                    let d = s * gain;
-                    let top = if ge { 0.8 } else { 1.0 };
-                    let w = if d + b > 0.0 { ((d + b) / top).tanh() * top } else { ((d + b) * 1.6).tanh() / 1.6 } - (b.max(0.0) / top).tanh() * top;
-                    let w = st.mid.process(w);
-                    st.post.process(st.lp.process(w)) * 0.45
-                });
-                peak = peak.max(y.abs());
-                chn[k] = (y * o) as f32;
+            // a guitar pedal is mono: full scale is 1 V from the pickups
+            let x = chans.iter().map(|c| c[k] as f64).sum::<f64>() / nch as f64 * self.inp.next();
+            let ckt = &mut self.ckt;
+            let y = self.os.process(x, |u| ckt.step(&[u]));
+            let y = self.dc.process(y);
+            peak = peak.max(y.abs());
+            for c in chans.iter_mut() {
+                c[k] = y as f32;
             }
         }
         meters[0] = peak as f32;
@@ -303,3 +313,92 @@ vintage::vintage_plugin!(
     name: "Fuzz Face", class_id: *b"PFFuzzFacePQD001", vendor: "PEQUOD Pink Floyd",
     categories: [Fx, Distortion]
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The operating point a working Fuzz Face measures: Q2's collector about half the supply.
+    #[test]
+    fn bias_points() {
+        for ge in [false, true] {
+            let mut c = fuzz_face(ge, 0, 192000.0);
+            for (ctl, pos) in [(C_VOL, 0.7), (C_FUZZ, 1.0), (C_GUITAR, 1.0), (C_BIAS, 0.5)] {
+                c.set_ctl(ctl, pos);
+            }
+            c.reset();
+            let (q1c, q2e, q2c) = (c.node(5), c.node(6), c.node(8));
+            eprintln!("ge {ge}: Q1 c {q1c:.2} V, Q2 e {q2e:.2} V, Q2 c {q2c:.2} V");
+            assert!(q2c.abs() > 3.0 && q2c.abs() < 6.5, "Q2 collector {q2c}");
+        }
+    }
+
+    #[test]
+    fn gain_and_cleanup() {
+        let fs = 48000.0;
+        let run = |gv: f32, amp: f64| {
+            let mut d = Dsp::new(fs as f32, 2);
+            let mut v = defaults();
+            v[GUITAR_VOL] = gv;
+            v[FUZZ] = 10.0;
+            v[VOLUME] = 7.0;
+            d.set_params(&v);
+            d.reset();
+            let n = 24000;
+            let mut l: Vec<f32> = (0..n).map(|k| (amp * (k as f64 * 2.0 * std::f64::consts::PI * 196.0 / fs).sin()) as f32).collect();
+            let mut r = l.clone();
+            let mut m = [0.0f32; 1];
+            d.process(&mut [&mut l[..], &mut r[..]], &mut m);
+            let tail = &l[n / 2..];
+            let rms = (tail.iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / tail.len() as f64).sqrt();
+            // harmonics vs fundamental (Goertzel at 196 Hz and its multiples)
+            let bin = |f: f64| {
+                let w = 2.0 * std::f64::consts::PI * f / fs;
+                let (mut re, mut im) = (0.0, 0.0);
+                for (i, x) in tail.iter().enumerate() {
+                    re += *x as f64 * (w * i as f64).cos();
+                    im += *x as f64 * (w * i as f64).sin();
+                }
+                (re * re + im * im).sqrt()
+            };
+            let f1 = bin(196.0);
+            let h: f64 = (2..10).map(|k| bin(196.0 * k as f64).powi(2)).sum::<f64>().sqrt();
+            (20.0 * rms.log10(), 20.0 * (h / f1).log10())
+        };
+        for (gv, amp) in [(10.0, 0.1), (10.0, 0.01), (7.0, 0.1), (5.0, 0.1), (4.0, 0.1), (3.0, 0.1), (2.0, 0.1)] {
+            let (db, thd) = run(gv, amp);
+            eprintln!("guitar vol {gv}, {amp} V in: out {db:.1} dBV, harmonics {thd:.1} dB");
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod ge_debug {
+    use super::*;
+    #[test]
+    fn ge_sweep() {
+        let fs = 192000.0;
+        for ge in [false, true] {
+            let mut c = fuzz_face(ge, 0, fs);
+            for (ctl, pos) in [(C_VOL, 0.6), (C_FUZZ, 0.9), (C_GUITAR, 1.0), (C_BIAS, 0.5)] {
+                c.set_ctl(ctl, pos);
+            }
+            c.reset();
+            for amp in [0.01, 0.03, 0.1, 0.3, 0.6] {
+                let (mut q2, mut y2, mut ymean) = (0.0, 0.0, 0.0);
+                let n = 96000;
+                for k in 0..n {
+                    let y = c.step(&[amp * (k as f64 * 2.0 * std::f64::consts::PI * 110.0 / fs).sin()]);
+                    if k >= n / 2 {
+                        q2 += c.node(8);
+                        y2 += y * y;
+                        ymean += y;
+                    }
+                }
+                let m = (n / 2) as f64;
+                eprintln!("ge {ge} amp {amp}: Q2 c mean {:.2} V, out rms {:.1} dBV (dc {:.3})", q2 / m, 10.0 * (y2 / m).log10(), ymean / m);
+            }
+        }
+    }
+}

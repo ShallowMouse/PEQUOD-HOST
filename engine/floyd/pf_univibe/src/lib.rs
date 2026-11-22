@@ -89,30 +89,71 @@ pub fn defaults() -> Vec<f32> {
 
 // -------------------------------------------------------------------- dsp --
 
-#[derive(Clone, Copy, Default)]
-struct Ap {
-    z: f64,
-}
-impl Ap {
-    #[inline]
-    fn process(&mut self, x: f64, a: f64) -> f64 {
-        let y = a * x + self.z;
-        self.z = x - a * y;
-        y
-    }
+use vintage::circuit::{self, Circuit, Solver};
+
+/// The four stages' capacitors (collector side), in signal order.
+const CAPS: [f64; 4] = [15e-9, 220e-9, 470e-12, 4.7e-9];
+/// Photocell resistance: about 1M dark, a few k fully lit; CdS conductance rises a bit slower than the light.
+const R_DARK: f64 = 1.0e6;
+const R_LIT: f64 = 4.0e3;
+/// How often (samples at the circuit's rate) the photocells' resistances are brought up to date.
+const CELL_EVERY: usize = 16;
+/// The bulb's glow with the driver at rest.
+const LAMP_IDLE: f64 = 0.15;
+
+fn cell_ohms(light: f64) -> f64 {
+    1.0 / (1.0 / R_DARK + light.max(0.0).powf(0.85) / R_LIT)
 }
 
-/// The four stages' corners at full light (their capacitors differ: 15n, 220n, 470p, 4n7 in the original).
-const CORNERS: [f64; 4] = [1100.0, 120.0, 4200.0, 650.0];
+/// The Uni-Vibe's four phase stages at `fs`, fed from the preamp (input 0).
+///
+/// Each is a 2N5133 phase splitter on 15 V: 470k / 180k base bias through 1u, 4k7 collector and
+/// 4k7 emitter, so the collector and emitter carry equal and opposite signals; the collector feeds
+/// the stage's capacitor and the emitter its photocell, and where they meet is the stage output.
+/// The finite source and load impedances make each stage an imperfect all-pass, part of the sound.
+fn vibe_stages(fs: f64) -> Solver {
+    let q = circuit::N3904;
+    let mut c = Circuit::new().input(1, 600.0).dc(2, 15.0, 10.0);
+    let mut inp = 1;
+    for k in 0..4 {
+        let (b, col, e, o) = (3 + 4 * k, 4 + 4 * k, 5 + 4 * k, 6 + 4 * k);
+        c = c
+            .c(inp, b, 1e-6)
+            .r(2, b, 470e3)
+            .r(b, 0, 180e3)
+            .r(2, col, 4.7e3)
+            .r(e, 0, 4.7e3)
+            .npn(col, b, e, q)
+            .c(col, o, CAPS[k])
+            .var(e, o);
+        inp = o;
+    }
+    // into the output amplifier
+    c.c(inp, 20, 1e-6).r(20, 0, 47e3).output(20).build(fs)
+}
 
 pub struct Dsp {
     fs: f64,
     v: [f32; NPARAMS],
-    ap: [[Ap; 4]; 2],
+    ckt: [Solver; 2],
+    os: [Oversampler2; 2],
+    dc: [DcBlock; 2],
     ph: f64,
     lamp: f64,
     cell: f64,
+    tick: usize,
     out: Smooth,
+}
+
+impl Dsp {
+    fn cells(&mut self) {
+        let r = cell_ohms(self.cell);
+        for c in self.ckt.iter_mut() {
+            for k in 0..4 {
+                c.set_var(k, r);
+            }
+        }
+    }
 }
 
 impl VintageDsp for Dsp {
@@ -121,13 +162,25 @@ impl VintageDsp for Dsp {
         let fs = sample_rate as f64;
         let mut v = [0.0; NPARAMS];
         v.copy_from_slice(&defaults());
-        Self { fs, v, ap: [[Ap::default(); 4]; 2], ph: 0.0, lamp: 0.0, cell: 0.0, out: Smooth::new(fs, 20.0, 1.0) }
+        let c = vibe_stages(fs * 2.0);
+        let mut d = Self { fs, v, ckt: [c.clone(), c], os: [Oversampler2::new(), Oversampler2::new()], dc: [DcBlock::new(fs), DcBlock::new(fs)], ph: 0.0, lamp: 0.0, cell: 0.0, tick: 0, out: Smooth::new(fs, 20.0, 1.0) };
+        d.reset();
+        d
+    }
+    fn latency(&self) -> u32 {
+        OS_LATENCY as u32
     }
     fn reset(&mut self) {
-        self.ap = [[Ap::default(); 4]; 2];
         self.ph = 0.0;
         self.lamp = 0.0;
         self.cell = 0.0;
+        self.tick = 0;
+        self.cells();
+        for c in 0..2 {
+            self.ckt[c].reset();
+            self.os[c].reset();
+            self.dc[c] = DcBlock::new(self.fs);
+        }
     }
     fn set_params(&mut self, v: &[f32]) {
         self.v.copy_from_slice(&v[..NPARAMS]);
@@ -148,30 +201,81 @@ impl VintageDsp for Dsp {
             let drive = (0.5 - 0.5 * (2.0 * std::f64::consts::PI * self.ph).cos()) * inten;
             let c = if drive > self.lamp { heat } else { cool };
             self.lamp = drive + c * (self.lamp - drive);
-            let light = self.lamp * self.lamp;
+            // the driver keeps the bulb glowing between flashes
+            let light = LAMP_IDLE + (1.0 - LAMP_IDLE) * self.lamp * self.lamp;
             self.cell = light + lag * (self.cell - light);
-            // photocell resistance falls with light: the corners rise about 12x from dark to full
-            let span = 0.08 + 0.92 * self.cell;
-            let mut a = [0.0; 4];
-            for (i, f0) in CORNERS.iter().enumerate() {
-                let f = (f0 * span).max(20.0);
-                let t = (std::f64::consts::PI * f / self.fs).tan();
-                a[i] = (t - 1.0) / (t + 1.0);
+            self.tick += 2;
+            if self.tick >= CELL_EVERY {
+                self.tick = 0;
+                self.cells();
             }
             let o = self.out.next();
             for ch in 0..nch {
                 let x = chans[ch][k] as f64;
-                // the transistor stages colour it a little
-                let x = x + 0.05 * x * x;
-                let mut w = x;
-                for (i, s) in self.ap[ch].iter_mut().enumerate() {
-                    w = s.process(w, a[i]);
-                }
-                let y = if vib { w } else { 0.65 * (x + w) };
+                let ckt = &mut self.ckt[ch];
+                let w = self.os[ch].process(x, |u| ckt.step(&[u]));
+                let w = self.dc[ch].process(w);
+                // the mixer: the preamp's signal and the fourth stage's, or the stages alone
+                let y = if vib { w * WET } else { 0.65 * (x + w * WET) };
                 chans[ch][k] = (y * o) as f32;
             }
         }
         meters[0] = self.lamp as f32;
+    }
+}
+
+/// Make-up for the stages' loss, so the shifted signal matches the dry one.
+const WET: f64 = 1.5;
+
+#[cfg(test)]
+mod circuit_tests {
+    use super::*;
+
+    fn response(light: f64, f: f64) -> (f64, f64) {
+        let fs = 96000.0;
+        let mut c = vibe_stages(fs);
+        for k in 0..4 {
+            c.set_var(k, cell_ohms(light));
+        }
+        c.reset();
+        let n = (fs * 0.3) as usize;
+        let (mut a, mut b, mut cr) = (0.0, 0.0, 0.0);
+        for k in 0..n {
+            let x = 0.05 * (k as f64 * 2.0 * std::f64::consts::PI * f / fs).sin();
+            let y = c.step(&[x]);
+            if k > n / 2 {
+                a += x * x;
+                b += y * y;
+                cr += x * y;
+            }
+        }
+        (10.0 * (b / a).log10(), cr / (a * b).sqrt())
+    }
+
+    #[test]
+    fn stages() {
+        let fs = 96000.0;
+        let c = vibe_stages(fs);
+        eprintln!("bias: b {:.2} c {:.2} e {:.2}", c.node(3), c.node(4), c.node(5));
+        for light in [0.15, 0.3, 0.6, 1.0] {
+            let mut line = format!("light {light} ({:.0} ohm):", cell_ohms(light));
+            for f in [60.0, 150.0, 400.0, 1000.0, 2500.0, 6000.0] {
+                let (g, corr) = response(light, f);
+                line += &format!(" {f}:{g:.1}dB/{corr:.2}");
+            }
+            eprintln!("{line}");
+        }
+        let mut c = vibe_stages(fs);
+        let t = std::time::Instant::now();
+        for k in 0..96000 {
+            if k % 16 == 0 {
+                for s in 0..4 {
+                    c.set_var(s, cell_ohms((k as f64 / 20000.0).sin().abs()));
+                }
+            }
+            c.step(&[0.2 * (k as f64 * 0.03).sin()]);
+        }
+        eprintln!("1 s at 2x in {:.0} ms", t.elapsed().as_secs_f64() * 1e3);
     }
 }
 

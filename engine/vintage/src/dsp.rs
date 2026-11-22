@@ -257,9 +257,13 @@ const PHASE_LEN: usize = (TAPS + OS - 1) / OS;
 pub const OS_LATENCY: usize = (TAPS - 1) / OS; // 24
 
 fn design_fir() -> [f64; TAPS] {
-    let fc = 0.112;
+    design_kaiser::<TAPS>(0.112)
+}
+
+/// Kaiser-windowed sinc low-pass, `fc` relative to the sample rate, unity DC gain.
+fn design_kaiser<const T: usize>(fc: f64) -> [f64; T] {
     let beta = 8.0;
-    let m = (TAPS - 1) as f64;
+    let m = (T - 1) as f64;
     let i0 = |x: f64| {
         let mut sum = 1.0;
         let mut term = 1.0;
@@ -269,7 +273,7 @@ fn design_fir() -> [f64; TAPS] {
         }
         sum
     };
-    let mut h = [0.0; TAPS];
+    let mut h = [0.0; T];
     let mut total = 0.0;
     for (n, tap) in h.iter_mut().enumerate() {
         let t = n as f64 - m / 2.0;
@@ -326,6 +330,55 @@ impl Oversampler {
         }
         let mut out = 0.0;
         for i in 0..TAPS {
+            out += self.h[i] * self.down_hist[i];
+        }
+        out
+    }
+}
+
+const TAPS2: usize = 49;
+const PHASE_LEN2: usize = (TAPS2 + 1) / 2;
+
+/// 2x oversampling with the same latency as [`Oversampler`] (`OS_LATENCY` base-rate samples),
+/// for circuits whose nonlinearity is gentle enough not to need 4x.
+#[derive(Clone)]
+pub struct Oversampler2 {
+    h: [f64; TAPS2],
+    up_hist: [f64; PHASE_LEN2],
+    down_hist: [f64; TAPS2],
+}
+
+impl Default for Oversampler2 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Oversampler2 {
+    pub fn new() -> Self {
+        Self { h: design_kaiser::<TAPS2>(0.224), up_hist: [0.0; PHASE_LEN2], down_hist: [0.0; TAPS2] }
+    }
+    pub fn reset(&mut self) {
+        self.up_hist = [0.0; PHASE_LEN2];
+        self.down_hist = [0.0; TAPS2];
+    }
+    #[inline]
+    pub fn process(&mut self, x: f64, mut f: impl FnMut(f64) -> f64) -> f64 {
+        self.up_hist.copy_within(0..PHASE_LEN2 - 1, 1);
+        self.up_hist[0] = x;
+        for p in 0..2 {
+            let mut acc = 0.0;
+            let mut k = 0;
+            while p + 2 * k < TAPS2 {
+                acc += self.h[p + 2 * k] * self.up_hist[k];
+                k += 1;
+            }
+            let y = f(acc * 2.0);
+            self.down_hist.copy_within(0..TAPS2 - 1, 1);
+            self.down_hist[0] = y;
+        }
+        let mut out = 0.0;
+        for i in 0..TAPS2 {
             out += self.h[i] * self.down_hist[i];
         }
         out

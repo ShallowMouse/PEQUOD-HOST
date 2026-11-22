@@ -86,42 +86,100 @@ pub fn defaults() -> Vec<f32> {
 
 // -------------------------------------------------------------------- dsp --
 
-const OS: usize = 4;
+use vintage::amp::net::Taper;
+use vintage::circuit::{self, Circuit, Solver};
 
-#[derive(Clone, Default)]
-struct St {
-    hp: Biquad,
-    bass: Biquad,
-    treble: Biquad,
-    mid: Biquad,
-    lp: Biquad,
-    dc: Biquad,
+const OS: usize = 4;
+const C_GAIN: usize = 0;
+const C_BASS: usize = 1;
+const C_TREBLE: usize = 2;
+const C_VOL: usize = 3;
+/// Q2's collector (the end of the gain pair) and its resting voltage, for the drive lamp.
+const N_Q2C: usize = 7;
+
+/// The whole pedal at `supply` volts (two PP3s: 18 V).
+///
+/// Three BC184Ls. Q1/Q2 are a direct-coupled feedback pair: Q2's collector feeds back to Q1's
+/// emitter through 12k, and the gain pot (10k, reverse log, to ground through 22u) sets how much of
+/// Q1's emitter is grounded for audio: about 2x fully down, rising to open loop fully up. DC is held by 150k + 120k from
+/// Q2's emitter back to Q1's base, decoupled in the middle. Q3 is an inverting stage with the bass
+/// and treble network wrapped around it (Colorsound's feedback Baxandall), then the volume pot.
+/// Resistor placement follows the published parts list fitted to measured voltages of an 18 V unit
+/// (Q1 c/b/e 6.4/3.9/3.5 V, Q2 c/e 11.5/5.8 V, Q3 c/b/e 10.2/2.8/2.2 V at 18.8 V).
+fn power_boost(supply: f64, fs: f64) -> Solver {
+    let q = circuit::BC184;
+    Circuit::new()
+        .input(1, 7e3)
+        .dc(2, supply, 5.0)
+        // input: 1M to ground, 220n into Q1's base
+        .r(1, 0, 1e6)
+        .c(1, 3, 220e-9)
+        // Q1
+        .r(2, 4, 5.6e3)
+        .c(4, 3, 220e-12)
+        .r(5, 0, 1.2e3)
+        .npn(4, 3, 5, q)
+        // gain pot to ground through 22u
+        .rheo(5, 6, 10e3, Taper::Audio, C_GAIN, 10.0)
+        .c(6, 0, 22e-6)
+        // Q2, direct from Q1's collector; 12k feedback from its collector to Q1's emitter
+        .r(2, N_Q2C, 3.9e3)
+        .r(8, 0, 4.7e3)
+        .npn(N_Q2C, 4, 8, q)
+        .r(N_Q2C, 5, 12e3)
+        // DC bias: Q2's emitter back to Q1's base, decoupled halfway
+        .r(8, 9, 150e3)
+        .r(9, 3, 120e3)
+        .c(9, 0, 22e-6)
+        // into the tone network
+        .c(N_Q2C, 10, 22e-6)
+        // bass: 4k7, the 100k pot with 100n across it, 4k7 to Q3's collector side; wiper through 39k
+        .r(10, 11, 4.7e3)
+        .pot(13, 12, 11, 100e3, Taper::Linear, C_BASS)
+        .c(11, 13, 100e-9)
+        .r(13, 14, 4.7e3)
+        .r(12, 15, 39e3)
+        // treble: 10n, the 100k pot, 10n; wiper straight to Q3's base
+        .c(10, 16, 10e-9)
+        .pot(18, 17, 16, 100e3, Taper::Linear, C_TREBLE)
+        .c(18, 14, 10e-9)
+        .r(17, 15, 1.0)
+        // Q3: 180k/33k bias, 4k7 collector, 1k2 emitter with 470R + 10u across it
+        .r(2, 15, 180e3)
+        .r(15, 0, 33e3)
+        .r(2, 19, 4.7e3)
+        .r(20, 0, 1.2e3)
+        .r(20, 21, 470.0)
+        .c(21, 0, 10e-6)
+        .npn(19, 15, 20, q)
+        // the network's far end is AC-coupled to the collector
+        .c(19, 14, 1e-6)
+        // out: 22u, the 100k volume pot
+        .c(19, 22, 22e-6)
+        .pot(0, 23, 22, 100e3, Taper::Audio, C_VOL)
+        .r(23, 0, 1e6)
+        .output(23)
+        .build(fs)
 }
 
 pub struct Dsp {
     fs: f64,
     v: [f32; NPARAMS],
-    st: [St; 2],
+    ckt: [Solver; 2],
     os: [Oversampler; 2],
-    key: [i32; 2],
+    dc: [DcBlock; 2],
+    rest: f64,
     inp: Smooth,
-    drive: Smooth,
-    out: Smooth,
 }
 
 impl Dsp {
-    fn design(&mut self) {
-        let ofs = self.fs * OS as f64;
-        let b = (self.v[BASS] as f64 - 5.0) / 5.0 * 15.0;
-        let t = (self.v[TREBLE] as f64 - 5.0) / 5.0 * 15.0;
-        for st in self.st.iter_mut() {
-            st.hp.set_highpass(ofs, 35.0, 0.6);
-            st.bass.set_low_shelf(ofs, 200.0, 0.6, b);
-            st.treble.set_high_shelf(ofs, 2000.0, 0.6, t);
-            // the clipping stage's mid hump (the "fat" in the overdrive)
-            st.mid.set_peak(ofs, 700.0, 0.6, 2.5);
-            st.lp.set_lowpass(ofs, 9000.0, 0.7);
-            st.dc.set_highpass(ofs, 20.0, 0.7);
+    fn controls(&mut self) {
+        for c in self.ckt.iter_mut() {
+            // reverse-log gain pot: more gain, less resistance
+            c.set_ctl(C_GAIN, 1.0 - self.v[GAIN] as f64 / 10.0);
+            c.set_ctl(C_BASS, self.v[BASS] as f64 / 10.0);
+            c.set_ctl(C_TREBLE, self.v[TREBLE] as f64 / 10.0);
+            c.set_ctl(C_VOL, self.v[VOLUME] as f64 / 10.0);
         }
     }
 }
@@ -132,32 +190,29 @@ impl VintageDsp for Dsp {
         let fs = sample_rate as f64;
         let mut v = [0.0; NPARAMS];
         v.copy_from_slice(&defaults());
-        let mut d = Self { fs, v, st: Default::default(), os: [Oversampler::new(), Oversampler::new()], key: [-1; 2], inp: Smooth::new(fs, 20.0, 1.0), drive: Smooth::new(fs, 20.0, 1.0), out: Smooth::new(fs, 20.0, 0.25) };
-        d.design();
+        let ckt = power_boost(18.0, fs * OS as f64);
+        let rest = ckt.node(N_Q2C);
+        let mut d = Self { fs, v, ckt: [ckt.clone(), ckt], os: [Oversampler::new(), Oversampler::new()], dc: [DcBlock::new(fs), DcBlock::new(fs)], rest, inp: Smooth::new(fs, 20.0, 1.0) };
+        d.reset();
         d
     }
     fn latency(&self) -> u32 {
         OS_LATENCY as u32
     }
     fn reset(&mut self) {
+        self.controls();
         for c in 0..2 {
-            self.st[c] = St::default();
+            self.ckt[c].reset();
             self.os[c].reset();
+            self.dc[c] = DcBlock::new(self.fs);
         }
-        self.design();
+        self.rest = self.ckt[0].node(N_Q2C);
+        self.inp.snap(db_to_gain(self.v[LEVEL] as f64));
     }
     fn set_params(&mut self, v: &[f32]) {
         self.v.copy_from_slice(&v[..NPARAMS]);
-        let k = [(v[BASS] * 10.0).round() as i32, (v[TREBLE] * 10.0).round() as i32];
-        if k != self.key {
-            self.key = k;
-            self.design();
-        }
+        self.controls();
         self.inp.set(db_to_gain(v[LEVEL] as f64));
-        let g = v[GAIN] as f64 / 10.0;
-        self.drive.set(7.2 * 10f64.powf(g));
-        let vol = v[VOLUME] as f64 / 10.0;
-        self.out.set(vol * vol);
     }
     fn process(&mut self, chans: &mut [&mut [f32]], meters: &mut [f32]) {
         let n = chans.first().map(|c| c.len()).unwrap_or(0);
@@ -165,28 +220,102 @@ impl VintageDsp for Dsp {
         let mut peak = 0.0f64;
         for k in 0..n {
             let gi = self.inp.next();
-            let dr = self.drive.next();
-            let o = self.out.next();
             for c in 0..nch {
                 let x = chans[c][k] as f64 * gi;
-                let st = &mut self.st[c];
-                let mut pk = 0.0f64;
+                let ckt = &mut self.ckt[c];
+                let (rest, mut pk) = (self.rest, 0.0f64);
                 let y = self.os[c].process(x, |u| {
-                    // first stage: about 4x, plenty of headroom on 18 V
-                    let s = st.hp.process(u) * 4.0;
-                    let s = s + 0.03 * s * s;
-                    let s = st.treble.process(st.bass.process(s));
-                    // second stage: the gain pot; clips softly, a little lopsided, at about 7 V
-                    let d = st.mid.process(s * dr * 0.25);
-                    pk = pk.max(d.abs() / 7.0);
-                    let w = if d > 0.0 { 7.0 * (d / 7.0).tanh() } else { -6.0 * (-d / 6.0).tanh() };
-                    st.dc.process(st.lp.process(w)) * 0.6
+                    let y = ckt.step(&[u]);
+                    pk = pk.max((ckt.node(N_Q2C) - rest).abs());
+                    y
                 });
                 peak = peak.max(pk);
-                chans[c][k] = (y * o) as f32;
+                chans[c][k] = self.dc[c].process(y) as f32;
             }
         }
-        meters[0] = peak as f32;
+        // the lamp: Q2's collector swinging most of the way to a rail
+        meters[0] = (peak / 6.0) as f32;
+    }
+}
+
+#[cfg(test)]
+mod circuit_tests {
+    use super::*;
+
+    #[test]
+    fn bias_and_response() {
+        let mut c = power_boost(18.84, 192000.0);
+        c.reset();
+        let v = |c: &Solver, n: usize| c.node(n);
+        eprintln!(
+            "Q1 c {:.2} b {:.2} e {:.2} | Q2 c {:.2} e {:.2} | Q3 c {:.2} b {:.2} e {:.2}",
+            v(&c, 4), v(&c, 3), v(&c, 5), v(&c, 7), v(&c, 8), v(&c, 19), v(&c, 15), v(&c, 20)
+        );
+        for (n, want) in [(4, 6.43), (3, 3.92), (5, 3.54), (7, 11.53), (8, 5.82), (19, 10.19), (15, 2.77), (20, 2.23)] {
+            assert!((v(&c, n) - want).abs() < 0.6, "node {n}: {} vs {want}", v(&c, n));
+        }
+        // small-signal gain against the gain knob, and the tone controls at 100 Hz / 5 kHz
+        let fs = 192000.0;
+        let gain_at = |gain: f64, bass: f64, treble: f64, f: f64| {
+            let mut c = power_boost(18.0, fs);
+            c.set_ctl(C_GAIN, 1.0 - gain);
+            c.set_ctl(C_BASS, bass);
+            c.set_ctl(C_TREBLE, treble);
+            c.set_ctl(C_VOL, 1.0);
+            c.reset();
+            let (mut a, mut b) = (0.0, 0.0);
+            let n = (fs * 0.3) as usize;
+            for k in 0..n {
+                let x = 0.005 * (k as f64 * 2.0 * std::f64::consts::PI * f / fs).sin();
+                let y = c.step(&[x]);
+                if k > n / 2 {
+                    a += x * x;
+                    b += y * y;
+                }
+            }
+            10.0 * (b / a).log10()
+        };
+        {
+            let mut c = power_boost(18.0, fs);
+            c.set_ctl(C_GAIN, 1.0);
+            c.set_ctl(C_VOL, 1.0);
+            c.reset();
+            let nodes = [1usize, 3, 4, 5, 6, 7, 8, 9, 10, 15];
+            let mut mean = [0.0f64; 10];
+            let mut sq = [0.0f64; 10];
+            let n = 57600;
+            for k in 0..n {
+                c.step(&[0.005 * (k as f64 * 2.0 * std::f64::consts::PI * 1000.0 / fs).sin()]);
+                if k >= n / 2 {
+                    for (j, &nd) in nodes.iter().enumerate() {
+                        mean[j] += c.node(nd);
+                        sq[j] += c.node(nd) * c.node(nd);
+                    }
+                }
+            }
+            for (j, &nd) in nodes.iter().enumerate() {
+                let m = mean[j] / (n / 2) as f64;
+                let rms = (sq[j] / (n / 2) as f64 - m * m).max(0.0).sqrt();
+                eprintln!("node {nd}: dc {m:.2} ac {:.1} dBV", 20.0 * rms.log10());
+            }
+        }
+        for g in [0.0, 0.3, 0.5, 0.7, 0.9] {
+            eprintln!("gain {g}: {:.1} dB at 1 kHz", gain_at(g, 0.5, 0.5, 1000.0));
+        }
+        for (b, t) in [(0.0, 0.5), (1.0, 0.5), (0.5, 0.0), (0.5, 1.0), (0.5, 0.5)] {
+            eprintln!(
+                "bass {b} treble {t}: 100 Hz {:.1}, 1 kHz {:.1}, 5 kHz {:.1} dB",
+                gain_at(0.0, b, t, 100.0), gain_at(0.0, b, t, 1000.0), gain_at(0.0, b, t, 5000.0)
+            );
+        }
+        let t = std::time::Instant::now();
+        let mut c = power_boost(18.0, fs);
+        c.set_ctl(C_GAIN, 0.2);
+        c.reset();
+        for k in 0..192000 {
+            c.step(&[0.3 * (k as f64 * 2.0 * std::f64::consts::PI * 196.0 / fs).sin()]);
+        }
+        eprintln!("1 s at 4x in {:.0} ms", t.elapsed().as_secs_f64() * 1e3);
     }
 }
 

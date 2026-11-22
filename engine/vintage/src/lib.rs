@@ -1,6 +1,7 @@
 //! Shared framework for the Studio Two suite of vintage-style plugins.
 
 pub mod amp;
+pub mod circuit;
 pub mod dsp;
 pub mod link;
 pub mod native;

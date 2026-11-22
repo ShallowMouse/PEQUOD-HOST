@@ -1,4 +1,7 @@
-//! Big Muff: the Electro-Harmonix Big Muff Pi as David Gilmour used it: a Ram's Head ('73-'77) or a Sovtek Civil War ('94). Input booster, two diode-clipping gain stages, the passive tone stack and the output booster.
+//! Big Muff: the Electro-Harmonix Big Muff Pi as David Gilmour used it: a Ram's Head (violet, 1973-77) or a Sovtek Civil
+//! War (1994). The whole circuit, solved from its part values: the input booster, the two 1N914-clipping stages with their
+//! 470k / 560p feedback, the Sustain pot between them, the passive tone stack and the output booster. Values after Kit
+//! Rae's measurements of the violet Ram's Head; the Civil War's tone stack after the Sovtek green.
 
 #![allow(clippy::excessive_precision)]
 use nih_plug::prelude::*;
@@ -92,228 +95,184 @@ pub fn defaults() -> Vec<f32> {
 
 // -------------------------------------------------------------------- dsp --
 
-const OS_N: usize = 4;
-// Q1 (input booster): shunt feedback 470k from collector to base, 39k in series at the input
-const RF: f64 = 470e3;
-const RS: f64 = 39e3;
-// collector load and intrinsic emitter resistance at ~0.2 mA bias (re = 26 mV / Ic)
-const RC_EFF: f64 = 9e3;
-const RE_INTR: f64 = 130.0;
+use vintage::amp::net::Taper;
+use vintage::circuit::{self, Circuit, Solver};
 
+const OS: usize = 4;
+const C_SUS: usize = 0;
+const C_TONE: usize = 1;
+const C_VOL: usize = 2;
 
-/// Diode-clipping gain stage (Q2/Q3): high-passed input, gain, diodes in the feedback loop limiting to ~0.6 V, Miller roll-off.
-#[derive(Clone, Copy, Default)]
-struct ClipStage {
-    hp: Biquad,
-    lp: Biquad,
-    gain: f64,
-}
-
-impl ClipStage {
-    fn new(fs: f64, gain: f64, f_hp: f64, f_lp: f64) -> Self {
-        // coupling cap into the stage: first-order high-pass
-        let mut hp = Biquad::identity();
-        let t = 1.0 / (2.0 * std::f64::consts::PI * f_hp);
-        hp.set_analog(fs, [0.0, t, 0.0], [0.0, t, 1.0]);
-        // Miller cap across the feedback: a first-order roll-off
-        let mut lp = Biquad::identity();
-        lp.set_analog(fs, [0.0, 0.0, 1.0], [0.0, 1.0 / (2.0 * std::f64::consts::PI * f_lp), 1.0]);
-        Self { hp, lp, gain }
-    }
-    #[inline]
-    fn process(&mut self, x: f64) -> f64 {
-        let v = self.hp.process(x) * self.gain;
-        // silicon diode pair in the feedback: soft limit around 0.6 V, slightly rounded
-        let vd = 0.6;
-        let y = vd * (v / vd).tanh() + 0.04 * v / (1.0 + v.abs());
-        self.lp.process(y)
-    }
-    fn reset(&mut self) {
-        self.hp.reset();
-        self.lp.reset();
-    }
-}
-
-struct Muff {
-    fs_os: f64,
-    in_hp: Biquad,
-    q1_lp: Biquad,
-    q1_av: f64,
-    q1_k: f64,
-    q2: ClipStage,
-    q3: ClipStage,
-    lp_tone: Biquad,
-    hp_tone: Biquad,
-    q4_hp: Biquad,
-    sustain: f64,
-}
-
-impl Muff {
-    fn new(fs_os: f64) -> Self {
-        let mut in_hp = Biquad::identity();
-        in_hp.set_highpass(fs_os, 4.0, 0.5);
-        let mut m = Self {
-            fs_os,
-            in_hp,
-            q1_lp: Biquad::identity(),
-            q1_av: 9.0,
-            q1_k: 0.5,
-            // clipping stages: ~26x and ~30x small-signal, 100 nF into ~15k (about 110 Hz), Miller roll-off
-            q2: ClipStage::new(fs_os, 26.0, 110.0, 6000.0),
-            q3: ClipStage::new(fs_os, 30.0, 110.0, 5000.0),
-            lp_tone: Biquad::identity(),
-            hp_tone: Biquad::identity(),
-            q4_hp: Biquad::identity(),
-            sustain: 0.5,
-        };
-        // tone stack: 39k / 10 nF low-pass (~408 Hz), 4 nF / 22k high-pass (~1.8 kHz)
-        m.lp_tone.set_analog(fs_os, [0.0, 0.0, 1.0], [0.0, 39e3 * 10e-9, 1.0]);
-        m.hp_tone.set_analog(fs_os, [0.0, 22e3 * 4e-9, 0.0], [0.0, 22e3 * 4e-9, 1.0]);
-        m.q4_hp.set_highpass(fs_os, 20.0, 0.5);
-        m.set_r22(100.0);
-        m
-    }
-    /// Ram's Head: 39k / 10n low-pass, 4n / 22k high-pass. Civil War: a lower low-pass leg and a lower high-pass corner (more bass, a gentler scoop).
-    fn set_version(&mut self, civil: bool) {
-        let fs_os = self.fs_os;
-        if civil {
-            let (a, rl, chp) = (1.5, 39e3, 7e-9);
-            self.lp_tone.set_analog(fs_os, [0.0, 0.0, a], [0.0, rl * 10e-9, 1.0]);
-            self.hp_tone.set_analog(fs_os, [0.0, 22e3 * chp, 0.0], [0.0, 22e3 * chp, 1.0]);
-        } else {
-            self.lp_tone.set_analog(fs_os, [0.0, 0.0, 1.0], [0.0, 39e3 * 10e-9, 1.0]);
-            self.hp_tone.set_analog(fs_os, [0.0, 22e3 * 4e-9, 0.0], [0.0, 22e3 * 4e-9, 1.0]);
+/// The whole pedal. `civil`: the Sovtek Civil War's tone stack.
+fn big_muff(civil: bool, fs: f64) -> Solver {
+    let q = circuit::BC108;
+    let d = circuit::D1N914;
+    // tone stack: low-pass leg (R, C) and high-pass leg (C, R)
+    let (rl, cl, ch, rh) = if civil { (20e3, 10e-9, 10e-9, 22e3) } else { (39e3, 10e-9, 4e-9, 22e3) };
+    let mut c = Circuit::new()
+        .input(1, 10e3)
+        .dc(2, 9.0, 5.0)
+        // Q1: input booster
+        .c(1, 3, 1e-6)
+        .r(3, 4, 39e3)
+        .r(5, 4, 470e3)
+        .c(5, 4, 560e-12)
+        .r(4, 0, 100e3)
+        .r(2, 5, 15e3)
+        .r(6, 0, 100.0)
+        .npn(5, 4, 6, q)
+        // sustain: Q1's output across the 100k pot, its wiper through 1k into the first clipper
+        .c(5, 7, 1e-6)
+        .pot(0, 8, 7, 100e3, Taper::Linear, C_SUS)
+        .r(8, 9, 1e3)
+        .c(9, 10, 1e-6)
+        .r(10, 11, 10e3);
+    // the two clipping stages: 470k + 560p feedback, 1N914 pair through 1u, 15k collector, 150R emitter
+    for (b, col, e, dm, nxt_c, nxt_r) in [(11usize, 12usize, 13usize, 14usize, 15usize, 16usize), (16, 17, 18, 19, 20, 21)] {
+        let _ = nxt_r;
+        c = c.r(col, b, 470e3).c(col, b, 560e-12).r(b, 0, 100e3).r(2, col, 15e3).r(e, 0, 150.0).npn(col, b, e, q)
+            .c(col, dm, 1e-6).diode(dm, b, d).diode(b, dm, d);
+        if col == 12 {
+            // coupling into the second clipper
+            c = c.c(col, nxt_c, 1e-6).r(nxt_c, 16, 10e3);
         }
     }
-    fn reset(&mut self) {
-        for b in [&mut self.in_hp, &mut self.q1_lp, &mut self.lp_tone, &mut self.hp_tone, &mut self.q4_hp] {
-            b.reset();
-        }
-        self.q2.reset();
-        self.q3.reset();
-    }
-    /// R22 (Q1 emitter resistor) -> open-loop gain -> closed-loop gain of the shunt-feedback booster, and its bandwidth.
-    fn set_r22(&mut self, r22: f64) {
-        let a = RC_EFF / (RE_INTR + r22.max(0.0));
-        let ratio = RF / RS;
-        self.q1_av = ratio * a / (a + 1.0 + ratio);
-        // un-degenerated, the transistor's exponential curve shows through more
-        self.q1_k = RE_INTR / (RE_INTR + r22.max(0.0));
-        // feedback cap 470 pF across RF: the pole widens as loop gain falls
-        let fc = (1.0 / (2.0 * std::f64::consts::PI * RF * 470e-12)) * (1.0 + ratio / (a + 1.0));
-        // first order: the gain falls back toward the feedback limit rather than to nothing
-        let fc = fc.min(self.fs_os * 0.2);
-        let shelf = 1.0 / self.q1_av.max(1.0);
-        self.q1_lp.set_analog(self.fs_os, [0.0, shelf / (2.0 * std::f64::consts::PI * fc * shelf.max(1e-3)), 1.0], [0.0, 1.0 / (2.0 * std::f64::consts::PI * fc), 1.0]);
-    }
-    #[inline]
-    fn process(&mut self, x: f64, tone: f64) -> f64 {
-        // input booster Q1: collector idles near 7 V on a 9 V supply, so it runs out of room upward first
-        let v = self.in_hp.process(x) * self.q1_av;
-        let v = v + self.q1_k * 0.08 * v * v.abs().min(4.0);
-        let v = if v > 0.0 { 1.9 * (v / 1.9).tanh() } else { -6.0 * (-v / 6.0).tanh() };
-        let v = self.q1_lp.process(v);
-        // sustain pot (with R23 keeping a little signal at zero)
-        let v = v * self.sustain;
-        let v = self.q2.process(v);
-        let v = self.q3.process(v);
-        // passive tone stack: low-pass and high-pass legs mixed by the tone pot (mid scoop near 1 kHz in the middle)
-        let lo = self.lp_tone.process(v);
-        let hi = self.hp_tone.process(v);
-        let t = tone;
-        let v = lo * (1.0 - t) + hi * t;
-        // output booster Q4 (~4.5x) with a little headroom limit
-        let v = self.q4_hp.process(v) * 4.5;
-        3.5 * (v / 3.5).tanh()
-    }
+    // tone stack from Q3's collector (17)
+    c = c
+        .c(17, 22, 1e-6)
+        .r(22, 23, rl)
+        .c(23, 0, cl)
+        .c(22, 24, ch)
+        .r(24, 0, rh)
+        .pot(23, 25, 24, 100e3, Taper::Linear, C_TONE)
+        // Q4: output booster
+        .c(25, 26, 1e-6)
+        .r(2, 26, 470e3)
+        .r(26, 0, 100e3)
+        .r(2, 27, 15e3)
+        .r(28, 0, 3.3e3)
+        .npn(27, 26, 28, q)
+        .c(27, 29, 1e-6)
+        .pot(0, 30, 29, 100e3, Taper::Audio, C_VOL)
+        .r(30, 0, 1e6)
+        .output(30);
+    c.build(fs)
 }
 
 pub struct Dsp {
     fs: f64,
-    muff: [Muff; 2],
-    os: [Oversampler; 2],
-    out_lp: [Biquad; 2],
     v: [f32; NPARAMS],
+    ckt: Solver,
+    os: Oversampler,
+    dc: DcBlock,
     version: i32,
-    input: Smooth,
-    sus: Smooth,
-    tone: Smooth,
-    vol: Smooth,
+    inp: Smooth,
+}
+
+impl Dsp {
+    fn controls(&mut self) {
+        self.ckt.set_ctl(C_SUS, self.v[SUSTAIN] as f64 / 10.0);
+        self.ckt.set_ctl(C_TONE, self.v[TONE] as f64 / 10.0);
+        self.ckt.set_ctl(C_VOL, self.v[VOLUME] as f64 / 10.0);
+    }
+    fn rebuild(&mut self) {
+        self.version = self.v[VERSION].round() as i32;
+        self.ckt = big_muff(self.version == 1, self.fs * OS as f64);
+        self.controls();
+        self.ckt.reset();
+    }
 }
 
 impl VintageDsp for Dsp {
     const METERS: usize = 1;
     fn new(sample_rate: f32, _ch: usize) -> Self {
         let fs = sample_rate as f64;
-        let fs_os = fs * OS_N as f64;
         let mut v = [0.0; NPARAMS];
         v.copy_from_slice(&defaults());
-        let mut out_lp = [Biquad::identity(); 2];
-        for b in &mut out_lp {
-            b.set_lowpass(fs, 12000.0f64.min(fs * 0.45), 0.707);
-        }
-        Self {
-            fs,
-            muff: [Muff::new(fs_os), Muff::new(fs_os)],
-            os: [Oversampler::new(), Oversampler::new()],
-            out_lp,
-            v,
-            version: -1,
-            input: Smooth::new(fs, 20.0, 1.0),
-            sus: Smooth::new(fs, 20.0, 0.5),
-            tone: Smooth::new(fs, 20.0, 0.5),
-            vol: Smooth::new(fs, 20.0, 0.5),
-        }
-    }
-    fn reset(&mut self) {
-        for c in 0..2 {
-            self.muff[c].reset();
-            self.os[c].reset();
-            self.out_lp[c].reset();
-        }
+        let mut d = Self { fs, v, ckt: big_muff(false, fs * OS as f64), os: Oversampler::new(), dc: DcBlock::new(fs), version: -1, inp: Smooth::new(fs, 20.0, 1.0) };
+        d.rebuild();
+        d
     }
     fn latency(&self) -> u32 {
         OS_LATENCY as u32
     }
+    fn reset(&mut self) {
+        self.os.reset();
+        self.dc.reset();
+        self.rebuild();
+        self.inp.snap(db_to_gain(self.v[GUITAR] as f64));
+    }
     fn set_params(&mut self, v: &[f32]) {
         self.v.copy_from_slice(&v[..NPARAMS]);
-        let ver = v[VERSION].round() as i32;
-        if ver != self.version {
-            for m in &mut self.muff {
-                m.set_version(ver == 1);
-            }
-            self.version = ver;
+        if v[VERSION].round() as i32 != self.version {
+            self.rebuild();
+        } else {
+            self.controls();
         }
-        self.input.set(db_to_gain(v[GUITAR] as f64));
-        let s = v[SUSTAIN] as f64 / 10.0;
-        self.sus.set((s * 100e3 + 1e3) / 101e3);
-        self.tone.set(v[TONE] as f64 / 10.0);
-        let vol = v[VOLUME] as f64 / 10.0;
-        self.vol.set(vol * vol);
+        self.inp.set(db_to_gain(v[GUITAR] as f64));
     }
     fn process(&mut self, chans: &mut [&mut [f32]], meters: &mut [f32]) {
         let n = chans.first().map(|c| c.len()).unwrap_or(0);
-        let nch = chans.len().min(2);
+        let nch = chans.len().max(1);
         let mut peak = 0.0f64;
         for k in 0..n {
-            let gi = self.input.next();
-            let sus = self.sus.next();
-            let tone = self.tone.next();
-            let vol = self.vol.next();
-            for c in 0..nch {
-                let x = chans[c][k] as f64 * gi;
-                let m = &mut self.muff[c];
-                m.sustain = sus;
-                let y = self.os[c].process(x, |s| m.process(s, tone));
-                peak = peak.max(y.abs());
-                let y = self.out_lp[c].process(y) * vol * 0.6;
-                chans[c][k] = y as f32;
+            let x = chans.iter().map(|c| c[k] as f64).sum::<f64>() / nch as f64 * self.inp.next();
+            let ckt = &mut self.ckt;
+            let y = self.os.process(x, |u| ckt.step(&[u]));
+            // the CLIPPING lamp follows the first clipper's diodes
+            peak = peak.max((ckt.node(12) - ckt.node(14)).abs());
+            let y = self.dc.process(y);
+            for c in chans.iter_mut() {
+                c[k] = y as f32;
             }
         }
-        meters[0] = peak as f32;
+        meters[0] = (peak / 0.6) as f32;
     }
 }
 
+#[cfg(test)]
+mod circuit_tests {
+    use super::*;
+
+    #[test]
+    fn bias_and_speed() {
+        let mut c = big_muff(false, 192000.0);
+        c.set_ctl(C_SUS, 0.6);
+        c.set_ctl(C_TONE, 0.5);
+        c.set_ctl(C_VOL, 0.4);
+        c.reset();
+        eprintln!("collectors: Q1 {:.2} Q2 {:.2} Q3 {:.2} Q4 {:.2} V", c.node(5), c.node(12), c.node(17), c.node(27));
+        for col in [5, 12, 17, 27] {
+            assert!(c.node(col) > 2.5 && c.node(col) < 7.5, "collector {col}: {}", c.node(col));
+        }
+        // accuracy of a loose Newton tolerance against a tight one
+        for tol in if std::env::var("NO_TOL").is_ok() { vec![] } else { vec![1e-4, 1e-3, 3e-3] } {
+            let mut a = c.clone();
+            let mut b = c.clone();
+            a.tol = 1e-8;
+            b.tol = tol;
+            let (mut e2, mut s2, mut it) = (0.0, 0.0, 0usize);
+            for k in 0..48000 {
+                let x = 0.3 * (k as f64 * 2.0 * std::f64::consts::PI * 196.0 / 192000.0).sin();
+                let (ya, yb) = (a.step(&[x]), b.step(&[x]));
+                it += b.iters;
+                e2 += (ya - yb) * (ya - yb);
+                s2 += ya * ya;
+            }
+            eprintln!("tol {tol}: error {:.1} dB, {:.2} iterations", 10.0 * (e2 / s2).log10(), it as f64 / 48000.0);
+        }
+        let t = std::time::Instant::now();
+        let mut y2 = 0.0;
+        let mut hist = [0usize; 32];
+        for k in 0..192000 {
+            let y = c.step(&[0.1 * (k as f64 * 2.0 * std::f64::consts::PI * 196.0 / 192000.0).sin()]);
+            hist[c.iters.min(31)] += 1;
+            y2 += y * y;
+        }
+        eprintln!("newton iterations: {:?}, refactors {}, size {:?}", hist, c.refactors, c.size());
+        eprintln!("1 s at 4x in {:.0} ms, out {:.1} dBV", t.elapsed().as_secs_f64() * 1e3, 10.0 * (y2 / 192000.0).log10());
+    }
+}
 
 // ------------------------------------------------------------------ panel --
 

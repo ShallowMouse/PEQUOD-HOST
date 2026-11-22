@@ -76,66 +76,230 @@ pub fn defaults() -> Vec<f32> {
 
 // -------------------------------------------------------------------- dsp --
 
+use vintage::amp::net::Taper;
+use vintage::circuit::{self, Circuit, Solver};
+
+const C_SENS: usize = 0;
+const C_OUT: usize = 1;
+/// The OTA's bias pin and the 27k feeding it from the sensitivity pot, for the meter.
+const N_ABC: usize = 12;
+const N_IFB: usize = 19;
+
+/// The whole MXR Dyna Comp at the sample rate `fs`.
+///
+/// 2N3904 emitter follower in; the CA3080 with both inputs biased from 470k off the supply
+/// through 1M each, the non-inverting one grounded for audio (15k || 10n, 1u); its output into
+/// 150k || 1n to the 3 V bias. Q2 splits the phase (10k / 10k); each side drives an envelope
+/// detector (10n, 1N4148 clamp, 1M, a 2N3904) that pulls the 150k / 10u envelope node down. Q5
+/// follows that node and feeds the OTA's bias pin through the sensitivity pot and 27k: a feedback
+/// compressor. Out through 50n and 10k to the 50k output pot.
+fn dyna_comp(fs: f64) -> Solver {
+    let q = circuit::N3904;
+    let d = circuit::D1N914;
+    Circuit::new()
+        .input(1, 7e3)
+        .dc(2, 9.0, 5.0)
+        // 3 V bias
+        .r(2, 3, 56e3)
+        .r(3, 0, 27e3)
+        .c(3, 0, 1e-6)
+        // input buffer
+        .r(1, 0, 4.7e6)
+        .c(1, 4, 10e-9)
+        .r(4, 5, 10e3)
+        .r(5, 3, 1e6)
+        .npn(2, 5, 6, q)
+        .r(6, 0, 10e3)
+        // the OTA's inputs
+        .c(6, 7, 1e-6)
+        .r(7, 0, 1e6)
+        .r(8, 0, 1e6)
+        .r(7, 9, 1e3)
+        .r(9, 8, 1e3)
+        .r(2, 9, 470e3)
+        .r(8, 10, 15e3)
+        .c(8, 10, 10e-9)
+        .c(10, 0, 1e-6)
+        // CA3080: + is the grounded side, - takes the signal; output into 150k || 1n to the bias
+        .ota_pin(8, 7, 11, N_ABC, 0)
+        .r(3, 11, 150e3)
+        .c(3, 11, 1e-9)
+        // its output stage runs out of room near the rails
+        .diode(11, 2, d)
+        .diode(0, 11, d)
+        // Q2 phase splitter
+        .r(2, 13, 10e3)
+        .r(14, 0, 10e3)
+        .npn(13, 11, 14, q)
+        // envelope detectors
+        .c(13, 15, 10e-9)
+        .diode(0, 15, d)
+        .r(15, 0, 1e6)
+        .npn(17, 15, 0, q)
+        .c(14, 16, 10e-9)
+        .diode(0, 16, d)
+        .r(16, 0, 1e6)
+        .npn(17, 16, 0, q)
+        .r(2, 17, 150e3)
+        .c(17, 0, 10e-6)
+        // Q5 and the sensitivity pot into the bias pin
+        .npn(2, 17, 18, q)
+        .rheo(18, N_IFB, 500e3, Taper::Linear, C_SENS, 100.0)
+        .r(N_IFB, N_ABC, 27e3)
+        // out
+        .c(14, 20, 50e-9)
+        .r(20, 21, 10e3)
+        .pot(0, 22, 21, 50e3, Taper::Audio, C_OUT)
+        .r(22, 0, 1e6)
+        .output(22)
+        .build(fs)
+}
+
 pub struct Dsp {
     fs: f64,
     v: [f32; NPARAMS],
-    env: f64,
-    top: Vec<Biquad>,
-    hp: Vec<Biquad>,
-    out: Smooth,
+    ckt: [Solver; 2],
+    os: [Oversampler2; 2],
+    dc: [DcBlock; 2],
     inp: Smooth,
+    rest: f64,
+}
+
+impl Dsp {
+    fn controls(&mut self) {
+        for c in self.ckt.iter_mut() {
+            // more sensitivity, less resistance in the bias feed
+            c.set_ctl(C_SENS, 1.0 - self.v[SENSITIVITY] as f64 / 10.0);
+            c.set_ctl(C_OUT, self.v[OUTPUT] as f64 / 10.0);
+        }
+    }
+    fn iabc(c: &Solver) -> f64 {
+        ((c.node(N_IFB) - c.node(N_ABC)) / 27e3).max(1e-12)
+    }
 }
 
 impl VintageDsp for Dsp {
     const METERS: usize = 1;
-    fn new(sample_rate: f32, ch: usize) -> Self {
+    fn new(sample_rate: f32, _ch: usize) -> Self {
         let fs = sample_rate as f64;
         let mut v = [0.0; NPARAMS];
         v.copy_from_slice(&defaults());
-        let n = ch.max(2);
-        let mut t = Biquad::identity();
-        t.set_lowpass(fs, 10000.0, 0.6);
-        let mut h = Biquad::identity();
-        h.set_highpass(fs, 40.0, 0.7);
-        Self { fs, v, env: 0.0, top: vec![t; n], hp: vec![h; n], out: Smooth::new(fs, 20.0, 0.25), inp: Smooth::new(fs, 20.0, 1.0) }
+        let ckt = dyna_comp(fs * 2.0);
+        let mut d = Self { fs, v, ckt: [ckt.clone(), ckt], os: [Oversampler2::new(), Oversampler2::new()], dc: [DcBlock::new(fs), DcBlock::new(fs)], inp: Smooth::new(fs, 20.0, 1.0), rest: 1.0 };
+        d.reset();
+        d
+    }
+    fn latency(&self) -> u32 {
+        OS_LATENCY as u32
     }
     fn reset(&mut self) {
-        self.env = 0.0;
-        self.top.iter_mut().chain(self.hp.iter_mut()).for_each(|b| b.reset());
+        self.controls();
+        for c in 0..2 {
+            self.ckt[c].reset();
+            self.os[c].reset();
+            self.dc[c] = DcBlock::new(self.fs);
+        }
+        self.rest = Self::iabc(&self.ckt[0]);
+        self.inp.snap(db_to_gain(self.v[LEVEL] as f64));
     }
     fn set_params(&mut self, v: &[f32]) {
+        let sens_changed = v[SENSITIVITY] != self.v[SENSITIVITY];
         self.v.copy_from_slice(&v[..NPARAMS]);
-        let o = v[OUTPUT] as f64 / 10.0;
-        self.out.set(o * o * 9.5);
+        self.controls();
+        if sens_changed {
+            // the meter's reference: the bias current with no signal at this setting
+            let mut c = self.ckt[0].clone();
+            c.reset();
+            self.rest = Self::iabc(&c);
+        }
         self.inp.set(db_to_gain(v[LEVEL] as f64));
     }
     fn process(&mut self, chans: &mut [&mut [f32]], meters: &mut [f32]) {
         let n = chans.first().map(|c| c.len()).unwrap_or(0);
-        let sens = self.v[SENSITIVITY] as f64 / 10.0;
-        // sensitivity: the gain in front of the gain cell, so more squash and more noise
-        let pre = db_to_gain(36.0 * sens);
-        let ca = coeff(self.fs, 4.0);
-        let cr = coeff(self.fs, 150.0);
-        let last = self.top.len() - 1;
-        let mut most = 0.0f64;
+        let nch = chans.len().min(2);
         for k in 0..n {
-            let o = self.out.next();
             let gi = self.inp.next();
-            let peak = chans.iter().map(|c| (c[k] as f64).abs()).fold(0.0, f64::max) * pre * gi;
-            let c = if peak > self.env { ca } else { cr };
-            self.env = peak + c * (self.env - peak);
-            // the OTA's gain falls roughly as 1 / level above a small threshold
-            let g = (1.0 + 6.0 * self.env).powf(-0.75);
-            most = most.max(-gain_to_db(g));
-            for (ci, ch) in chans.iter_mut().enumerate() {
-                let j = ci.min(last);
-                let x = ch[k] as f64 * gi * pre * g;
-                let y = (x * 2.5).tanh() / 2.5 + 0.04 * x * x;
-                let y = self.top[j].process(self.hp[j].process(y)) * 0.6;
-                ch[k] = (y * o) as f32;
+            for c in 0..nch {
+                let x = chans[c][k] as f64 * gi;
+                let ckt = &mut self.ckt[c];
+                let y = self.os[c].process(x, |u| ckt.step(&[u]));
+                chans[c][k] = self.dc[c].process(y) as f32;
             }
         }
-        meters[0] = most as f32;
+        // gain reduction: the OTA's gain follows its bias current
+        let mut gr = 0.0f64;
+        for c in 0..nch {
+            gr = gr.max(-gain_to_db(Self::iabc(&self.ckt[c]) / self.rest));
+        }
+        meters[0] = gr.max(0.0) as f32;
+    }
+}
+
+#[cfg(test)]
+mod circuit_tests {
+    use super::*;
+
+    #[test]
+    fn bias_and_compression() {
+        let fs = 96000.0;
+        let mut c = dyna_comp(fs);
+        c.set_ctl(C_SENS, 0.5);
+        c.set_ctl(C_OUT, 1.0);
+        c.reset();
+        let names = [(3, "bias"), (6, "Q1 e"), (7, "ota -"), (8, "ota +"), (11, "ota out"), (13, "Q2 c"), (14, "Q2 e"), (17, "env"), (18, "Q5 e"), (N_ABC, "abc")];
+        for (n, s) in names {
+            eprint!("{s} {:.2}  ", c.node(n));
+        }
+        eprintln!("iabc {:.1} uA", Dsp::iabc(&c) * 1e6);
+        // steady-state output level against input level
+        for sens in [0.0, 0.5, 1.0] {
+            let mut line = format!("sens {sens}:");
+            for a in [0.01, 0.03, 0.1, 0.3, 1.0] {
+                let mut c = dyna_comp(fs);
+                c.set_ctl(C_SENS, 1.0 - sens);
+                c.set_ctl(C_OUT, 1.0);
+                c.reset();
+                let n = (fs * 1.5) as usize;
+                let mut y2 = 0.0;
+                for k in 0..n {
+                    let y = c.step(&[a * (k as f64 * 2.0 * std::f64::consts::PI * 440.0 / fs).sin()]);
+                    if k > n * 2 / 3 {
+                        y2 += y * y;
+                    }
+                }
+                let rms = (y2 / (n / 3) as f64).sqrt();
+                line += &format!("  {:.0} dB in -> {:.1} dBV (iabc {:.0} uA)", 20.0 * (a / 2f64.sqrt()).log10(), 20.0 * rms.log10(), Dsp::iabc(&c) * 1e6);
+            }
+            eprintln!("{line}");
+        }
+        // chord steps against plain Newton, hard-driven at full sensitivity
+        {
+            let mut a = dyna_comp(fs);
+            a.set_ctl(C_SENS, 0.0);
+            a.set_ctl(C_OUT, 1.0);
+            a.reset();
+            let mut b = a.clone();
+            b.chord = false;
+            let (mut e2, mut s2) = (0.0, 0.0);
+            for k in 0..(fs as usize) {
+                let x = 1.0 * (k as f64 * 2.0 * std::f64::consts::PI * 440.0 / fs).sin();
+                let (ya, yb) = (a.step(&[x]), b.step(&[x]));
+                e2 += (ya - yb) * (ya - yb);
+                s2 += yb * yb;
+            }
+            eprintln!("chord vs newton: {:.1} dB", 10.0 * (e2 / s2).log10());
+            assert!(e2 / s2 < 1e-4);
+        }
+        let t = std::time::Instant::now();
+        let mut c = dyna_comp(fs);
+        c.reset();
+        let mut hist = [0usize; 32];
+        for k in 0..96000 {
+            c.step(&[0.2 * (k as f64 * 2.0 * std::f64::consts::PI * 196.0 / fs).sin()]);
+            hist[c.iters.min(31)] += 1;
+        }
+        eprintln!("iterations {:?}", &hist[..12]);
+        eprintln!("1 s at 2x in {:.0} ms, size {:?}", t.elapsed().as_secs_f64() * 1e3, c.size());
     }
 }
 
