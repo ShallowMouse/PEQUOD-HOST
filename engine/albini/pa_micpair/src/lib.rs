@@ -88,6 +88,15 @@ pub enum OutMode {
     StereoALeftBRight,
 }
 
+/// On/off switches are stored as 0/1 (as the released plugin saved them).
+#[derive(Enum, PartialEq, Clone, Copy)]
+pub enum OffOn {
+    #[name = "Off"]
+    Off,
+    #[name = "On"]
+    On,
+}
+
 #[derive(Params)]
 pub struct P {
     #[persist = "editor-state-v2"]
@@ -111,9 +120,9 @@ pub struct P {
     #[id = "out_mode"]
     pub out_mode: EnumParam<OutMode>,
     #[id = "polarity"]
-    pub polarity: BoolParam,
+    pub polarity: EnumParam<OffOn>,
     #[id = "align"]
-    pub align: BoolParam,
+    pub align: EnumParam<OffOn>,
     #[id = "output"]
     pub output: FloatParam,
 }
@@ -131,8 +140,8 @@ impl Default for P {
             angle_b: FloatParam::new("Mic B Angle", 0.0, FloatRange::Linear { min: 0.0, max: 90.0 }).with_step_size(1.0).with_unit("°"),  // texts '0' .. '45' .. '90'
             blend: pct("Blend A-B", 0.5),
             out_mode: EnumParam::new("Output", OutMode::MonoBlend),
-            polarity: BoolParam::new("Mic B Polarity Flip", false),
-            align: BoolParam::new("Time Align", false),
+            polarity: EnumParam::new("Mic B Polarity Flip", OffOn::Off),
+            align: EnumParam::new("Time Align", OffOn::Off),
             output: db("Output", 0.0, -18.0, 18.0),
         }
     }

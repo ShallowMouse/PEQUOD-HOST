@@ -3710,11 +3710,13 @@ dependencies = [
  "am_ts808",
  "am_vibe",
  "amp_ac100",
+ "amp_ac100_bass",
  "amp_ac30",
  "amp_ac50",
  "amp_bassman",
  "amp_deluxe",
  "amp_showman",
+ "amp_t60",
  "amp_twin",
  "amp_ul730",
  "b182_barker",
@@ -3825,6 +3827,15 @@ dependencies = [
  "jf_studer",
  "jf_synth",
  "jf_tape",
+ "jm_clavioline",
+ "jm_echo",
+ "jm_eq",
+ "jm_flanger",
+ "jm_limiter",
+ "jm_mixer",
+ "jm_rooms",
+ "jm_spring",
+ "jm_tape",
  "kb_chamberlin",
  "kb_clav",
  "kb_continental",
@@ -3868,6 +3879,42 @@ dependencies = [
  "ob_prophet",
  "ob_rooms",
  "ob_vocal",
+ "pa_ampex351",
+ "pa_bassman",
+ "pa_gate",
+ "pa_ivp",
+ "pa_jtm45",
+ "pa_micpair",
+ "pa_neotek",
+ "pa_percolator",
+ "pa_rooms",
+ "pa_tape",
+ "pa_tr606",
+ "pa_traynor",
+ "pf_bigmuff",
+ "pf_ce2",
+ "pf_ddl",
+ "pf_dr103",
+ "pf_dr103_bass",
+ "pf_dynacomp",
+ "pf_emt_plate",
+ "pf_farfisa",
+ "pf_fuzzface",
+ "pf_hammond",
+ "pf_mistress",
+ "pf_pbass",
+ "pf_phase90",
+ "pf_powerboost",
+ "pf_rotary",
+ "pf_selmer",
+ "pf_spaces",
+ "pf_talkbox",
+ "pf_tape",
+ "pf_tg",
+ "pf_twin",
+ "pf_univibe",
+ "pf_vcs3",
+ "pf_whammy",
  "plate_reverb",
  "pq_evenhand",
  "pq_expander",
@@ -3975,6 +4022,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pf_dr103"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "pf_dr103_bass"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "pf_dynacomp"
 version = "1.0.1"
 dependencies = [
@@ -3991,7 +4054,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pf_farfisa"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "pf_fuzzface"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "pf_hammond"
 version = "1.0.1"
 dependencies = [
  "nih_plug",
@@ -4071,6 +4150,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pf_tg"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "pf_twin"
 version = "1.0.1"
 dependencies = [
@@ -4080,6 +4167,14 @@ dependencies = [
 
 [[package]]
 name = "pf_univibe"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "pf_vcs3"
 version = "1.0.1"
 dependencies = [
  "nih_plug",
@@ -4238,9 +4333,13 @@ dependencies = [
  "pf_bigmuff",
  "pf_ce2",
  "pf_ddl",
+ "pf_dr103",
+ "pf_dr103_bass",
  "pf_dynacomp",
  "pf_emt_plate",
+ "pf_farfisa",
  "pf_fuzzface",
+ "pf_hammond",
  "pf_mistress",
  "pf_pbass",
  "pf_phase90",
@@ -4250,8 +4349,10 @@ dependencies = [
  "pf_spaces",
  "pf_talkbox",
  "pf_tape",
+ "pf_tg",
  "pf_twin",
  "pf_univibe",
+ "pf_vcs3",
  "pf_whammy",
  "vintage",
 ]

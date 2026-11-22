@@ -8,7 +8,7 @@ for m in members:
     for d in sorted(glob.glob(f'{ROOT}/{m}/*/Cargo.toml')):
         name = re.search(r'^name = "([^"]+)"', open(d).read(), re.M).group(1)
         lib = os.path.join(os.path.dirname(d), 'src/lib.rs')
-        if 'vintage_plugin!' not in open(lib).read():
+        if not os.path.exists(lib) or 'vintage_plugin!' not in open(lib).read():
             continue
         crates.append((name, os.path.relpath(os.path.dirname(d), f'{ROOT}/pequod_engine')))
 deps = '\n'.join(f'{n} = {{ path = "{p}" }}' for n, p in crates)
