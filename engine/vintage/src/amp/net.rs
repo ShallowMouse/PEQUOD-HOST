@@ -373,6 +373,8 @@ pub const AB763_DELUXE: StackValues = StackValues { r1: 250e3, r2: 250e3, r3: 6.
 pub const AB763_TWIN: StackValues = StackValues { r1: 250e3, r2: 250e3, r3: 10e3, r4: 100e3, c1: 250e-12, c2: 0.1e-6, c3: 0.047e-6 };
 pub const AA270_TWIN: StackValues = StackValues { r1: 250e3, r2: 250e3, r3: 10e3, r4: 100e3, c1: 120e-12, c2: 0.1e-6, c3: 0.047e-6 };
 pub const BASSMAN_6G6: StackValues = StackValues { r1: 250e3, r2: 1e6, r3: 10e3, r4: 100e3, c1: 250e-12, c2: 0.1e-6, c3: 0.047e-6 };
+/// Hiwatt DR103: 220k treble with 100 pF, 470k bass, 22k middle (here in the FMV arrangement).
+pub const HIWATT_DR103: StackValues = StackValues { r1: 220e3, r2: 470e3, r3: 22e3, r4: 100e3, c1: 100e-12, c2: 22e-9, c3: 22e-9 };
 pub const VOX_TB: StackValues = StackValues { r1: 1e6, r2: 1e6, r3: 10e3, r4: 100e3, c1: 50e-12, c2: 22e-9, c3: 22e-9 };
 
 #[cfg(test)]

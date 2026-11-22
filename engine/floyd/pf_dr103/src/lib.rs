@@ -163,8 +163,7 @@ fn rot(v: f32) -> f64 {
 
 impl AmpModel for Model {
     fn spec() -> AmpSpec {
-        // the circuit that measured closest to the released plugin
-        specs::ac50()
+        specs::hiwatt_dr103()
     }
     fn cab() -> cab::CabSpec {
         cab::MAGNATONE_1X15_HORN
@@ -182,7 +181,8 @@ impl AmpModel for Model {
         Settings {
             controls: Controls { volume: (vol * (0.55 + 0.45 * m)).min(1.0), treble: rot(v[TREBLE]), bass: rot(v[BASS]), middle: rot(v[MIDDLE]), cut: (1.0 - rot(v[PRESENCE])) * 0.6, bright, alt: false },
             input_db: v[INPUT],
-            output_db: v[OUTPUT] + 20.0 * (0.3 + 0.7 * m).log10() as f32,
+            // + 5 dB: the Hiwatt circuit's clean level against the plugin's reference
+            output_db: v[OUTPUT] + 5.0 + 20.0 * (0.3 + 0.7 * m).log10() as f32,
             cab: (v[CAB].round() as usize).min(3),
             mic: v[MIC],
         }

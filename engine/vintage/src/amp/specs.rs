@@ -422,6 +422,50 @@ pub fn eh150() -> AmpSpec {
     }
 }
 
+/// Hiwatt DR103 Custom 100 (1970s; the tone-stack pot values from the factory parts list,
+/// the rest typical of the amp): ECC83 preamp into the Hiwatt stack (treble 220k with 100 pF,
+/// bass 470k, middle 22k), ECC83 long-tailed pair, four EL34s fixed bias on a silicon-rectified
+/// supply, Partridge output transformer (wide and stiff), negative feedback with presence.
+pub fn hiwatt_dr103() -> AmpSpec {
+    let raa = 1700.0;
+    AmpSpec {
+        pre: PreSpec::Fender(FenderPreSpec {
+            v1: ECC83,
+            vb: 300.0,
+            stack: net::HIWATT_DR103,
+            fixed_mid: false,
+            treble_taper: Taper::Audio,
+            bass_taper: Taper::Audio,
+            // the Brilliant channel's lighter coupling, as a treble lift across the volume
+            bright_cap: 100e-12,
+            bright_switch: true,
+            v2_rk: 1.5e3,
+            v2_ck: 25e-6,
+            mix_cap: 0.047e-6,
+        }),
+        pi: PiSpec { valve: ECC83, vb: 420.0, ra1: 82e3, ra2: 100e3, rtail: 10e3, rbias: 1e3, cut: None },
+        power: PowerSpec {
+            valve: EL34,
+            per_side: 2,
+            b_plus: 500.0,
+            screen_ratio: 0.93,
+            ultralinear: 0.0,
+            raa,
+            bias: PowerBias::Fixed { idle_ma: 35.0 },
+            r_supply: 30.0,
+            c_supply: 100e-6,
+            cc: 0.1e-6,
+            rg: 220e3,
+            r_stop: 1.5e3,
+        },
+        alt_rk: None,
+        nfb: 0.06,
+        ot: TransformerSpec { f_low: 20.0, f_sat: 25.0, v_full: v_full(100.0, raa), f_high: 22000.0, q_high: 0.7, ratio: ratio(8.0, raa) },
+        speaker: SpeakerSpec { f_res: 75.0, z_peak: 6.0, q_res: 2.5, f_coil: 2200.0 },
+        current_drive: 0.85,
+    }
+}
+
 pub fn all() -> Vec<(&'static str, AmpSpec)> {
     vec![
         ("AC30 Top Boost", ac30()),
@@ -436,5 +480,6 @@ pub fn all() -> Vec<(&'static str, AmpSpec)> {
         ("DC30", matchless_dc30()),
         ("Magnatone", magnatone_custom()),
         ("EH-150", eh150()),
+        ("DR103", hiwatt_dr103()),
     ]
 }
