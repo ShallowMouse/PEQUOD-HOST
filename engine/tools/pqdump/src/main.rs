@@ -59,10 +59,17 @@ fn render(d: &Descriptor, job: &str) {
 }
 fn main() {
     let all: Vec<fn() -> Descriptor> = vec![
+        pa_ampex351::pequod_native,
         pa_bassman::pequod_native,
+        pa_gate::pequod_native,
+        pa_ivp::pequod_native,
         pa_jtm45::pequod_native,
+        pa_micpair::pequod_native,
+        pa_neotek::pequod_native,
+        pa_percolator::pequod_native,
         pa_rooms::pequod_native,
         pa_tape::pequod_native,
+        pa_tr606::pequod_native,
         pa_traynor::pequod_native,
         pf_bigmuff::pequod_native,
         pf_ce2::pequod_native,
@@ -82,7 +89,14 @@ fn main() {
         pf_twin::pequod_native,
         pf_univibe::pequod_native,
         pf_whammy::pequod_native,
+        jm_clavioline::pequod_native,
+        jm_echo::pequod_native,
+        jm_eq::pequod_native,
+        jm_flanger::pequod_native,
+        jm_limiter::pequod_native,
+        jm_mixer::pequod_native,
         jm_rooms::pequod_native,
+        jm_spring::pequod_native,
         jm_tape::pequod_native,
         amp_ac100_bass::pequod_native,
         amp_t60::pequod_native

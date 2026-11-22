@@ -2316,7 +2316,63 @@ dependencies = [
 ]
 
 [[package]]
+name = "jm_clavioline"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "jm_echo"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "jm_eq"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "jm_flanger"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "jm_limiter"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "jm_mixer"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "jm_rooms"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "jm_spring"
 version = "1.0.1"
 dependencies = [
  "nih_plug",
@@ -3500,6 +3556,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pa_ampex351"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "pa_bassman"
 version = "1.0.1"
 dependencies = [
@@ -3508,7 +3572,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "pa_gate"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "pa_ivp"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "pa_jtm45"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "pa_micpair"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "pa_neotek"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "pa_percolator"
 version = "1.0.1"
 dependencies = [
  "nih_plug",
@@ -3525,6 +3629,14 @@ dependencies = [
 
 [[package]]
 name = "pa_tape"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "pa_tr606"
 version = "1.0.1"
 dependencies = [
  "nih_plug",
@@ -4102,12 +4214,26 @@ version = "1.0.1"
 dependencies = [
  "amp_ac100_bass",
  "amp_t60",
+ "jm_clavioline",
+ "jm_echo",
+ "jm_eq",
+ "jm_flanger",
+ "jm_limiter",
+ "jm_mixer",
  "jm_rooms",
+ "jm_spring",
  "jm_tape",
+ "pa_ampex351",
  "pa_bassman",
+ "pa_gate",
+ "pa_ivp",
  "pa_jtm45",
+ "pa_micpair",
+ "pa_neotek",
+ "pa_percolator",
  "pa_rooms",
  "pa_tape",
+ "pa_tr606",
  "pa_traynor",
  "pf_bigmuff",
  "pf_ce2",

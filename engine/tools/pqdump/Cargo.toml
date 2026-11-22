@@ -5,10 +5,17 @@ edition.workspace = true
 
 [dependencies]
 vintage = { workspace = true, features = ["engine"] }
+pa_ampex351 = { path = "../../albini/pa_ampex351" }
 pa_bassman = { path = "../../albini/pa_bassman" }
+pa_gate = { path = "../../albini/pa_gate" }
+pa_ivp = { path = "../../albini/pa_ivp" }
 pa_jtm45 = { path = "../../albini/pa_jtm45" }
+pa_micpair = { path = "../../albini/pa_micpair" }
+pa_neotek = { path = "../../albini/pa_neotek" }
+pa_percolator = { path = "../../albini/pa_percolator" }
 pa_rooms = { path = "../../albini/pa_rooms" }
 pa_tape = { path = "../../albini/pa_tape" }
+pa_tr606 = { path = "../../albini/pa_tr606" }
 pa_traynor = { path = "../../albini/pa_traynor" }
 pf_bigmuff = { path = "../../floyd/pf_bigmuff" }
 pf_ce2 = { path = "../../floyd/pf_ce2" }
@@ -28,7 +35,14 @@ pf_tape = { path = "../../floyd/pf_tape" }
 pf_twin = { path = "../../floyd/pf_twin" }
 pf_univibe = { path = "../../floyd/pf_univibe" }
 pf_whammy = { path = "../../floyd/pf_whammy" }
+jm_clavioline = { path = "../../meek/jm_clavioline" }
+jm_echo = { path = "../../meek/jm_echo" }
+jm_eq = { path = "../../meek/jm_eq" }
+jm_flanger = { path = "../../meek/jm_flanger" }
+jm_limiter = { path = "../../meek/jm_limiter" }
+jm_mixer = { path = "../../meek/jm_mixer" }
 jm_rooms = { path = "../../meek/jm_rooms" }
+jm_spring = { path = "../../meek/jm_spring" }
 jm_tape = { path = "../../meek/jm_tape" }
 amp_ac100_bass = { path = "../../plugins/amp_ac100_bass" }
 amp_t60 = { path = "../../plugins/amp_t60" }
