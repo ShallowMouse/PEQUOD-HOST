@@ -93,12 +93,19 @@ pub fn defaults() -> Vec<f32> {
 
 // -------------------------------------------------------------------- dsp --
 
-use vintage::fx::Bbd;
+use vintage::fx::ClockedBbd;
+
+/// SAD1024: two 512-stage halves, run in series.
+const STAGES: usize = 1024;
 
 pub struct Dsp {
     fs: f64,
     v: [f32; NPARAMS],
-    bbd: [Bbd; 2],
+    bbd: [ClockedBbd; 2],
+    os: [Oversampler; 2],
+    pre: [[Biquad; 2]; 2],
+    post: [[Biquad; 2]; 2],
+    dry: [FixedDelay; 2],
     fb: [f64; 2],
     ph: f64,
     hp: [Biquad; 2],
@@ -112,18 +119,26 @@ impl VintageDsp for Dsp {
         let fs = sample_rate as f64;
         let mut v = [0.0; NPARAMS];
         v.copy_from_slice(&defaults());
-        let mk = || {
-            let mut b = Bbd::new(fs, 20.0);
-            b.set_bandwidth(8000.0);
-            b
-        };
+        let ofs = fs * OS as f64;
+        let mut f = [Biquad::identity(); 2];
+        f[0].set_lowpass(ofs, 8000.0, 0.54);
+        f[1].set_lowpass(ofs, 8000.0, 1.31);
+        let mk = || ClockedBbd::new(STAGES, ofs);
         let mut hp = Biquad::identity();
         hp.set_highpass(fs, 20.0, 0.7);
-        Self { fs, v, bbd: [mk(), mk()], fb: [0.0; 2], ph: 0.25, hp: [hp; 2], out: Smooth::new(fs, 20.0, 1.0), pos: Smooth::new(fs, 30.0, 0.5) }
+        Self { fs, v, bbd: [mk(), mk()], os: [Oversampler::new(), Oversampler::new()], pre: [f; 2], post: [f; 2], dry: [FixedDelay::new(OS_LATENCY), FixedDelay::new(OS_LATENCY)], fb: [0.0; 2], ph: 0.25, hp: [hp; 2], out: Smooth::new(fs, 20.0, 1.0), pos: Smooth::new(fs, 30.0, 0.5) }
+    }
+    fn latency(&self) -> u32 {
+        OS_LATENCY as u32
     }
     fn reset(&mut self) {
         for c in 0..2 {
             self.bbd[c].reset();
+            self.os[c].reset();
+            self.dry[c].reset();
+            for b in self.pre[c].iter_mut().chain(self.post[c].iter_mut()) {
+                b.reset();
+            }
             self.hp[c].reset();
             self.fb[c] = 0.0;
         }
@@ -154,8 +169,19 @@ impl VintageDsp for Dsp {
             let o = self.out.next();
             for c in 0..nch {
                 let x = self.hp[c].process(chans[c][k] as f64);
-                let w = self.bbd[c].process(x + fbk * self.fb[c], d.min(19.0 * ms));
-                self.fb[c] = w.clamp(-2.0, 2.0);
+                // the delay is set by the clock: stages / (2 f)
+                let f_clk = self.bbd[c].clock_for(d.min(19.0 * ms) / self.fs);
+                let (bbd, fpre, fpost, fb) = (&mut self.bbd[c], &mut self.pre[c], &mut self.post[c], &mut self.fb[c]);
+                // Color: the output fed back round the chip (inside the oversampled loop, so the
+                // comb sits where the clock puts it)
+                let w = self.os[c].process(x, |u| {
+                    let a = cascade(fpre, u + fbk * *fb);
+                    let d = bbd.process((a * 0.8).tanh() / 0.8, f_clk);
+                    let y = cascade(fpost, d);
+                    *fb = y.clamp(-2.0, 2.0);
+                    y
+                });
+                let x = self.dry[c].process(x);
                 chans[c][k] = ((x + w) * 0.85 * o) as f32;
             }
         }

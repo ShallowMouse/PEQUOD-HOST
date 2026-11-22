@@ -76,14 +76,23 @@ pub fn defaults() -> Vec<f32> {
 
 // -------------------------------------------------------------------- dsp --
 
-use vintage::fx::Bbd;
+use vintage::fx::ClockedBbd;
+
+/// MN3007: 1024 stages.
+const STAGES: usize = 1024;
+/// The delay at the top of the clock's sweep.
+const BASE_MS: f64 = 5.0;
 
 pub struct Dsp {
     fs: f64,
     v: [f32; NPARAMS],
-    bbd: Bbd,
+    bbd: ClockedBbd,
+    os: Oversampler,
+    pre: [Biquad; 2],
+    post: [Biquad; 2],
     ph: f64,
     hp: Biquad,
+    dry: FixedDelay,
     out: Smooth,
 }
 
@@ -91,17 +100,29 @@ impl VintageDsp for Dsp {
     const METERS: usize = 1;
     fn new(sample_rate: f32, _ch: usize) -> Self {
         let fs = sample_rate as f64;
+        let ofs = fs * OS as f64;
         let mut v = [0.0; NPARAMS];
         v.copy_from_slice(&defaults());
-        let mut bbd = Bbd::new(fs, 25.0);
-        bbd.set_bandwidth(7000.0);
+        // the input and output filters around the chip: two 2-pole transistor low-passes each side
+        let mut pre = [Biquad::identity(); 2];
+        pre[0].set_lowpass(ofs, 7000.0, 0.54);
+        pre[1].set_lowpass(ofs, 7000.0, 1.31);
+        let post = pre;
         let mut hp = Biquad::identity();
         hp.set_highpass(fs, 20.0, 0.7);
-        Self { fs, v, bbd, ph: 0.0, hp, out: Smooth::new(fs, 20.0, 1.0) }
+        Self { fs, v, bbd: ClockedBbd::new(STAGES, ofs), os: Oversampler::new(), pre, post, ph: 0.0, hp, dry: FixedDelay::new(OS_LATENCY), out: Smooth::new(fs, 20.0, 1.0) }
+    }
+    fn latency(&self) -> u32 {
+        OS_LATENCY as u32
     }
     fn reset(&mut self) {
         self.bbd.reset();
+        self.os.reset();
         self.hp.reset();
+        self.dry.reset();
+        for b in self.pre.iter_mut().chain(self.post.iter_mut()) {
+            b.reset();
+        }
         self.ph = 0.0;
     }
     fn set_params(&mut self, v: &[f32]) {
@@ -112,22 +133,32 @@ impl VintageDsp for Dsp {
         let n = chans.first().map(|c| c.len()).unwrap_or(0);
         let rate = self.v[RATE] as f64;
         let depth_ms = 0.2 + 3.0 * self.v[DEPTH] as f64;
-        let base = 5.0 * 0.001 * self.fs;
+        // the MN3101's clock swings between these; the delay follows 1 / clock
+        let f_hi = self.bbd.clock_for(BASE_MS * 1e-3);
+        let f_lo = self.bbd.clock_for((BASE_MS + depth_ms) * 1e-3);
         let nch = chans.len();
         let mut m = 0.0;
         for k in 0..n {
             self.ph = (self.ph + rate / self.fs).fract();
-            // the CE-2's LFO: a triangle, a little rounded
+            // the CE-2's LFO: a triangle into the clock's VCO
             let tri = 1.0 - 4.0 * (self.ph - 0.5).abs();
             m = tri;
+            let f_clk = f_hi + (f_lo - f_hi) * 0.5 * (1.0 + tri);
             let mut x = 0.0;
             for c in chans.iter() {
                 x += c[k] as f64;
             }
             x /= nch.max(1) as f64;
             let pre = self.hp.process(x);
-            let w = self.bbd.process(pre, base + depth_ms * 0.0005 * self.fs * (1.0 + tri));
-            let y = (pre + w) * 0.7 * self.out.next();
+            let (bbd, fpre, fpost) = (&mut self.bbd, &mut self.pre, &mut self.post);
+            let w = self.os.process(pre, |u| {
+                // the chip clips softly near its rails
+                let a = cascade(fpre, u);
+                let d = bbd.process((a * 0.8).tanh() / 0.8, f_clk);
+                cascade(fpost, d)
+            });
+            // the dry path is delayed to line up with the oversampled wet one
+            let y = (self.dry.process(pre) + w) * 0.7 * self.out.next();
             for c in chans.iter_mut() {
                 c[k] = y as f32;
             }
@@ -135,6 +166,7 @@ impl VintageDsp for Dsp {
         meters[0] = (0.5 + 0.5 * m) as f32;
     }
 }
+
 
 // ------------------------------------------------------------------ panel --
 

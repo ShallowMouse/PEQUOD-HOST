@@ -76,6 +76,10 @@ pub fn defaults() -> Vec<f32> {
 
 // -------------------------------------------------------------------- dsp --
 
+/// Output scaling from the pedal's volts to the plugin's level: the hardware's audio-taper volume
+/// sits about 20 dB down at noon, and this brings the default setting to the expected level.
+const MAKEUP: f64 = 11.8850; // +21.5 dB
+
 use vintage::amp::net::Taper;
 use vintage::circuit::{self, Circuit, Solver};
 
@@ -223,7 +227,7 @@ impl VintageDsp for Dsp {
                 let x = chans[c][k] as f64 * gi;
                 let ckt = &mut self.ckt[c];
                 let y = self.os[c].process(x, |u| ckt.step(&[u]));
-                chans[c][k] = self.dc[c].process(y) as f32;
+                chans[c][k] = (self.dc[c].process(y) * MAKEUP) as f32;
             }
         }
         // gain reduction: the OTA's gain follows its bias current

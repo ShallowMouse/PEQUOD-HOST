@@ -90,6 +90,58 @@ impl Bbd {
     }
 }
 
+/// A bucket-brigade chip run by its clock: `stages` buckets hold `stages / 2` samples, taken at
+/// the clock rate, so the delay is stages / (2 f_clk) and moves with the clock exactly as the chip's
+/// does. The input is sampled at each tick (interpolated between host samples), and the output is
+/// held between ticks, so a low clock aliases and images like the hardware; the chip's own filters
+/// (pre and post) belong around it, at a rate well above the audio.
+#[derive(Clone)]
+pub struct ClockedBbd {
+    fifo: Vec<f64>,
+    pos: usize,
+    phase: f64,
+    hold: f64,
+    prev: f64,
+    fs: f64,
+    /// how much of each bucket's charge is lost per stage (charge-transfer inefficiency)
+    loss: f64,
+}
+
+impl ClockedBbd {
+    pub fn new(stages: usize, fs: f64) -> Self {
+        Self { fifo: vec![0.0; (stages / 2).max(1)], pos: 0, phase: 0.0, hold: 0.0, prev: 0.0, fs, loss: 0.0 }
+    }
+    pub fn reset(&mut self) {
+        self.fifo.iter_mut().for_each(|v| *v = 0.0);
+        self.pos = 0;
+        self.phase = 0.0;
+        self.hold = 0.0;
+        self.prev = 0.0;
+    }
+    /// The clock that gives `seconds` of delay.
+    pub fn clock_for(&self, seconds: f64) -> f64 {
+        self.fifo.len() as f64 / seconds.max(1e-6)
+    }
+    /// One host sample in, with the clock at `f_clk` Hz; returns the held output.
+    #[inline]
+    pub fn process(&mut self, x: f64, f_clk: f64) -> f64 {
+        let step = (f_clk / self.fs).max(1e-6);
+        self.phase += step;
+        let n = self.fifo.len();
+        while self.phase >= 1.0 {
+            self.phase -= 1.0;
+            // the tick happened `phase / step` of a sample ago
+            let back = (self.phase / step).min(1.0);
+            let xt = x - back * (x - self.prev);
+            self.hold = self.fifo[self.pos] * (1.0 - self.loss);
+            self.fifo[self.pos] = xt;
+            self.pos = if self.pos + 1 == n { 0 } else { self.pos + 1 };
+        }
+        self.prev = x;
+        self.hold
+    }
+}
+
 /// 2:1 compander (dbx/NE570-like) around a noisy path: `encode` before,
 /// `decode` after, with the decoder tracking the encoder's control slowly
 /// enough to "breathe" a little as the hardware did.
