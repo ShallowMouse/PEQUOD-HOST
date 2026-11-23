@@ -487,9 +487,9 @@ void HeaderBar::paint (juce::Graphics& g)
     partui::drawBar (g, getLocalBounds(), Pequod::Colours::mustard);
     if (! showWordmark) return;
    #if defined (IRVING_LOOK) && IRVING_LOOK
-    partui::drawWordmark (g, wordmarkArea, "IRVING", "GUITAR RIG", Pequod::Colours::mustard, Pequod::heading (28.0f));    // (its name inside MELVILLE)
+    partui::drawWordmark (g, wordmarkArea, "IRVING", "GUITAR RIG", Pequod::Colours::mustard, Pequod::heading (30.0f));    // (its name inside MELVILLE)
    #else
-    partui::drawWordmark (g, wordmarkArea, "PEQUOD", "HOST", Pequod::Colours::mustard, Pequod::heading (28.0f));
+    partui::drawWordmark (g, wordmarkArea, "PEQUOD", "HOST", Pequod::Colours::mustard, Pequod::heading (30.0f));
    #endif
 }
 
@@ -501,14 +501,14 @@ void HeaderBar::resized()
     // Widths per size: normal, compact; the wordmark goes last when even compact is too wide.
     struct Sizes { int cpu, controller, gap, tuner, tap, tempo, wordmark, update; };
     const int tapW = tapButton.isVisible() ? 1 : 0;
-    const Sizes normal  { 104, 126, 10, 176, 50 * tapW, 124, 132, 150 };
-    const Sizes compact {  78, 112,  6, 140, 44 * tapW, 108, 132, 112 };
+    const Sizes normal  { 104, 126, 10, 176, 50 * tapW, 124, 200, 150 };
+    const Sizes compact {  78, 112,  6, 140, 44 * tapW, 108, 200, 112 };
 
     auto needed = [&] (const Sizes& z, bool wordmark)
     {
         int w = 66 + 6 + 66 + 8 + z.cpu + 8 + partui::keyWidth + 4 + z.controller + 4 + partui::keyWidth + z.gap + 66 + 4 + z.tuner + z.gap
               + partui::keyWidth + z.gap + z.tap + 4 + z.tempo + 12;
-        w += (wordmark ? z.wordmark + 8 : 0) + (updateButton.isVisible() ? z.update + 8 : 0);
+        w += (wordmark ? z.wordmark : 0) + (updateButton.isVisible() ? z.update + 8 : 0);
         w += 30 + 4 + 4 + 30 + 8 + 3 * (partui::keyWidth + 4);   // < > INIT SAVE SAVE AS
         return w;
     };
@@ -551,8 +551,10 @@ void HeaderBar::resized()
     r.removeFromRight (12);
 
     // Left-hand block: wordmark, preset navigation (preset name takes the remaining space)
-    wordmarkArea = showWordmark ? r.removeFromLeft (z.wordmark) : juce::Rectangle<int>();
-    if (showWordmark) r.removeFromLeft (8);
+    // the name where every part has it: 18 in, centred in the whole bar, and what follows it
+    // starting where the other parts' status lines do (214 in)
+    if (showWordmark) r.removeFromLeft (z.wordmark);
+    wordmarkArea = showWordmark ? juce::Rectangle<int> (18, 0, 190, getHeight()) : juce::Rectangle<int>();
     if (updateButton.isVisible())
     {
         updateButton.setBounds (row (r.removeFromLeft (z.update)));
