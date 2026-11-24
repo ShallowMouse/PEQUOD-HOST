@@ -282,7 +282,7 @@ impl VintageDsp for Dsp {
         let vdepth = if p[VIBHEAVY] >= 0.5 { 32.0 } else { 14.0 };
         let vol = db_to_gain(p[VOLUME] as f64);
         // the key contacts: on in a couple of milliseconds, off as fast
-        let key_c = coeff(fs, 1.5);
+        let key_c = 1.0 - coeff(fs, 1.5);
         let mut peak = 0.0f64;
         for k in 0..n {
             // vibrato bends the top-octave oscillators, so every key moves together; the phase is

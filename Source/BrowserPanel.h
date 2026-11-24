@@ -4,6 +4,7 @@
 #include "PequodLookAndFeel.h"
 #include "PresetLibrary.h"
 #include "PluginTags.h"
+#include "Favourites.h"
 
 //==============================================================================
 /** Left-hand browser: PRESETS / PLUGINS tabs, search, list. Plugins drag into the rack. */
@@ -24,6 +25,10 @@ public:
     void setGrouping (Grouping);
     Grouping getGrouping() const { return grouping; }
     std::function<void (Grouping)> onGroupingChanged;
+
+    /** FAVOURITES: a filter over either grouping (only the starred plugins). The list is IRVING's own. */
+    void setFavourites (const juce::String& saved, bool onlyFavourites);
+    std::function<void (const juce::String& saved, bool onlyFavourites)> onFavouritesChanged;
 
     std::function<void (const juce::PluginDescription&)> onAddPlugin;
     std::function<void (const juce::File&)> onLoadPreset;
@@ -47,6 +52,7 @@ private:
         juce::File file;
         juce::String bank;          // bank header rows
         juce::Colour colour;        // plugin rows and group headers: the function's colour
+        bool favourite = false;
     };
 
     HostEngine& engine;
@@ -60,6 +66,10 @@ private:
     juce::TextEditor search;
     juce::TextButton newBankButton { "+ BANK" };
     juce::TextButton byFunctionButton { "BY FUNCTION" }, byCollectionButton { "BY COLLECTION" };
+    juce::TextButton favouritesButton { "FAVOURITES" };
+    Favourites favourites;
+    bool favouritesOnly = false;
+    void toggleFavourite (int pluginIndex);
     juce::ListBox list { "browser", this };
     std::vector<Row> rows;
 

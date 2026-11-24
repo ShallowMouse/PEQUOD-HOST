@@ -217,7 +217,7 @@ impl VintageDsp for Dsp {
         let meg_ms = if self.accented { 200.0 } else { 200.0 * 10f64.powf(decay) };
         let meg_k = (-6.9 / (meg_ms * 0.001 * fs)).exp();
         // the amp envelope: a fast rise, held while the key is down (with a slow sag), fast off
-        let veg_up = coeff(fs, 3.0);
+        let veg_up = 1.0 - coeff(fs, 3.0);
         let veg_hold = (-1.0 / (3.0 * fs)).exp();
         let veg_off = coeff(fs, 8.0);
         // the accent sweep: its capacitor charges with each accented note and drains slowly
@@ -246,7 +246,7 @@ impl VintageDsp for Dsp {
             if self.gate {
                 self.veg = if self.veg < 0.98 { self.veg + (1.0 - self.veg) * veg_up } else { self.veg * veg_hold };
             } else {
-                self.veg *= 1.0 - veg_off;
+                self.veg *= veg_off;
             }
             self.accent_env *= acc_k;
             let acc = if self.accented { accent } else { 0.0 };

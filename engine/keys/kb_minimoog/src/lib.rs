@@ -393,10 +393,12 @@ impl VintageDsp for Dsp {
         let amount = p[CONTOUR] as f64 / 10.0 * 5.0; // octaves at full contour
         let track = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0][st(KBD, 3.0)];
         let ms = |i: usize| p[i].max(1.0) as f64;
-        let (fa, fd, fsus) = (coeff(fs, ms(FA) / 2.2), coeff(fs, ms(FD) / 2.2), p[FS] as f64 / 10.0);
-        let (la, ld, lsus) = (coeff(fs, ms(LA) / 2.2), coeff(fs, ms(LD) / 2.2), p[LS] as f64 / 10.0);
+        // per-sample rates of the contours' RC segments (1 - the pole)
+        let rt = |t: f64| 1.0 - coeff(fs, t / 2.2);
+        let (fa, fd, fsus) = (rt(ms(FA)), rt(ms(FD)), p[FS] as f64 / 10.0);
+        let (la, ld, lsus) = (rt(ms(LA)), rt(ms(LD)), p[LS] as f64 / 10.0);
         let decay_sw = p[DECAYSW] >= 0.5;
-        let (fr, lr) = if decay_sw { (fd, ld) } else { (coeff(fs, 8.0), coeff(fs, 8.0)) };
+        let (fr, lr) = if decay_sw { (fd, ld) } else { (rt(8.0), rt(8.0)) };
         let vol = db_to_gain(p[VOLUME] as f64);
         let ref_f = |note: f64| 440.0 * 2f64.powf((note - 69.0) / 12.0);
         let mut peak = 0.0f64;

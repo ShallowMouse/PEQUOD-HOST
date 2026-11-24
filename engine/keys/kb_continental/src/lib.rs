@@ -195,7 +195,7 @@ impl VintageDsp for Dsp {
         let (b16, b8, b4, biv) = (bar(D16), bar(D8), bar(D4), bar(DIV));
         let vib = p[VIB] >= 0.5;
         let vol = db_to_gain(p[VOLUME] as f64);
-        let key_c = coeff(fs, 1.2);
+        let key_c = 1.0 - coeff(fs, 1.2);
         let mut peak = 0.0f64;
         for k in 0..n {
             // the vibrato: about 6.5 Hz, bending every oscillator together

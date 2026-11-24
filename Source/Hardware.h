@@ -49,9 +49,22 @@ namespace Pequod::hw
         g.drawHorizontalLine ((int) r.getBottom() - 1, r.getX() + corner, r.getRight() - corner);
     }
 
-    /** A slotted pan-head screw: chrome, with a shadow. */
-    inline void screw (juce::Graphics& g, juce::Point<float> c, float rad, float angle = 0.6f)
+    /** How far a screw's slot is turned: as random as screws done up by hand, but the same each time
+        that screw is drawn (from where it is and a seed: a unit's own, so no two units match). */
+    inline float screwTurn (juce::Point<float> c, float seed = 0.0f)
     {
+        auto h = (uint32_t) (juce::roundToInt (c.x * 3.0f) * 73856093) ^ (uint32_t) (juce::roundToInt (c.y * 3.0f) * 19349663)
+               ^ (uint32_t) (juce::roundToInt (seed * 1000.0f) * 83492791);
+        h ^= h >> 16; h *= 0x7feb352dU; h ^= h >> 15; h *= 0x846ca68bU; h ^= h >> 16;
+        return (float) (h & 0xffff) / 65536.0f * juce::MathConstants<float>::pi;
+    }
+    /** A seed from an object (a rack unit): its screws are turned its own way. */
+    inline float screwSeed (const void* p) { return (float) ((((size_t) p) >> 4) % 9973); }
+
+    /** A slotted pan-head screw: chrome, with a shadow. `seed` picks how its slot is turned. */
+    inline void screw (juce::Graphics& g, juce::Point<float> c, float rad, float seed = 0.6f)
+    {
+        const float angle = screwTurn (c, seed);
         g.setColour (juce::Colours::black.withAlpha (0.5f));
         g.fillEllipse (c.x - rad + 0.6f, c.y - rad + 1.0f, rad * 2.0f, rad * 2.0f);
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xffd8d8d4), c.x - rad * 0.6f, c.y - rad * 0.7f,

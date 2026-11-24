@@ -1067,6 +1067,54 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
+name = "cl_faded"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "cl_laptop"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "cl_livetape"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "cl_rooms"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "cl_scrappy"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "cl_vocal"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "clang-sys"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2127,6 +2175,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hw_arp2600"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "hw_bbe"
 version = "1.0.1"
 dependencies = [
@@ -2183,7 +2239,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "hw_fairlight"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "hw_h3000"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "hw_jupiter8"
 version = "1.0.1"
 dependencies = [
  "nih_plug",
@@ -2263,7 +2335,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "hw_novachord"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "hw_obx"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "hw_odyssey"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "hw_pcm70"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "hw_polymoog"
 version = "1.0.1"
 dependencies = [
  "nih_plug",
@@ -4040,6 +4144,12 @@ dependencies = [
  "cb_vox212",
  "cb_vox412",
  "cb_wiz212",
+ "cl_faded",
+ "cl_laptop",
+ "cl_livetape",
+ "cl_rooms",
+ "cl_scrappy",
+ "cl_vocal",
  "cp_console",
  "cp_echo",
  "cp_loop",
@@ -4093,6 +4203,7 @@ dependencies = [
  "hw_api2500",
  "hw_api312",
  "hw_api550a",
+ "hw_arp2600",
  "hw_bbe",
  "hw_dbx160",
  "hw_distressor",
@@ -4100,7 +4211,9 @@ dependencies = [
  "hw_emt250",
  "hw_exciter",
  "hw_fairchild670",
+ "hw_fairlight",
  "hw_h3000",
+ "hw_jupiter8",
  "hw_la2a",
  "hw_la3a",
  "hw_langpeq1",
@@ -4110,7 +4223,11 @@ dependencies = [
  "hw_mxr_flanger",
  "hw_neve1073",
  "hw_neve33609",
+ "hw_novachord",
+ "hw_obx",
+ "hw_odyssey",
  "hw_pcm70",
+ "hw_polymoog",
  "hw_pultec",
  "hw_rev7",
  "hw_rmx16",

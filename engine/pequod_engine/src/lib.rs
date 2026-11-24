@@ -330,6 +330,7 @@ static FNS: &[fn() -> Descriptor] = &[
         hw_api2500::pequod_native,
         hw_api312::pequod_native,
         hw_api550a::pequod_native,
+        hw_arp2600::pequod_native,
         hw_bbe::pequod_native,
         hw_dbx160::pequod_native,
         hw_distressor::pequod_native,
@@ -337,7 +338,9 @@ static FNS: &[fn() -> Descriptor] = &[
         hw_emt250::pequod_native,
         hw_exciter::pequod_native,
         hw_fairchild670::pequod_native,
+        hw_fairlight::pequod_native,
         hw_h3000::pequod_native,
+        hw_jupiter8::pequod_native,
         hw_la2a::pequod_native,
         hw_la3a::pequod_native,
         hw_langpeq1::pequod_native,
@@ -347,12 +350,22 @@ static FNS: &[fn() -> Descriptor] = &[
         hw_mxr_flanger::pequod_native,
         hw_neve1073::pequod_native,
         hw_neve33609::pequod_native,
+        hw_novachord::pequod_native,
+        hw_obx::pequod_native,
+        hw_odyssey::pequod_native,
         hw_pcm70::pequod_native,
+        hw_polymoog::pequod_native,
         hw_pultec::pequod_native,
         hw_rev7::pequod_native,
         hw_rmx16::pequod_native,
         hw_spx90::pequod_native,
-        hw_sslbus::pequod_native
+        hw_sslbus::pequod_native,
+        cl_faded::pequod_native,
+        cl_laptop::pequod_native,
+        cl_livetape::pequod_native,
+        cl_rooms::pequod_native,
+        cl_scrappy::pequod_native,
+        cl_vocal::pequod_native
 ];
 
 struct Entry {

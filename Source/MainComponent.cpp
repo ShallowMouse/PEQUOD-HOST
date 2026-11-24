@@ -276,6 +276,14 @@ MainComponent::MainComponent()
     {
         appProperties->getUserSettings()->setValue ("browserGrouping", g == BrowserPanel::Grouping::collection ? 1 : 0);
     };
+    browser.setFavourites (settings->getValue ("browserFavourites"), settings->getBoolValue ("browserFavouritesOnly", false));
+    browser.onFavouritesChanged = [this] (const juce::String& saved, bool only)
+    {
+        auto* s = appProperties->getUserSettings();
+        s->setValue ("browserFavourites", saved);
+        s->setValue ("browserFavouritesOnly", only);
+        s->saveIfNeeded();
+    };
     library.addChangeListener (this);
 
     browser.refresh();

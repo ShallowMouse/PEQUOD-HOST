@@ -331,6 +331,7 @@ mu_whammy = { path = "../muse/mu_whammy" }
 hw_api2500 = { path = "../hardware/hw_api2500" }
 hw_api312 = { path = "../hardware/hw_api312" }
 hw_api550a = { path = "../hardware/hw_api550a" }
+hw_arp2600 = { path = "../hardware/hw_arp2600" }
 hw_bbe = { path = "../hardware/hw_bbe" }
 hw_dbx160 = { path = "../hardware/hw_dbx160" }
 hw_distressor = { path = "../hardware/hw_distressor" }
@@ -338,7 +339,9 @@ hw_echoplex = { path = "../hardware/hw_echoplex" }
 hw_emt250 = { path = "../hardware/hw_emt250" }
 hw_exciter = { path = "../hardware/hw_exciter" }
 hw_fairchild670 = { path = "../hardware/hw_fairchild670" }
+hw_fairlight = { path = "../hardware/hw_fairlight" }
 hw_h3000 = { path = "../hardware/hw_h3000" }
+hw_jupiter8 = { path = "../hardware/hw_jupiter8" }
 hw_la2a = { path = "../hardware/hw_la2a" }
 hw_la3a = { path = "../hardware/hw_la3a" }
 hw_langpeq1 = { path = "../hardware/hw_langpeq1" }
@@ -348,9 +351,19 @@ hw_meq5 = { path = "../hardware/hw_meq5" }
 hw_mxr_flanger = { path = "../hardware/hw_mxr_flanger" }
 hw_neve1073 = { path = "../hardware/hw_neve1073" }
 hw_neve33609 = { path = "../hardware/hw_neve33609" }
+hw_novachord = { path = "../hardware/hw_novachord" }
+hw_obx = { path = "../hardware/hw_obx" }
+hw_odyssey = { path = "../hardware/hw_odyssey" }
 hw_pcm70 = { path = "../hardware/hw_pcm70" }
+hw_polymoog = { path = "../hardware/hw_polymoog" }
 hw_pultec = { path = "../hardware/hw_pultec" }
 hw_rev7 = { path = "../hardware/hw_rev7" }
 hw_rmx16 = { path = "../hardware/hw_rmx16" }
 hw_spx90 = { path = "../hardware/hw_spx90" }
 hw_sslbus = { path = "../hardware/hw_sslbus" }
+cl_faded = { path = "../clairo/cl_faded" }
+cl_laptop = { path = "../clairo/cl_laptop" }
+cl_livetape = { path = "../clairo/cl_livetape" }
+cl_rooms = { path = "../clairo/cl_rooms" }
+cl_scrappy = { path = "../clairo/cl_scrappy" }
+cl_vocal = { path = "../clairo/cl_vocal" }

@@ -44,6 +44,7 @@ namespace PluginTags
             { "thejam",                   { "The Jam", "Woking" } },
             { "tameimpala",               { "Tame Impala", "Perth" } },
             { "muse",                     { "Muse", "Teignmouth" } },
+            { "clairo",                   { "Clairo", "Mount Tonche" } },
             { "amps",                     { "PEQUOD Amps", nullptr } },
             { "cabs",                     { "PEQUOD Cabs", nullptr } },
             { "pedals",                   { "PEQUOD Pedals", nullptr } },

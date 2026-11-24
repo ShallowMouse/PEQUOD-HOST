@@ -273,8 +273,8 @@ impl VintageDsp for Dsp {
         let cut = p[CUTOFF] as f64;
         let k = 4.0 * p[EMPH] as f64;
         let amount = 5.0 * p[CONTOUR] as f64;
-        let ca = coeff(fs, p[ATTACK].max(1.0) as f64 / 2.2);
-        let cd = coeff(fs, p[DECAY].max(1.0) as f64 / 2.2);
+        let ca = 1.0 - coeff(fs, p[ATTACK].max(1.0) as f64 / 2.2);
+        let cd = 1.0 - coeff(fs, p[DECAY].max(1.0) as f64 / 2.2);
         let sus = p[SUSTAIN] as f64;
         let glide = p[GLIDE] as f64;
         let gc = if glide > 0.0 { coeff(fs, 5.0 + 2000.0 * glide * glide) } else { 0.0 };

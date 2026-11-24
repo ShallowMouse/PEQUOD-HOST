@@ -68,7 +68,12 @@ namespace Pequod
                                                  juce::Colour (0xff1e1e1e), c.x + r, c.y + r, false));
         g.fillEllipse (c.x - r, c.y - r, r * 2, r * 2);
         g.setColour (juce::Colour (0xff0c0c0c));
-        g.drawLine (c.x - r * 0.6f, c.y, c.x + r * 0.6f, c.y, 1.2f);
+        // (turned as far as whoever did it up left it: random, but the same every time it's drawn)
+        auto h = (uint32_t) (juce::roundToInt (c.x * 3.0f) * 73856093) ^ (uint32_t) (juce::roundToInt (c.y * 3.0f) * 19349663);
+        h ^= h >> 16; h *= 0x7feb352dU; h ^= h >> 15; h *= 0x846ca68bU; h ^= h >> 16;
+        const float a = (float) (h & 0xffff) / 65536.0f * juce::MathConstants<float>::pi;
+        const float dx = std::cos (a) * r * 0.6f, dy = std::sin (a) * r * 0.6f;
+        g.drawLine (c.x - dx, c.y - dy, c.x + dx, c.y + dy, 1.2f);
     }
 
     /** Hardware-style module panel with rack ears. */

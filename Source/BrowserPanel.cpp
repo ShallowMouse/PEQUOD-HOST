@@ -27,6 +27,17 @@ BrowserPanel::BrowserPanel (HostEngine& e, PresetLibrary& lib) : engine (e), lib
     byFunctionButton.onClick   = [this] { setGrouping (Grouping::function); if (onGroupingChanged) onGroupingChanged (grouping); };
     byCollectionButton.onClick = [this] { setGrouping (Grouping::collection); if (onGroupingChanged) onGroupingChanged (grouping); };
     byFunctionButton.setToggleState (true, juce::dontSendNotification);
+    favouritesButton.setClickingTogglesState (false);
+    favouritesButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
+    favouritesButton.setTooltip ("Show only your favourites (click a plugin's star to add it), still grouped by function or collection");
+    favouritesButton.onClick = [this]
+    {
+        favouritesOnly = ! favouritesOnly;
+        favouritesButton.setToggleState (favouritesOnly, juce::dontSendNotification);
+        refresh();
+        if (onFavouritesChanged) onFavouritesChanged (favourites.toString(), favouritesOnly);
+    };
+    addChildComponent (favouritesButton);
     pluginsTabButton.onClick = [this] { showPresets (false); };
 
     search.setTextToShowWhenEmpty ("Search...", Pequod::Colours::textDim);
@@ -58,6 +69,7 @@ void BrowserPanel::showPresets (bool p)
     newBankButton.setVisible (p);
     byFunctionButton.setVisible (! p);
     byCollectionButton.setVisible (! p);
+    favouritesButton.setVisible (! p);
     resized();
     refresh();
 }
@@ -69,6 +81,25 @@ void BrowserPanel::setGrouping (Grouping g)
     byCollectionButton.setToggleState (g == Grouping::collection, juce::dontSendNotification);
     refresh();
     list.scrollToEnsureRowIsOnscreen (0);
+}
+
+void BrowserPanel::setFavourites (const juce::String& saved, bool only)
+{
+    favourites.fromString (saved);
+    favouritesOnly = only;
+    favouritesButton.setToggleState (only, juce::dontSendNotification);
+    refresh();
+}
+
+void BrowserPanel::toggleFavourite (int pluginIndex)
+{
+    auto types = engine.knownPlugins.getTypes();
+    if (! juce::isPositiveAndBelow (pluginIndex, types.size())) return;
+    favourites.toggle (PluginTags::duplicateKey (types.getReference (pluginIndex)));
+    const auto pos = list.getViewport()->getViewPositionY();
+    refresh();
+    list.getViewport()->setViewPosition (0, pos);
+    if (onFavouritesChanged) onFavouritesChanged (favourites.toString(), favouritesOnly);
 }
 
 void BrowserPanel::refresh()
@@ -132,6 +163,8 @@ void BrowserPanel::refresh()
             if (t.isInstrument) continue;              // (IRVING is for guitar: no instruments)
            #endif
 
+            if (favouritesOnly && ! favourites.contains (PluginTags::duplicateKey (t))) continue;
+
             const auto function = PluginTags::functionOf (t);
             const auto collection = PluginTags::collectionOf (t);
             if (filter.isNotEmpty() && ! (t.name.containsIgnoreCase (filter) || t.manufacturerName.containsIgnoreCase (filter)
@@ -181,11 +214,13 @@ void BrowserPanel::refresh()
 
             Row row { false, t.name, tag, e.index, {}, {} };
             row.colour = colour;
+            row.favourite = favourites.contains (PluginTags::duplicateKey (t));
             rows.push_back (row);
         }
 
         if (rows.empty())
-            rows.push_back ({ true, types.isEmpty() ? "No plugins - click PLUGINS > Scan" : "No matches", {}, -1, {}, {} });
+            rows.push_back ({ true, types.isEmpty() ? "No plugins - click PLUGINS > Scan"
+                                    : favouritesOnly && filter.isEmpty() ? "   No favourites yet - click a plugin's star" : "No matches", {}, -1, {}, {} });
     }
 
     list.updateContent();
@@ -248,9 +283,15 @@ void BrowserPanel::paintListBoxItem (int rowIndex, juce::Graphics& g, int w, int
         g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ 10.0f, (float) h * 0.5f }));
     }
 
+    if (row.pluginIndex >= 0)
+    {
+        auto star = r.removeFromRight (Favourites::starWidth).toFloat();
+        Favourites::drawStar (g, star, row.favourite, Pequod::Colours::mustard, selected);
+    }
+
     g.setColour (isCurrent ? Pequod::Colours::mustard : Pequod::Colours::text);
     g.setFont (Pequod::body (14.0f, isCurrent));
-    auto textArea = r.reduced (16, 0).withTrimmedLeft (row.pluginIndex >= 0 ? 4 : 0);
+    auto textArea = r.reduced (16, 0).withTrimmedLeft (row.pluginIndex >= 0 ? 4 : 0).withTrimmedRight (row.pluginIndex >= 0 ? -10 : 0);
     if (row.subText.isNotEmpty())
     {
         auto sub = textArea.removeFromRight (juce::jmin (row.pluginIndex >= 0 ? 110 : 100, w * 2 / 5));
@@ -297,12 +338,20 @@ void BrowserPanel::listBoxItemClicked (int rowIndex, const juce::MouseEvent& e)
         return;
     }
 
+    // the star, on the right: in or out of the favourites
+    if (row.pluginIndex >= 0 && ! e.mods.isPopupMenu() && e.x >= list.getVisibleRowWidth() - Favourites::starWidth)
+    {
+        toggleFavourite (row.pluginIndex);
+        return;
+    }
+
     if (! e.mods.isPopupMenu()) return;
 
     if (row.pluginIndex >= 0)
     {
         juce::PopupMenu m;
         m.addItem ("Add to rack", [this, rowIndex] { activateRow (rowIndex); });
+        m.addItem (row.favourite ? "Remove from favourites" : "Add to favourites", [this, idx = row.pluginIndex] { toggleFavourite (idx); });
         m.showMenuAsync (juce::PopupMenu::Options());
     }
     else if (row.file != juce::File())
@@ -360,7 +409,7 @@ juce::String BrowserPanel::getTooltipForRow (int rowIndex)
         {
             auto& t = types.getReference (row.pluginIndex);
             return t.name + "\n" + PluginTags::functionOf (t) + PluginTags::sep() + PluginTags::collectionOf (t)
-                 + "\nDrag into the rack, or double-click to add at the end";
+                 + "\nDrag into the rack, or double-click to add at the end. The star adds it to your favourites.";
         }
         return "Drag into the rack, or double-click to add at the end";
     }
@@ -390,6 +439,11 @@ void BrowserPanel::resized()
     if (presetsTab)
     {
         newBankButton.setBounds (searchRow.removeFromRight (64));
+        searchRow.removeFromRight (6);
+    }
+    else
+    {
+        favouritesButton.setBounds (searchRow.removeFromRight (92));
         searchRow.removeFromRight (6);
     }
     search.setBounds (searchRow);
