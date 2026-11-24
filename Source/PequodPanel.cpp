@@ -10,14 +10,7 @@ namespace
 
     const Colour WOOD        { 0xff3a2416 };
     const Colour WOOD_DARK   { 0xff24160d };
-    const Colour PLATE       { 0xffe8ddc4 };
-    const Colour PLATE_EDGE  { 0xffb9a986 };
-    const Colour INK         { 0xff2b2118 };
-    const Colour INK_SOFT    { 0xff6b5a48 };
     const Colour CREAM       { 0xfff6eedc };
-    const Colour BAKELITE    { 0xff1c1714 };
-    const Colour BAKELITE_HI { 0xff332b25 };
-    const Colour METER_FACE  { 0xfff3e2a6 };
 
     constexpr float pi = juce::MathConstants<float>::pi;
 
@@ -111,6 +104,72 @@ namespace
     }
 
     const char* noteNames[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+
+    /** A screw slot's turn: random-looking, but the same every time that screw is drawn. */
+    float slotTurn (Pt c, float seed)
+    {
+        auto h = (uint32_t) (juce::roundToInt (c.x * 3.0f) * 73856093) ^ (uint32_t) (juce::roundToInt (c.y * 3.0f) * 19349663)
+               ^ (uint32_t) (juce::roundToInt (seed * 1000.0f) * 83492791);
+        h ^= h >> 16; h *= 0x7feb352dU; h ^= h >> 15; h *= 0x846ca68bU; h ^= h >> 16;
+        return (float) (h & 0xffff) / 65536.0f * pi;
+    }
+}
+
+//==============================================================================
+/*  PEQUOD Hardware's faceplates: each unit in the colours and knobs of the box it emulates
+    (its paint, its ink, the knobs it wore), with no maker's name or logo on it. */
+void PequodPanel::applyHardwareFace (const juce::String& name)
+{
+    struct F { const char* names; uint32_t plate, edge, ink, inkSoft, block, blockInk; KnobStyle knob; uint32_t cap; std::initializer_list<uint32_t> caps; uint32_t meter; bool brushed; };
+    static const std::vector<F> faces {
+        // compressors
+        { "Fairchild 670",        0xff5d625f, 0xff3d413f, 0xfff0ece0, 0xffb8b4a8, 0xff3a3e3c, 0xfff0ece0, KnobStyle::skirted,   0xff151515, {}, 0xfff3e7c2, false },
+        { "LA-2A",                0xffb9bcbd, 0xff8a8d8e, 0xff1a1a1a, 0xff4a4a4a, 0xff2a2c2d, 0xffe8e8e6, KnobStyle::skirted,   0xff111111, {}, 0xfff3e7c2, true },
+        { "LA-3A",                0xff1d1e20, 0xff3a3b3e, 0xffd8d8d4, 0xff8c8c88, 0xffb9bcbd, 0xff111111, KnobStyle::skirted,   0xff111111, {}, 0xfff3e7c2, false },
+        { "dbx 160",              0xffc4c6c7, 0xff8f9192, 0xff151515, 0xff4b4b4b, 0xff1a1a1a, 0xffe0e0dc, KnobStyle::aluminium, 0xff1a1a1a, {}, 0xff141414, true },
+        { "SSL Bus Compressor",   0xff6d757b, 0xff4b5156, 0xffe9ebec, 0xffb4babe, 0xff40464b, 0xffe9ebec, KnobStyle::capped,    0xff2a2a2a, { 0xffc33a32, 0xff2f5fae, 0xff3b8a4a, 0xffe0e0dc }, 0xff141414, false },
+        { "API 2500",             0xff2b2d30, 0xff45484c, 0xffe6e6e2, 0xff9da0a3, 0xff5a7fa6, 0xfff3f3f0, KnobStyle::aluminium, 0xff1a1a1a, {}, 0xff141414, false },
+        { "Neve 33609",           0xff6f7f8b, 0xff4d5962, 0xfff1f1ee, 0xffc4cbd0, 0xff4a5660, 0xfff1f1ee, KnobStyle::capped,    0xff6e7175, { 0xffb2443a, 0xff8a8e92 }, 0xfff3e7c2, false },
+        { "Distressor",           0xff141516, 0xff2e3032, 0xffe0e2e4, 0xff8e9296, 0xff2a2c2e, 0xffe0e2e4, KnobStyle::aluminium, 0xff1a1a1a, {}, 0xff141414, false },
+        // equalisers and preamps
+        { "Pultec EQP-1A|Pultec MEQ-5", 0xff6b7d8c, 0xff4a5865, 0xfff3f2ec, 0xffc9d0d6, 0xff4a5865, 0xfff3f2ec, KnobStyle::chicken, 0xff151515, {}, 0xfff3e7c2, false },
+        { "Neve 1073",            0xff5f7486, 0xff43535f, 0xfff1f1ee, 0xffc4ccd2, 0xff3c4a55, 0xfff1f1ee, KnobStyle::capped,    0xff6e7175, { 0xffb2443a, 0xff3e6aa8, 0xff8a8e92 }, 0xfff3e7c2, false },
+        { "API 550A|API 312",     0xff8e9195, 0xff686b6e, 0xff151515, 0xff3e4144, 0xff1e2022, 0xffe6e6e2, KnobStyle::aluminium, 0xff1a1a1a, {}, 0xff141414, true },
+        { "Lang PEQ-1",           0xff9a9a92, 0xff707068, 0xff151515, 0xff444440, 0xff2a2a28, 0xffeeeee8, KnobStyle::chicken,   0xff151515, {}, 0xfff3e7c2, true },
+        // reverbs and effects
+        { "Lexicon 224",          0xffd9cfb8, 0xffa99f88, 0xff3b2f24, 0xff786a58, 0xff8a6a46, 0xfff6eedc, KnobStyle::aluminium, 0xff2a2a2a, {}, 0xff141414, false },
+        { "Lexicon 480L|PCM70",   0xff1e1f21, 0xff3a3b3e, 0xffd8d8d4, 0xff8c8c88, 0xff6a2626, 0xffeeeeea, KnobStyle::aluminium, 0xff1a1a1a, {}, 0xff141414, false },
+        { "EMT 250",              0xff3b4a5a, 0xff2a3642, 0xffe8ecef, 0xffaab5bf, 0xffc7a24a, 0xff1a1a1a, KnobStyle::capped,    0xff2a2a2a, { 0xffc7a24a, 0xffe8ecef }, 0xff141414, false },
+        { "AMS RMX16",            0xff1f2d4a, 0xff314366, 0xffe6eaf2, 0xff9aa6bd, 0xff121b2e, 0xffe6eaf2, KnobStyle::aluminium, 0xff1a1a1a, {}, 0xff141414, false },
+        { "Yamaha REV7|Yamaha SPX90", 0xff27292c, 0xff45484c, 0xffe8e8e4, 0xff9a9d9f, 0xff3d4045, 0xffe8e8e4, KnobStyle::capped,  0xff2a2a2a, { 0xff8e9196 }, 0xff141414, false },
+        { "H3000",                0xff121314, 0xff2e3032, 0xffdcdde0, 0xff8a8d90, 0xff2a2c2e, 0xffdcdde0, KnobStyle::aluminium, 0xff1a1a1a, {}, 0xff141414, false },
+        { "Echoplex EP-3",        0xffb8b9b6, 0xff858683, 0xff161616, 0xff474747, 0xff2a2624, 0xffe8e4dc, KnobStyle::chicken,   0xff151515, {}, 0xfff3e7c2, true },
+        { "Aural Exciter",        0xff17181a, 0xff34363a, 0xffd9b86a, 0xff9b8550, 0xffd9b86a, 0xff17181a, KnobStyle::aluminium, 0xff1a1a1a, {}, 0xff141414, false },
+        { "Sonic Maximizer",      0xff1b1c1e, 0xff383a3e, 0xffe2e2de, 0xff96969a, 0xff2a2c2e, 0xffe2e2de, KnobStyle::aluminium, 0xff1a1a1a, {}, 0xff141414, false },
+        { "Flanger/Doubler",      0xff151617, 0xff323436, 0xffe4e4e0, 0xff94948f, 0xffb83a2c, 0xfff2f2ee, KnobStyle::capped,    0xff2a2a2a, { 0xffb83a2c, 0xff2f5fae, 0xffd9a531 }, 0xff141414, false },
+        // synthesizers
+        { "ARP Odyssey",          0xff1a1a1a, 0xff3a3a3a, 0xffeeeeea, 0xff9a9a96, 0xffd86a22, 0xff1a1a1a, KnobStyle::capped,    0xff2a2a2a, { 0xffeeeeea }, 0xff141414, false },
+        { "ARP 2600",             0xff4b5e73, 0xff33424f, 0xffeef0f2, 0xffb0bcc8, 0xff2c3946, 0xffeef0f2, KnobStyle::capped,    0xff2a2a2a, { 0xffeeeeea, 0xffd86a22, 0xff2f5fae }, 0xff141414, false },
+        { "Oberheim OB-X",        0xff17181a, 0xff34363a, 0xffe8e8e4, 0xff9a9a96, 0xff6e4a2e, 0xffe8e8e4, KnobStyle::aluminium, 0xff1a1a1a, {}, 0xff141414, false },
+        { "Roland Jupiter-8",     0xff1c1d1f, 0xff3a3b3e, 0xffe8e8e4, 0xff9a9a96, 0xff2a2b2e, 0xffe8e8e4, KnobStyle::capped,    0xff2a2a2a, { 0xffd8d8d2 }, 0xff141414, false },
+        { "Moog Polymoog",        0xff191919, 0xff3a3a3a, 0xffeeeeea, 0xff9a9a96, 0xff6e4a2e, 0xffeeeeea, KnobStyle::capped,    0xff2a2a2a, { 0xffeeeeea }, 0xff141414, false },
+        { "Fairlight CMI",        0xffe6e2d6, 0xffb8b3a5, 0xff2a2824, 0xff6a6660, 0xff4a7aa0, 0xfff6f4ee, KnobStyle::capped,    0xff2a2a2a, { 0xff3a3a3a }, 0xff141414, false },
+        { "Hammond Novachord",    0xff4a2e1c, 0xff2e1c10, 0xfff1e6cc, 0xffc8b48c, 0xff2a1a0e, 0xfff1e6cc, KnobStyle::skirted,   0xff2a1c12, {}, 0xfff3e2a6, false },
+    };
+    for (auto& f : faces)
+        if (juce::StringArray::fromTokens (f.names, "|", "").contains (name))
+        {
+            hardwareFace = true;
+            PLATE = Colour (f.plate); PLATE_EDGE = Colour (f.edge); INK = Colour (f.ink); INK_SOFT = Colour (f.inkSoft);
+            titleBlock = Colour (f.block); titleInk = Colour (f.blockInk);
+            knobStyle = f.knob;
+            BAKELITE = Colour (f.cap); BAKELITE_HI = Colour (f.cap).brighter (0.25f);
+            for (auto c : f.caps) caps.push_back (Colour (c));
+            METER_FACE = Colour (f.meter);
+            brushed = f.brushed;
+            accent = titleBlock.getPerceivedBrightness() > 0.35f && titleBlock.getPerceivedBrightness() < 0.85f ? titleBlock : accent;
+            return;
+        }
 }
 
 //==============================================================================
@@ -125,6 +184,8 @@ PequodPanel::PequodPanel (PequodNative::Instance& p)
         sub2 = (*s)[1].toString();
     }
     accent = Colour::fromString ("ff" + j["accent"].toString().removeCharacters ("#"));
+    titleBlock = accent;
+    if (inst.info().vendor == "PEQUOD Hardware") applyHardwareFace (inst.info().name);
     panelW = juce::jmax (200, i (j["w"], 640));
     panelH = juce::jmax (120, i (j["h"], 432));
 
@@ -347,14 +408,41 @@ void PequodPanel::drawFaceplate (juce::Graphics& g) const
         g.setColour (PLATE_EDGE);
         g.drawRect (getLocalBounds().toFloat(), 1.5f);
         const Rect block (0.0f, 0.0f, (float) rackTitleWidth, h);
-        g.setGradientFill (juce::ColourGradient (accent.brighter (0.08f), 0.0f, 0.0f, accent.darker (0.2f), 0.0f, h, false));
+        if (hardwareFace) drawPlateTexture (g, getLocalBounds().toFloat());
+        g.setGradientFill (juce::ColourGradient (titleBlock.brighter (0.08f), 0.0f, 0.0f, titleBlock.darker (0.2f), 0.0f, h, false));
         g.fillRect (block);
         g.setColour (blackAlpha (60));
         g.fillRect (block.withX (block.getRight() - 2.0f).withWidth (2.0f));
         const float fitW = (float) rackTitleWidth - 28.0f;
-        sayFit (g, title, { 16.0f, 30.0f }, fitW, 24.0f, CREAM);
-        sayFit (g, sub1, { 16.0f, 54.0f }, fitW, 10.5f, CREAM);
-        sayFit (g, sub2, { 16.0f, 68.0f }, fitW, 10.5f, CREAM);
+        sayFit (g, title, { 16.0f, 30.0f }, fitW, 24.0f, hardwareFace ? titleInk : CREAM);
+        sayFit (g, sub1, { 16.0f, 54.0f }, fitW, 10.5f, hardwareFace ? titleInk.withAlpha (0.8f) : CREAM);
+        sayFit (g, sub2, { 16.0f, 68.0f }, fitW, 10.5f, hardwareFace ? titleInk.withAlpha (0.8f) : CREAM);
+        return;
+    }
+    if (hardwareFace)
+    {
+        // the box's own front panel, edge to edge: its paint, a strip of its colour for the name, four screws
+        g.setGradientFill (juce::ColourGradient (PLATE.brighter (0.06f), 0.0f, 0.0f, PLATE.darker (0.1f), 0.0f, h, false));
+        g.fillAll();
+        drawPlateTexture (g, getLocalBounds().toFloat());
+        g.setColour (PLATE_EDGE);
+        g.drawRect (getLocalBounds().toFloat(), 2.0f);
+        const Rect band (0.0f, 14.0f, w, 52.0f);
+        g.setColour (titleBlock);
+        g.fillRect (band);
+        g.setColour (blackAlpha (70));
+        g.fillRect (band.withY (band.getBottom()).withHeight (2.0f));
+        say (g, title, { 44.0f, 40.0f }, -1, 0, 28.0f, titleInk);
+        say (g, sub1, { w - 44.0f, 34.0f }, 1, 0, 11.5f, titleInk.withAlpha (0.85f));
+        say (g, sub2, { w - 44.0f, 50.0f }, 1, 0, 11.5f, titleInk.withAlpha (0.85f));
+        for (auto c : { Pt (16.0f, 8.0f), Pt (w - 16.0f, 8.0f), Pt (16.0f, h - 10.0f), Pt (w - 16.0f, h - 10.0f) })
+        {
+            circle (g, c + Pt (0.4f, 0.8f), 5.0f, blackAlpha (90));
+            g.setGradientFill (juce::ColourGradient (Colour (0xffd8d8d4), c.x - 3.0f, c.y - 3.0f, Colour (0xff5a5a58), c.x + 3.0f, c.y + 4.0f, true));
+            g.fillEllipse (c.x - 4.5f, c.y - 4.5f, 9.0f, 9.0f);
+            const float a = slotTurn (c, (float) title.hashCode());
+            line (g, polar (c, 3.4f, a), polar (c, 3.4f, a + pi), 1.4f, Colour (0xff222222));
+        }
         return;
     }
     g.fillAll (WOOD);
@@ -387,14 +475,31 @@ void PequodPanel::drawFaceplate (juce::Graphics& g) const
     }
 }
 
+void PequodPanel::drawPlateTexture (juce::Graphics& g, Rect r) const
+{
+    if (! brushed) return;
+    // brushed aluminium: fine horizontal grain
+    juce::Random grain ((juce::int64) title.hashCode());
+    for (float y = r.getY() + 1.0f; y < r.getBottom() - 1.0f; y += 1.5f)
+    {
+        g.setColour ((grain.nextBool() ? Colour (0xffffffff) : Colour (0xff000000)).withAlpha (0.015f + 0.03f * grain.nextFloat()));
+        g.drawHorizontalLine ((int) y, r.getX(), r.getRight());
+    }
+}
+
 //==============================================================================
 void PequodPanel::drawKnob (juce::Graphics& g, const Item& it, int index) const
 {
+    if (hardwareFace && knobStyle != KnobStyle::bakelite)
+    {
+        drawHardwareKnob (g, it, index);
+        return;
+    }
     const bool dim = isDim (it);
     const bool big = it.r > 30.0f;
     const Pt c (it.x, it.y);
     const float r = it.r;
-    auto fade = [dim] (Colour col) { return dim ? lerp (col, PLATE, 0.6f) : col; };
+    auto fade = [this, dim] (Colour col) { return dim ? lerp (col, PLATE, 0.6f) : col; };
     const auto ink = fade (INK), inkSoft = fade (INK_SOFT), acc = fade (accent), bake = fade (BAKELITE), bakeHi = fade (BAKELITE_HI), cream = fade (CREAM);
     const float v = value (it.p);
 
@@ -421,6 +526,101 @@ void PequodPanel::drawKnob (juce::Graphics& g, const Item& it, int index) const
     if (hoverItem == index || dragItem == index)
         ring (g, c, r + 1.0f, 1.5f, accent);
     const float lf = big ? 16.0f : 11.0f, vf = big ? 13.0f : 11.0f;
+    say (g, it.label, c - Pt (0.0f, r + (big ? 22.0f : 20.0f)), 0, 0, lf, ink);
+    say (g, text (it.p), c + Pt (0.0f, r + (big ? 22.0f : 18.0f)), 0, 0, vf, inkSoft);
+}
+
+void PequodPanel::drawHardwareKnob (juce::Graphics& g, const Item& it, int index) const
+{
+    const bool dim = isDim (it);
+    const bool big = it.r > 30.0f;
+    const Pt c (it.x, it.y);
+    const float r = it.r;
+    auto fade = [this, dim] (Colour col) { return dim ? lerp (col, PLATE, 0.6f) : col; };
+    const auto ink = fade (INK), inkSoft = fade (INK_SOFT);
+    const float v = value (it.p);
+    const float a0 = knobAngle (0.0f), a1 = knobAngle (v);
+
+    // the scale printed round it
+    const int ticks = big ? 11 : 11;
+    for (int t = 0; t < ticks; ++t)
+    {
+        const float a = knobAngle ((float) t / (float) (ticks - 1));
+        const bool lng = t == 0 || t == ticks - 1 || t == ticks / 2;
+        line (g, polar (c, r + 4.0f, a), polar (c, r + (lng ? 10.0f : 7.0f), a), lng ? 1.6f : 1.0f, ink);
+    }
+    circle (g, c + Pt (0.8f, 3.0f), r, blackAlpha (dim ? 30 : 90));
+
+    // which cap: by the knob's order on the panel, as a desk's colour code
+    int knobIndex = 0;
+    for (int k = 0; k < index && k < (int) items.size(); ++k) if (items[(size_t) k].kind == Kind::knob) ++knobIndex;
+    const auto cap = caps.empty() ? BAKELITE : caps[(size_t) knobIndex % caps.size()];
+
+    switch (knobStyle)
+    {
+        case KnobStyle::chicken:
+        {
+            // a black chicken-head: a round boss and a long tapering pointer with a white line
+            circle (g, c, r * 0.7f, fade (Colour (0xff121212)));
+            juce::Path head;
+            const float L = r * 1.05f, W = r * 0.42f;
+            head.startNewSubPath (0.0f, -L);
+            head.quadraticTo (W, -L * 0.4f, W * 0.9f, r * 0.2f);
+            head.quadraticTo (0.0f, r * 0.75f, -W * 0.9f, r * 0.2f);
+            head.quadraticTo (-W, -L * 0.4f, 0.0f, -L);
+            head.closeSubPath();
+            g.setColour (fade (Colour (0xff181818)));
+            g.fillPath (head, juce::AffineTransform::rotation (a1).translated (c));
+            g.setColour (fade (Colour (0xff3a3a3a)));
+            g.strokePath (head, juce::PathStrokeType (1.0f), juce::AffineTransform::rotation (a1).translated (c));
+            line (g, polar (c, r * 0.1f, a1), polar (c, L * 0.92f, a1), 2.2f, fade (Colour (0xfff2f0ea)));
+            break;
+        }
+        case KnobStyle::aluminium:
+        {
+            // a knurled aluminium knob with a black line
+            g.setGradientFill (juce::ColourGradient (fade (Colour (0xffe6e7e8)), c.x - r * 0.6f, c.y - r * 0.7f, fade (Colour (0xff7b7d80)), c.x + r * 0.7f, c.y + r, true));
+            g.fillEllipse (c.x - r, c.y - r, r * 2.0f, r * 2.0f);
+            for (int k = 0; k < 36; ++k)
+            {
+                const float a = (float) k * pi / 18.0f + a1;
+                line (g, polar (c, r * 0.88f, a), polar (c, r, a), 0.8f, fade (Colour (0xff6a6c6f)));
+            }
+            circle (g, c, r * 0.72f, fade (Colour (0xffc9cbcd)));
+            line (g, polar (c, r * 0.15f, a1), polar (c, r * 0.95f, a1), big ? 3.0f : 2.2f, fade (cap));
+            break;
+        }
+        case KnobStyle::capped:
+        {
+            // a grey or black body with a coloured cap and a white pointer line (a desk's knobs)
+            circle (g, c, r, fade (BAKELITE));
+            for (int k = 0; k < 20; ++k)
+            {
+                const float a = (float) k * pi / 10.0f + a1;
+                line (g, polar (c, r * 0.82f, a), polar (c, r * 0.98f, a), 1.0f, fade (BAKELITE_HI));
+            }
+            circle (g, c, r * 0.62f, fade (cap));
+            circle (g, c - Pt (r * 0.12f, r * 0.15f), r * 0.3f, fade (cap.brighter (0.25f)).withAlpha (0.35f));
+            line (g, polar (c, r * 0.05f, a1), polar (c, r * 0.96f, a1), big ? 3.0f : 2.2f, fade (cap.getPerceivedBrightness() > 0.7f ? Colour (0xff1a1a1a) : Colour (0xfff4f2ec)));
+            break;
+        }
+        case KnobStyle::skirted:
+        default:
+        {
+            // a big black knob on a skirt: the skirt carries the pointer, polished metal edge
+            circle (g, c, r, fade (Colour (0xff0e0e0e)));
+            ring (g, c, r - 0.5f, 1.2f, fade (Colour (0xff8e8f90)));
+            g.setGradientFill (juce::ColourGradient (fade (Colour (0xff3a3a3a)), c.x - r * 0.4f, c.y - r * 0.5f, fade (Colour (0xff0b0b0b)), c.x + r * 0.5f, c.y + r * 0.5f, true));
+            g.fillEllipse (c.x - r * 0.66f, c.y - r * 0.66f, r * 1.32f, r * 1.32f);
+            line (g, polar (c, r * 0.68f, a1), polar (c, r * 0.97f, a1), big ? 3.5f : 2.6f, fade (Colour (0xfff2f0ea)));
+            break;
+        }
+    }
+    if (v > 0.001f && ! big)
+        polyline (g, 30, [&] (int k) { return polar (c, r + 2.0f, a0 + (a1 - a0) * (float) k / 30.0f); }, 1.6f, fade (accent).withAlpha (0.8f));
+    if (hoverItem == index || dragItem == index)
+        ring (g, c, r + 1.0f, 1.5f, accent);
+    const float lf = big ? 15.0f : 11.0f, vf = big ? 13.0f : 11.0f;
     say (g, it.label, c - Pt (0.0f, r + (big ? 22.0f : 20.0f)), 0, 0, lf, ink);
     say (g, text (it.p), c + Pt (0.0f, r + (big ? 22.0f : 18.0f)), 0, 0, vf, inkSoft);
 }

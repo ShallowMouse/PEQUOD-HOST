@@ -61,6 +61,18 @@ private:
     PequodNative::Instance& inst;
     juce::String title, sub1, sub2;
     juce::Colour accent { 0xff8e2a22 };
+
+    // the faceplate's colours (PEQUOD's cream and bakelite, or a hardware unit's own)
+    juce::Colour PLATE { 0xffe8ddc4 }, PLATE_EDGE { 0xffb9a986 }, INK { 0xff2b2118 }, INK_SOFT { 0xff6b5a48 },
+                 BAKELITE { 0xff1c1714 }, BAKELITE_HI { 0xff332b25 }, METER_FACE { 0xfff3e2a6 };
+    enum class KnobStyle { bakelite, chicken, aluminium, capped, skirted };
+    KnobStyle knobStyle = KnobStyle::bakelite;
+    bool hardwareFace = false, brushed = false;
+    juce::Colour titleBlock, titleInk { 0xfff6eedc };
+    std::vector<juce::Colour> caps;
+    void applyHardwareFace (const juce::String& name);
+    void drawPlateTexture (juce::Graphics&, juce::Rectangle<float>) const;
+    void drawHardwareKnob (juce::Graphics&, const Item&, int index) const;
     int panelW = 640, panelH = 432;
     std::vector<Item> items;
     std::vector<Preset> presets;
