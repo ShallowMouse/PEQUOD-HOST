@@ -47,6 +47,7 @@ namespace PluginTags
             { "amps",                     { "PEQUOD Amps", nullptr } },
             { "cabs",                     { "PEQUOD Cabs", nullptr } },
             { "pedals",                   { "PEQUOD Pedals", nullptr } },
+            { "hardware",                 { "PEQUOD Hardware", nullptr } },
         };
         auto it = titles.find (PluginColours::normalise (vendorSuffix));
         if (it == titles.end()) return vendorSuffix;
