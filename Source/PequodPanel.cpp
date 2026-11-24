@@ -156,20 +156,85 @@ void PequodPanel::applyHardwareFace (const juce::String& name)
         { "Fairlight CMI",        0xffe6e2d6, 0xffb8b3a5, 0xff2a2824, 0xff6a6660, 0xff4a7aa0, 0xfff6f4ee, KnobStyle::capped,    0xff2a2a2a, { 0xff3a3a3a }, 0xff141414, false },
         { "Hammond Novachord",    0xff4a2e1c, 0xff2e1c10, 0xfff1e6cc, 0xffc8b48c, 0xff2a1a0e, 0xfff1e6cc, KnobStyle::skirted,   0xff2a1c12, {}, 0xfff3e2a6, false },
     };
-    for (auto& f : faces)
-        if (juce::StringArray::fromTokens (f.names, "|", "").contains (name))
-        {
-            hardwareFace = true;
-            PLATE = Colour (f.plate); PLATE_EDGE = Colour (f.edge); INK = Colour (f.ink); INK_SOFT = Colour (f.inkSoft);
-            titleBlock = Colour (f.block); titleInk = Colour (f.blockInk);
-            knobStyle = f.knob;
-            BAKELITE = Colour (f.cap); BAKELITE_HI = Colour (f.cap).brighter (0.25f);
-            for (auto c : f.caps) caps.push_back (Colour (c));
-            METER_FACE = Colour (f.meter);
-            brushed = f.brushed;
-            accent = titleBlock.getPerceivedBrightness() > 0.35f && titleBlock.getPerceivedBrightness() < 0.85f ? titleBlock : accent;
-            return;
-        }
+    // every other plugin after a real box: its family's paint, ink and knobs
+    static const std::vector<F> families {
+        { "Deluxe Reverb|Deluxe Head|Showman AB763|Showman Head|Fender 1x12|Fender 2x12 JBL|Fender 2x15|Hot Rod Deluxe|Hot Rod DeVille|Harmonic Trem", 0xff1b1b1c, 0xff3a3a3b, 0xffe9e6dc, 0xffa9a69c, 0xff2b2b2c, 0xffe9e6dc, KnobStyle::skirted, 0xff111111, {  }, 0xfff3e7c2, false },
+        { "Twin Reverb|Twin Head|Silverface Twin|Bassman 50", 0xffc5c7c8, 0xff8f9192, 0xff1c2a4a, 0xff4a5a7a, 0xff1e3a6a, 0xfff2f2ee, KnobStyle::skirted, 0xff111111, {  }, 0xfff3e7c2, true },
+        { "Bassman 6G6-B|Bassman Head|Blonde Bassman|Bassman 2x12|Bassman 4x10", 0xffb89a62, 0xff7f6a40, 0xff2a1e10, 0xff5a4428, 0xff6e2a1c, 0xfff3ead6, KnobStyle::chicken, 0xff3a2618, {  }, 0xfff3e7c2, false },
+        { "JTM45|JTM45 Head|Plexi Head|JCM800 Head|JCM900 Head|JCM900|Greenback 4x12|G12T-75 4x12|Time Modulator|Foxton Bass", 0xffc9a34a, 0xff8a6e2a, 0xff161412, 0xff4a3e2a, 0xff141414, 0xffd9b25a, KnobStyle::capped, 0xff141414, { 0xffd2b05a }, 0xfff3e7c2, true },
+        { "AC30 Top Boost|AC30 Head|AC30 Normal|AC30 FWN|AC50|AC100|AC100 Head|AC100 Bass|Vox 2x12 Blue|Vox 4x12 Horns|DC30 Head|Matchless 2x12", 0xff7a4e2c, 0xff4a2e18, 0xfff1e4c8, 0xffc8b088, 0xff2a1a10, 0xfff1e4c8, KnobStyle::chicken, 0xffece2cc, {  }, 0xfff3e7c2, false },
+        { "T60 Bass|UL730", 0xff6e6f6c, 0xff4a4b48, 0xfff1eee6, 0xffc0beb6, 0xff2a2a28, 0xfff1eee6, KnobStyle::chicken, 0xffece2cc, {  }, 0xfff3e7c2, false },
+        { "Hiwatt Head|DR103 Bass|DR103 Custom 100|Hiwatt 4x12|Selmer TB50|Traynor YBA-1", 0xff141414, 0xff323232, 0xffeeeeea, 0xff9a9a96, 0xff222222, 0xffeeeeea, KnobStyle::capped, 0xff111111, { 0xffb8b8b4 }, 0xfff3e7c2, false },
+        { "Mark IIB|Mark IIB Head|Rectifier Head|Rectified|Mesa 1x12 EV|Mesa 4x12 V30|VH4|Wizard Head|Wizard MC|Wizard 2x12|ODS Head|Valve Jr Celestion|Valve Jr V30", 0xff121212, 0xff303030, 0xffe6e6e2, 0xff94948f, 0xff1e1e1e, 0xffe6e6e2, KnobStyle::capped, 0xff0e0e0e, { 0xff2a2a2a }, 0xfff3e7c2, false },
+        { "SLO Head", 0xffcfd2d4, 0xff8e9193, 0xff141414, 0xff444648, 0xff141414, 0xffe6e8ea, KnobStyle::capped, 0xff111111, { 0xff222222 }, 0xfff3e7c2, true },
+        { "EH-150|EH-150 Head|EH-150 1x12|Archtop", 0xff5a3a22, 0xff3a2414, 0xfff0dfc0, 0xffc4a880, 0xff2e1c0e, 0xfff0dfc0, KnobStyle::skirted, 0xff2a1a10, {  }, 0xfff3e7c2, false },
+        { "Magnatone Custom|Magnatone Head|Magnatone 1x15", 0xffe6dcc4, 0xffb0a688, 0xff3a2a1c, 0xff7a6650, 0xff7a3a26, 0xfff4ecdc, KnobStyle::skirted, 0xff1a1a1a, {  }, 0xfff3e7c2, false },
+        { "SVT Bass|SVT 8x10|B-15 1x15", 0xffc4c7ca, 0xff8e9194, 0xff1a2440, 0xff4a5470, 0xff1e2c52, 0xfff0f0ec, KnobStyle::skirted, 0xff111111, {  }, 0xfff3e7c2, true },
+        { "Jazz Chorus", 0xff1a1a1b, 0xff3a3a3b, 0xffe6e6e2, 0xff94948f, 0xffbfc2c4, 0xff141414, KnobStyle::aluminium, 0xff1a1a1a, {  }, 0xff141414, false },
+        { "Backstage 30|Practice Amp Vocal|HD-130|HD-130 Head|Music Man 2x12", 0xff1c1c1c, 0xff3a3a3a, 0xffe6e6e2, 0xff94948f, 0xff8a8c8e, 0xff141414, KnobStyle::capped, 0xff111111, { 0xffb8b8b4 }, 0xfff3e7c2, false },
+        { "DS-1|OS-2", 0xffe0702a, 0xffa04e1a, 0xff141414, 0xff3a2418, 0xff141414, 0xffe0702a, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Blues Driver|Vibrato", 0xff2f5fae, 0xff1e3f76, 0xfff2f2ee, 0xffc0cce0, 0xff141414, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "CE-2 Chorus|Dimension", 0xff7ab8d8, 0xff4a8aaa, 0xff141414, 0xff2a4a5a, 0xff141414, 0xff7ab8d8, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "TR-2 Tremolo|Slow Gear", 0xff3a8a5a, 0xff24603c, 0xfff2f2ee, 0xffc4e0cc, 0xff141414, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "DD-3|GE-7 EQ", 0xffe8e8e4, 0xffb0b0ac, 0xff141414, 0xff4a4a48, 0xff141414, 0xffe8e8e4, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Slicer", 0xff6a4a9a, 0xff4a3070, 0xfff2f2ee, 0xffccc0e0, 0xff141414, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "CE-1 Chorus Ensemble|DM-1 Delay", 0xffb8babc, 0xff7e8082, 0xff141414, 0xff44464a, 0xff141414, 0xffe8e8e4, KnobStyle::aluminium, 0xff1a1a1a, {  }, 0xff141414, true },
+        { "Phase 90", 0xffe8762a, 0xffa8501a, 0xff141414, 0xff3a2418, 0xff141414, 0xffe8762a, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Dyna Comp", 0xffc4302a, 0xff8a1e1a, 0xfff2f2ee, 0xffe0c0bc, 0xff141414, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Distortion+", 0xffe8c22a, 0xffa8881a, 0xff141414, 0xff3a3018, 0xff141414, 0xffe8c22a, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Micro Amp|Analog Delay", 0xff8e9196, 0xff606368, 0xff141414, 0xff34363a, 0xff141414, 0xffe6e6e2, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, true },
+        { "Flanger", 0xff4a2e6a, 0xff301c4a, 0xfff2f2ee, 0xffccc0e0, 0xff141414, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Smart Gate|Digital Delay", 0xff1a1a1a, 0xff3a3a3a, 0xffe6e6e2, 0xff94948f, 0xff8a2a2a, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff2a2a2a }, 0xff141414, false },
+        { "Big Muff|Muff R22|Freeze|POG|HOG|Small Stone", 0xffc8cacc, 0xff8a8c8e, 0xffb02a26, 0xff3a3a3c, 0xff141414, 0xffe6e6e2, KnobStyle::capped, 0xff111111, { 0xff1a1a1a }, 0xff141414, true },
+        { "Electric Mistress|Small Clone|Memory Man", 0xffc8cacc, 0xff8a8c8e, 0xff2a4a8a, 0xff3a3a3c, 0xff2a4a8a, 0xfff2f2ee, KnobStyle::capped, 0xff111111, { 0xff1a1a1a }, 0xff141414, true },
+        { "Fuzz Face|First Fuzz|Rangemaster|Treble Booster|Tone Bender|Octavia|Harmonic Percolator|IVP Preamp|Power Boost", 0xff7a7e80, 0xff4e5254, 0xfff2f2ee, 0xffc8ccce, 0xff2a2c2e, 0xfff2f2ee, KnobStyle::capped, 0xff111111, { 0xff1a1a1a }, 0xff141414, false },
+        { "TS-808|Dead Battery TS", 0xff3a9a5a, 0xff246a3c, 0xfff2f2ee, 0xffc4e4cc, 0xff141414, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Centaur|EP Booster", 0xffc8a24a, 0xff8a6e2a, 0xff1a1410, 0xff4a3a24, 0xff1a1410, 0xffd8b45a, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, true },
+        { "RAT|Jekyll & Hyde", 0xff141414, 0xff343434, 0xffe6e6e2, 0xff94948f, 0xff141414, 0xffe6e6e2, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Whammy|Drop Tune|Wah", 0xffb8241e, 0xff7a1612, 0xfff2f2ee, 0xffe0c0bc, 0xff141414, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "DL4", 0xff3a7a2a, 0xff24501a, 0xfff2f2ee, 0xffc4dcbc, 0xff141414, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Fuzz Factory", 0xff2a6a8a, 0xff1a4a62, 0xfff2e8a0, 0xffc8d4dc, 0xffd8a030, 0xff141414, KnobStyle::capped, 0xff141414, { 0xffd8a030 }, 0xff141414, false },
+        { "Envelope Filter|Bi-Phase", 0xff1a1a1a, 0xff3a3a3a, 0xffd8b45a, 0xff9a8250, 0xffd8b45a, 0xff141414, KnobStyle::aluminium, 0xff1a1a1a, {  }, 0xff141414, false },
+        { "Uni-Vibe|Deja Vibe", 0xff2a2a2c, 0xff4a4a4c, 0xffe6e6e2, 0xff94948f, 0xff8a8c8e, 0xff141414, KnobStyle::skirted, 0xff111111, {  }, 0xff141414, false },
+        { "Hotcake|Mudhoney", 0xff6a3a8a, 0xff4a2462, 0xfff2f2ee, 0xffd4c4e0, 0xff141414, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Ring Mod", 0xff8ab0c8, 0xff5a809a, 0xff141414, 0xff2a3a48, 0xff141414, 0xff8ab0c8, KnobStyle::capped, 0xff141414, { 0xff1a1a1a }, 0xff141414, false },
+        { "Black Box EQ", 0xff6b7d8c, 0xff4a5865, 0xfff3f2ec, 0xffc9d0d6, 0xff4a5865, 0xfff3f2ec, KnobStyle::chicken, 0xff151515, {  }, 0xfff3e7c2, false },
+        { "FET Limiter|Immunity Vocal|Black Box Limiter", 0xff1d1e20, 0xff3a3b3e, 0xffd8d8d4, 0xff8c8c88, 0xffb9bcbd, 0xff111111, KnobStyle::skirted, 0xff111111, {  }, 0xfff3e7c2, false },
+        { "TG Strip|TG Channel|RS124|Studio EQ|Valve Desk|Valve Mixer|Gold Star Desk|Vari-Mu|Twin-Track Tape|Grit Comp|Doubler|Varispeed", 0xff7a8478, 0xff545c52, 0xfff2f2ec, 0xffc8cec4, 0xff3a423a, 0xfff2f2ec, KnobStyle::skirted, 0xff151515, {  }, 0xfff3e7c2, false },
+        { "EMT Plate|Plate 140|Strawberry Plate", 0xff8a9088, 0xff5e645c, 0xff141414, 0xff3a3e38, 0xff3a3e38, 0xfff0f0ea, KnobStyle::skirted, 0xff151515, {  }, 0xfff3e7c2, false },
+        { "Vocal Chain", 0xff5f7486, 0xff43535f, 0xfff1f1ee, 0xffc4ccd2, 0xff3c4a55, 0xfff1f1ee, KnobStyle::capped, 0xff6e7175, { 0xffb2443a, 0xff3e6aa8, 0xff8a8e92 }, 0xfff3e7c2, false },
+        { "Helios Channel|Plank Console|Channel Dynamics", 0xff4e5a62, 0xff34404a, 0xfff1f1ee, 0xffc0c8ce, 0xff2a3238, 0xfff1f1ee, KnobStyle::capped, 0xff2a2a2a, { 0xff8a8e92, 0xffb2443a }, 0xfff3e7c2, false },
+        { "Studer 169|A800 Bus|Analog Tape|Multitrack Tape|Tape Machine", 0xffb6b8b4, 0xff84868a, 0xff141414, 0xff3e4044, 0xff3e4044, 0xfff0f0ec, KnobStyle::capped, 0xff2a2a2a, { 0xff4a4c50 }, 0xff141414, true },
+        { "Neotek Channel", 0xff3a4a6a, 0xff24304a, 0xfff0f2f6, 0xffb4bed0, 0xff1e2a40, 0xfff0f2f6, KnobStyle::capped, 0xff2a2a2a, { 0xffd8d8d2, 0xffc33a32, 0xff2f5fae }, 0xff141414, false },
+        { "Ampex 350|Ampex 351|Tape Echo|Three-Head Echo|Backwards", 0xff7e8286, 0xff54585c, 0xfff2f2ee, 0xffc8cccf, 0xff3a3e42, 0xfff2f2ee, KnobStyle::skirted, 0xff151515, {  }, 0xfff3e7c2, false },
+        { "V72 V76", 0xff8a8e8a, 0xff5e625e, 0xff141414, 0xff3a3e3a, 0xff3a3e3a, 0xfff0f0ea, KnobStyle::skirted, 0xff151515, {  }, 0xfff3e7c2, false },
+        { "Echo Pro|Kaoss Pad|Nonlin|Level Loc", 0xff1d1e20, 0xff3a3b3e, 0xffdcdde0, 0xff8a8d90, 0xff2a2c2e, 0xffdcdde0, KnobStyle::aluminium, 0xff1a1a1a, {  }, 0xff141414, false },
+        { "Space Station|Ford Space Station", 0xff6a4a32, 0xff46301e, 0xfff0e6d6, 0xffc4b49c, 0xff2a1c12, 0xfff0e6d6, KnobStyle::aluminium, 0xff1a1a1a, {  }, 0xff141414, false },
+        { "AMS 15-80S", 0xff1f2d4a, 0xff314366, 0xffe6eaf2, 0xff9aa6bd, 0xff121b2e, 0xffe6eaf2, KnobStyle::aluminium, 0xff1a1a1a, {  }, 0xff141414, false },
+        { "Chorus Echo|RE-301", 0xff1c1c1c, 0xff3a3a3a, 0xffe8e8e4, 0xff94948f, 0xff3a6a4a, 0xfff2f2ee, KnobStyle::capped, 0xff141414, { 0xff2a2a2a }, 0xfff3e7c2, false },
+        { "Echorec", 0xffb0b4b6, 0xff7a7e80, 0xff1a1a1a, 0xff444648, 0xff8a2a22, 0xfff2f2ee, KnobStyle::skirted, 0xff151515, {  }, 0xfff3e7c2, true },
+        { "Copicat", 0xff2a2a2a, 0xff4a4a4a, 0xffd8b45a, 0xff9a8250, 0xffd8b45a, 0xff141414, KnobStyle::skirted, 0xff151515, {  }, 0xfff3e7c2, false },
+        { "Revox Loop|Repro Head", 0xffb8babc, 0xff7e8082, 0xff141414, 0xff44464a, 0xff2a2c2e, 0xffe8e8e4, KnobStyle::aluminium, 0xff1a1a1a, {  }, 0xff141414, true },
+        { "Rotary Speakers|Rotor", 0xff5a3a22, 0xff3a2414, 0xfff0dfc0, 0xffc4a880, 0xff2e1c0e, 0xfff0dfc0, KnobStyle::chicken, 0xff1a1a1a, {  }, 0xfff3e7c2, false },
+        { "Kit Crush 165A", 0xff1a1a1a, 0xff3a3a3a, 0xffe0e0dc, 0xff94948f, 0xffc4c6c7, 0xff141414, KnobStyle::aluminium, 0xff1a1a1a, {  }, 0xff141414, false },
+        { "Phone Line", 0xff9a9c9a, 0xff6a6c6a, 0xff141414, 0xff3a3c3a, 0xff2a2c2a, 0xffeeeeea, KnobStyle::chicken, 0xff151515, {  }, 0xfff3e7c2, false },
+        { "Talk Box", 0xff2a2a2a, 0xff4a4a4a, 0xffe6e6e2, 0xff94948f, 0xff8a8c8e, 0xff141414, KnobStyle::skirted, 0xff111111, {  }, 0xff141414, false },
+    };
+    for (auto* table : { &faces, &families })
+        for (auto& f : *table)
+            if (juce::StringArray::fromTokens (f.names, "|", "").contains (name))
+            {
+                hardwareFace = true;
+                PLATE = Colour (f.plate); PLATE_EDGE = Colour (f.edge); INK = Colour (f.ink); INK_SOFT = Colour (f.inkSoft);
+                titleBlock = Colour (f.block); titleInk = Colour (f.blockInk);
+                knobStyle = f.knob;
+                BAKELITE = Colour (f.cap); BAKELITE_HI = Colour (f.cap).brighter (0.25f);
+                for (auto c : f.caps) caps.push_back (Colour (c));
+                METER_FACE = Colour (f.meter);
+                brushed = f.brushed;
+                accent = titleBlock.getPerceivedBrightness() > 0.35f && titleBlock.getPerceivedBrightness() < 0.85f ? titleBlock : accent;
+                return;
+            }
 }
 
 //==============================================================================
@@ -185,7 +250,7 @@ PequodPanel::PequodPanel (PequodNative::Instance& p)
     }
     accent = Colour::fromString ("ff" + j["accent"].toString().removeCharacters ("#"));
     titleBlock = accent;
-    if (inst.info().vendor == "PEQUOD Hardware") applyHardwareFace (inst.info().name);
+    applyHardwareFace (inst.info().name);
     panelW = juce::jmax (200, i (j["w"], 640));
     panelH = juce::jmax (120, i (j["h"], 432));
 
