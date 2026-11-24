@@ -53,6 +53,9 @@ inline juce::String eraName (Era e)
     return names[juce::jlimit (0, numEras - 1, (int) e)];
 }
 
+/** MELVILLE's blue (verdigris): every decade's colours are drawn from it. */
+inline juce::Colour melvilleBlue() { return juce::Colour (0xff5fa8a0); }
+
 /** A typeface every Windows has, with the one Linux has for it. */
 inline juce::Font eraTypeface (const char* windows, const char* linuxName, float size, int style)
 {
@@ -93,16 +96,16 @@ inline void drawEraPanel (juce::Graphics& g, juce::Rectangle<float> r, Era e)
     {
         case Era::forties:
         {
-            // brown Bakelite, polished
-            grad (juce::Colour (0xff3a261a), juce::Colour (0xff1f130c));
+            // Bakelite in MELVILLE's blue-green, polished
+            grad (juce::Colour (0xff1f3b37), juce::Colour (0xff0e1d1b));
             g.setColour (juce::Colours::white.withAlpha (0.07f));
             g.fillRect (r.withHeight (r.getHeight() * 0.35f));
             break;
         }
         case Era::fifties:
         {
-            // grey-green hammertone, the broadcast desks' enamel
-            grad (juce::Colour (0xff47534a), juce::Colour (0xff2f3832));
+            // hammertone enamel in MELVILLE's blue-grey
+            grad (juce::Colour (0xff40544f), juce::Colour (0xff293834));
             juce::Random rnd (1953);
             for (int i = 0; i < (int) (r.getWidth() * r.getHeight() / 90.0f); ++i)
             {
@@ -114,8 +117,8 @@ inline void drawEraPanel (juce::Graphics& g, juce::Rectangle<float> r, Era e)
         }
         case Era::sixties:
         {
-            // dark brushed aluminium
-            grad (juce::Colour (0xff4b4e52), juce::Colour (0xff33363a));
+            // dark brushed aluminium, anodised a little blue-green
+            grad (juce::Colour (0xff485354), juce::Colour (0xff30393a));
             juce::Random rnd (1966);
             for (float y = top; y < bot; y += 1.0f)
             {
@@ -126,8 +129,8 @@ inline void drawEraPanel (juce::Graphics& g, juce::Rectangle<float> r, Era e)
         }
         case Era::seventies:
         {
-            // black anodised, walnut at the ends
-            grad (juce::Colour (0xff1c1b1a), juce::Colour (0xff0e0d0d));
+            // black anodised (a shade of the blue in it), walnut at the ends
+            grad (juce::Colour (0xff182120), juce::Colour (0xff0b100f));
             for (auto end : { r.withWidth (10.0f), r.withLeft (r.getRight() - 10.0f) })
             {
                 g.setGradientFill (juce::ColourGradient (juce::Colour (0xff6a4024), end.getX(), 0.0f, juce::Colour (0xff3b2213), end.getRight(), 0.0f, false));
@@ -137,17 +140,18 @@ inline void drawEraPanel (juce::Graphics& g, juce::Rectangle<float> r, Era e)
         }
         case Era::eighties:
         {
-            // charcoal, with the band of four colours along the foot
-            grad (juce::Colour (0xff2e2e2f), juce::Colour (0xff202021));
+            // charcoal, with a band of four of MELVILLE's blues along the foot
+            grad (juce::Colour (0xff2a2f2f), juce::Colour (0xff1c2121));
             const float w = r.getWidth() / 4.0f;
-            const juce::Colour band[] = { juce::Colour (0xffd8432f), juce::Colour (0xffea7f2a), juce::Colour (0xffe9c53b), juce::Colour (0xffe7e0cc) };
+            const auto b = melvilleBlue();
+            const juce::Colour band[] = { b.darker (0.7f), b.darker (0.3f), b, b.brighter (0.55f) };
             for (int i = 0; i < 4; ++i) { g.setColour (band[i]); g.fillRect (juce::Rectangle<float> (x + w * (float) i, bot - 6.0f, w, 3.0f)); }
             break;
         }
         case Era::nineties:
         {
-            // a 1U rack unit: blue-grey, with the ears' slots
-            grad (juce::Colour (0xff2d3240), juce::Colour (0xff1c1f29));
+            // a 1U rack unit in MELVILLE's blue-grey, with the ears' slots
+            grad (juce::Colour (0xff2a3a3b), juce::Colour (0xff182424));
             g.setColour (juce::Colours::white.withAlpha (0.08f));
             g.drawHorizontalLine ((int) top + 1, x, r.getRight());
             for (auto cx : { x + 10.0f, r.getRight() - 10.0f })
@@ -159,20 +163,20 @@ inline void drawEraPanel (juce::Graphics& g, juce::Rectangle<float> r, Era e)
         }
         case Era::noughties:
         {
-            // dark glass with a gloss across the top half
-            grad (juce::Colour (0xff2b3138), juce::Colour (0xff0f1215));
+            // dark blue-green glass with a gloss across the top half
+            grad (juce::Colour (0xff254042), juce::Colour (0xff0c1617));
             g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.16f), x, top, juce::Colours::white.withAlpha (0.03f), x, r.getCentreY(), false));
             g.fillRect (r.withHeight (r.getHeight() * 0.48f));
             break;
         }
         case Era::tens:
-            g.setColour (juce::Colour (0xff1f2023));      // flat
+            g.setColour (juce::Colour (0xff1b2525));      // flat
             g.fillRect (r);
             break;
         case Era::today:
-            g.setColour (juce::Colour (0xff17181b));
+            g.setColour (juce::Colour (0xff141b1b));
             g.fillRect (r);
-            g.setColour (juce::Colours::white.withAlpha (0.05f));
+            g.setColour (melvilleBlue().withAlpha (0.12f));
             g.drawHorizontalLine ((int) top, x, r.getRight());
             break;
         case Era::standard:
@@ -189,8 +193,8 @@ inline void drawBar (juce::Graphics& g, juce::Rectangle<int> bar, juce::Colour p
     drawEraPanel (g, bar.toFloat(), e);
     switch (e)
     {
-        case Era::forties:      // a brass line over the part's
-            g.setColour (juce::Colour (0xffc9a04a));
+        case Era::forties:      // a line of MELVILLE's blue over the part's
+            g.setColour (melvilleBlue());
             g.fillRect (bar.withHeight (1).withY (bar.getBottom() - 4));
             break;
         case Era::fifties:      // chrome
@@ -370,7 +374,7 @@ inline juce::Rectangle<float> drawKey (juce::Graphics& g, juce::Rectangle<float>
         case Era::forties:      // a Bakelite button in a brass bezel
             g.setColour (juce::Colour (0xffa9843c));
             g.fillRoundedRectangle (r, 7.0f);
-            gradFill (on ? partColour.withMultipliedBrightness (0.5f) : juce::Colour (0xff3b2619), 6.0f, 0.12f, 0.3f);
+            gradFill (on ? partColour.withMultipliedBrightness (0.5f) : juce::Colour (0xff1d3633), 6.0f, 0.12f, 0.3f);
             g.setColour (juce::Colours::white.withAlpha (0.10f));
             g.fillRoundedRectangle (cap.withHeight (cap.getHeight() * 0.4f).reduced (3.0f, 1.0f), 4.0f);
             return cap;
@@ -382,15 +386,15 @@ inline juce::Rectangle<float> drawKey (juce::Graphics& g, juce::Rectangle<float>
         case Era::sixties:      // a square grey pushbutton
             g.setColour (juce::Colour (0xff161718));
             g.fillRect (r);
-            gradFill (on ? partColour.withMultipliedBrightness (0.85f) : juce::Colour (0xffb9bab6), 1.0f, 0.05f, 0.15f);
+            gradFill (on ? partColour.withMultipliedBrightness (0.85f) : juce::Colour (0xffb6bdbb), 1.0f, 0.05f, 0.15f);
             g.setColour (juce::Colours::white.withAlpha (0.35f));
             g.drawHorizontalLine ((int) cap.getY() + 1, cap.getX() + 1.0f, cap.getRight() - 1.0f);
             return cap;
         case Era::seventies:    // black, the cap lit in its colour when it's on
             g.setColour (juce::Colour (0xff050505));
             g.fillRoundedRectangle (r, 3.0f);
-            gradFill (juce::Colour (0xff222120), 2.0f);
-            g.setColour (on ? partColour : juce::Colour (0xff3a3836));
+            gradFill (juce::Colour (0xff1f2726), 2.0f);
+            g.setColour (on ? partColour : melvilleBlue().withMultipliedBrightness (0.35f));
             g.fillRect (cap.removeFromBottom (4.0f).reduced (4.0f, 0.5f));
             if (on)
             {
@@ -402,7 +406,7 @@ inline juce::Rectangle<float> drawKey (juce::Graphics& g, juce::Rectangle<float>
         {
             g.setColour (juce::Colours::black.withAlpha (0.6f));
             g.fillRoundedRectangle (r.translated (0.0f, down ? 1.0f : 2.0f), 2.5f);
-            gradFill (on ? partColour : juce::Colour (0xff8f8e8a), 2.5f, 0.1f, 0.15f);
+            gradFill (on ? partColour : juce::Colour (0xff8a9290), 2.5f, 0.1f, 0.15f);
             g.setColour (juce::Colours::white.withAlpha (0.25f));
             g.drawHorizontalLine ((int) cap.getY() + 1, cap.getX() + 2.0f, cap.getRight() - 2.0f);
             return cap;
@@ -410,8 +414,8 @@ inline juce::Rectangle<float> drawKey (juce::Graphics& g, juce::Rectangle<float>
         case Era::nineties:     // soft rubber, with an LED over it
             g.setColour (juce::Colour (0xff0e0f14));
             g.fillRoundedRectangle (r, 7.0f);
-            gradFill (juce::Colour (0xff3a3f4c), 6.0f, 0.06f, 0.2f);
-            g.setColour (on ? juce::Colour (0xff5ef2d0) : juce::Colour (0xff1d3a35));
+            gradFill (juce::Colour (0xff344849), 6.0f, 0.06f, 0.2f);
+            g.setColour (on ? melvilleBlue().brighter (0.6f) : melvilleBlue().withMultipliedBrightness (0.3f));
             g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre ({ cap.getRight() - 6.0f, cap.getY() + 6.0f }));
             return cap;
         case Era::noughties:    // a glossy pill
@@ -419,17 +423,17 @@ inline juce::Rectangle<float> drawKey (juce::Graphics& g, juce::Rectangle<float>
             const float rad = cap.getHeight() * 0.5f;
             g.setColour (juce::Colours::black.withAlpha (0.7f));
             g.fillRoundedRectangle (r, rad + 1.0f);
-            gradFill (on ? partColour.withMultipliedBrightness (0.75f) : juce::Colour (0xff3d4550), rad, 0.15f, 0.35f);
+            gradFill (on ? partColour.withMultipliedBrightness (0.75f) : juce::Colour (0xff35494b), rad, 0.15f, 0.35f);
             g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.38f), 0.0f, cap.getY(), juce::Colours::white.withAlpha (0.05f), 0.0f, cap.getCentreY(), false));
             g.fillRoundedRectangle (cap.withHeight (cap.getHeight() * 0.5f).reduced (2.0f, 1.0f), rad * 0.8f);
             return cap;
         }
         case Era::tens:         // flat
-            g.setColour (on ? partColour : over ? juce::Colour (0xff33353a) : juce::Colour (0xff2a2c30));
+            g.setColour (on ? partColour : over ? juce::Colour (0xff2e3c3b) : juce::Colour (0xff253231));
             g.fillRect (cap);
             return cap;
         case Era::today:        // a soft rounded key
-            g.setColour (on ? partColour.withAlpha (0.28f) : juce::Colours::white.withAlpha (over ? 0.10f : 0.055f));
+            g.setColour (on ? partColour.withAlpha (0.28f) : melvilleBlue().withAlpha (over ? 0.16f : 0.08f));
             g.fillRoundedRectangle (cap, 8.0f);
             if (on) { g.setColour (partColour.withAlpha (0.7f)); g.drawRoundedRectangle (cap, 8.0f, 1.0f); }
             return cap;
