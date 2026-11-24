@@ -38,18 +38,18 @@ inline juce::Colour dimColour()    { return juce::Colour (0xff8f8a80); }
 
 //==============================================================================
 /** MELVILLE's theme: the decade the header bars (and MELVILLE's own bar) are dressed for.
-    STANDARD is the look they had before there was a choice. One setting for the whole
-    program (MELVILLE keeps it), read whenever a header is drawn. The bars stay dark in every
-    decade, so the parts' own status lines read on all of them. */
-enum class Era { standard = 0, forties, fifties, sixties, seventies, eighties, nineties, noughties, tens, today };
-constexpr int numEras = 10;
+    The 2020s unless it's changed. One setting for the whole program (MELVILLE keeps it), read
+    whenever a header is drawn. The bars stay dark in every decade, so the parts' own status
+    lines read on all of them. */
+enum class Era { forties = 0, fifties, sixties, seventies, eighties, nineties, noughties, tens, today };
+constexpr int numEras = 9;
 
-inline std::atomic<int>& eraState() { static std::atomic<int> e { 0 }; return e; }
+inline std::atomic<int>& eraState() { static std::atomic<int> e { (int) Era::today }; return e; }
 inline Era era()                     { return (Era) juce::jlimit (0, numEras - 1, eraState().load()); }
 inline void setEra (Era e)           { eraState() = (int) e; }
 inline juce::String eraName (Era e)
 {
-    static const char* names[] = { "Standard", "1940s", "1950s", "1960s", "1970s", "1980s", "1990s", "2000s", "2010s", "Today" };
+    static const char* names[] = { "1940s", "1950s", "1960s", "1970s", "1980s", "1990s", "2000s", "2010s", "2020s" };
     return names[juce::jlimit (0, numEras - 1, (int) e)];
 }
 
@@ -82,7 +82,6 @@ inline juce::Font eraNameFont (Era e, float size)
         case Era::noughties: return eraTypeface ("Tahoma", "DejaVu Sans", size * 0.78f, juce::Font::bold);
         case Era::tens:      return eraTypeface ("Segoe UI Light", "Liberation Sans", size * 0.86f, juce::Font::plain).withExtraKerningFactor (0.06f);
         case Era::today:     return eraTypeface ("Segoe UI Semibold", "Liberation Sans", size * 0.84f, juce::Font::bold);
-        case Era::standard:  break;
     }
     return juce::Font (juce::FontOptions (size, juce::Font::bold));
 }
@@ -178,10 +177,6 @@ inline void drawEraPanel (juce::Graphics& g, juce::Rectangle<float> r, Era e)
             g.fillRect (r);
             g.setColour (melvilleBlue().withAlpha (0.12f));
             g.drawHorizontalLine ((int) top, x, r.getRight());
-            break;
-        case Era::standard:
-            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1b1c1e), 0.0f, top, barColour(), 0.0f, bot, false));
-            g.fillRect (r);
             break;
     }
 }
@@ -437,8 +432,6 @@ inline juce::Rectangle<float> drawKey (juce::Graphics& g, juce::Rectangle<float>
             g.fillRoundedRectangle (cap, 8.0f);
             if (on) { g.setColour (partColour.withAlpha (0.7f)); g.drawRoundedRectangle (cap, 8.0f, 1.0f); }
             return cap;
-        case Era::standard:
-            break;
     }
     g.setColour (juce::Colour (0xff0d0e0f));
     g.fillRoundedRectangle (r, 5.0f);
@@ -519,7 +512,7 @@ inline void drawWordmark (juce::Graphics& g, juce::Rectangle<int> area, const ju
                           juce::Colour partColour, juce::Font nameFont)
 {
     auto a = area.withSizeKeepingCentre (area.getWidth(), 42);
-    if (era() != Era::standard) nameFont = eraNameFont (era(), nameFont.getHeight());    // (the decade's lettering)
+    nameFont = eraNameFont (era(), nameFont.getHeight());    // (the decade's lettering)
     g.setColour (partColour);
     g.setFont (nameFont);
     g.drawFittedText (name, a.removeFromTop (28), juce::Justification::bottomLeft, 1, 0.75f);
