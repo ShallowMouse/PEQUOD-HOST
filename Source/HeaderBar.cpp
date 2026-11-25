@@ -211,6 +211,9 @@ HeaderBar::HeaderBar (HostEngine& e, ControlSurface& c, Tuner& t)
     for (auto* b : std::initializer_list<juce::Button*> { &prevButton, &nextButton, &presetButton, &saveButton, &saveAsButton, &initButton,
                      &learnButton, &audioButton, &pluginsButton, &controllerButton })
         addAndMakeVisible (b);
+   #if ! JUCE_PLUGINHOST_VST3
+    pluginsButton.setVisible (false);      // (in MELVILLE every effect is built in: no VST3s to scan)
+   #endif
 
     addAndMakeVisible (tunerDisplay);
     addAndMakeVisible (tempoDisplay);
@@ -533,8 +536,11 @@ void HeaderBar::resized()
     r.removeFromRight (8);
     cpuButton.setBounds (row (r.removeFromRight (z.cpu), 40));
     r.removeFromRight (8);
-    pluginsButton.setBounds (row (r.removeFromRight (partui::keyWidth), partui::keyHeight));
-    r.removeFromRight (4);
+    if (pluginsButton.isVisible())
+    {
+        pluginsButton.setBounds (row (r.removeFromRight (partui::keyWidth), partui::keyHeight));
+        r.removeFromRight (4);
+    }
     controllerButton.setBounds (row (r.removeFromRight (z.controller)));
     r.removeFromRight (4);
     audioButton.setBounds (row (r.removeFromRight (partui::keyWidth), partui::keyHeight));

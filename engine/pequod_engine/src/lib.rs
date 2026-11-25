@@ -340,6 +340,8 @@ static FNS: &[fn() -> Descriptor] = &[
         hw_fairchild670::pequod_native,
         hw_fairlight::pequod_native,
         hw_h3000::pequod_native,
+        hw_juno106::pequod_native,
+        hw_juno60::pequod_native,
         hw_jupiter8::pequod_native,
         hw_la2a::pequod_native,
         hw_la3a::pequod_native,

@@ -424,8 +424,10 @@ void HostEngine::attachListener (PluginSlot& slot)
 }
 
 
-std::shared_ptr<PluginSlot> HostEngine::createSlot (const juce::PluginDescription& desc, juce::String& error)
+std::shared_ptr<PluginSlot> HostEngine::createSlot (const juce::PluginDescription& asked, juce::String& error)
 {
+    // an old PEQUOD / Studio Two VST3 of a built-in plugin: the built-in one (its own panel, no plugin window)
+    const auto desc = [&] { if (auto* i = PequodNative::nativeFor (asked)) return PequodNative::describe (*i); return asked; }();
     const double sr = rack->getCurrentSampleRate();
     const int bs = rack->getCurrentBlockSize();
 
@@ -945,9 +947,8 @@ bool HostEngine::loadRackXml (const juce::XmlElement& root, juce::StringArray& e
             if (known.isDuplicateOf (desc)) { desc = known; break; }
 
         // A PEQUOD plugin saved as a VST3 runs on the built-in engine (it reads the VST3's settings).
-        if (desc.pluginFormatName != PequodNative::formatName && desc.manufacturerName.startsWith ("PEQUOD"))
-            for (auto& i : PequodNative::all())
-                if (i.name == desc.name && i.vendor == desc.manufacturerName) { desc = PequodNative::describe (i); break; }
+        if (auto* i = PequodNative::nativeFor (desc))
+            desc = PequodNative::describe (*i);
 
         if (skipPlugins.contains (desc.name, true))
         {

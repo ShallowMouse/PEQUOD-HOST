@@ -2255,6 +2255,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hw_juno106"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
+name = "hw_juno60"
+version = "1.0.1"
+dependencies = [
+ "nih_plug",
+ "vintage",
+]
+
+[[package]]
 name = "hw_jupiter8"
 version = "1.0.1"
 dependencies = [
@@ -4213,6 +4229,8 @@ dependencies = [
  "hw_fairchild670",
  "hw_fairlight",
  "hw_h3000",
+ "hw_juno106",
+ "hw_juno60",
  "hw_jupiter8",
  "hw_la2a",
  "hw_la3a",

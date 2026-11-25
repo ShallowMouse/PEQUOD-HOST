@@ -153,8 +153,8 @@ void BrowserPanel::refresh()
             auto& t = types.getReference (i);
 
             // The same plugin installed twice (e.g. in its collection and in PEQUOD Pedals): show it once.
-            if (! seen.insert (PluginTags::duplicateKey (t)).second)
-            {
+            if (! seen.insert (PluginTags::duplicateKey (t)).second || PequodNative::nativeFor (t) != nullptr)
+            {   // (an old PEQUOD / Studio Two VST3 of a built-in plugin: the built-in one is listed)
                 ++hiddenDuplicates;
                 continue;
             }

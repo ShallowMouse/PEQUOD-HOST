@@ -63,6 +63,11 @@ MainComponent::MainComponent()
     // Plugins
     if (auto xml = settings->getXmlValue ("knownPlugins"))
         engine.knownPlugins.recreateFromXml (*xml);
+   #if ! JUCE_PLUGINHOST_VST3
+    for (auto& t : engine.knownPlugins.getTypes())         // (in MELVILLE: built-in plugins only - old VST3 entries go)
+        if (t.pluginFormatName != PequodNative::formatName)
+            engine.knownPlugins.removeType (t);
+   #endif
     PequodNative::registerAll (engine.knownPlugins);   // the built-in PEQUOD plugins: always there, no scan
     engine.knownPlugins.addChangeListener (this);
 
@@ -329,8 +334,10 @@ MainComponent::MainComponent()
     }
     browser.setCurrentPresetFile (currentPresetFile);
 
+   #if JUCE_PLUGINHOST_VST3     // (in MELVILLE everything is built in: nothing to scan for)
     if (engine.knownPlugins.getNumTypes() <= (int) PequodNative::all().size())
         juce::MessageManager::callAsync ([this] { showPluginManager (true); });
+   #endif
 
     setWantsKeyboardFocus (true);
     setSize (1440, 900);

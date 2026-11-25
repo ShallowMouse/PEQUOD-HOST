@@ -49,7 +49,7 @@ namespace PluginColours
             { "Synths, keys & instruments", 0x3F6B2A, "6120 Voice|Archtop|B-3 Organ|Bass Line|Bass Pedals|Bass Voice|Clavi D6|Clavioline|Combo Compact|Compact Organ|Dream Machine|Electric Grand|FM 7|Juno Six|"
                 "Model 72|Music Master|P-Bass Voice|Pianet|Prophet Five|Red Special|Reed 200|RS-202|Stage 73|String Ensemble|Synare 3|Tape 400|Tonewheel Organ|TR-606|"
                 "Twenty-Six|Upright Slap|VCS3|Continental|Foxton Bass|Ricky 330|"
-                "ARP Odyssey|ARP 2600|Oberheim OB-X|Roland Jupiter-8|Moog Polymoog|Fairlight CMI|Hammond Novachord" },
+                "ARP Odyssey|ARP 2600|Oberheim OB-X|Roland Jupiter-8|Moog Polymoog|Fairlight CMI|Hammond Novachord|Roland Juno-60|Roland Juno-106" },
             { "Lo-fi & character", 0x8C2F62, "Car Radio|Cheap Speaker|Lo-Fi Crush|Phone Line|Practice Amp Vocal|Transcription Disc|Laptop Diary" },
             { "Microphones", 0x444B52, "Mic Pair|Studio Mics" },
             { "Experimental & pitch", 0x3B336B, "Drop Tune|Feedback|Freeze|Guitar Orchestra|Harmonizer|HOG|POG|Sympathy|Whammy" },

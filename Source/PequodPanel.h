@@ -127,6 +127,7 @@ private:
     juce::Rectangle<float> irClear (const Item&) const;
 
     void drawFaceplate (juce::Graphics&) const;
+    juce::Image plateCache;      // the faceplate (plate, grain, name block) drawn once: scrolling and meters only redraw the controls
     void rackLayout();                      // (rack-mounted) the controls into rows, the panel to whole units
     juce::Rectangle<float> itemBounds (const Item&) const;
     static bool& rackMountedFlag() noexcept { static bool b = false; return b; }

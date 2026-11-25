@@ -64,6 +64,33 @@ juce::PluginDescription describe (const Info& i)
     return d;
 }
 
+const Info* nativeFor (const juce::PluginDescription& d)
+{
+    if (d.pluginFormatName == formatName) return nullptr;
+    // the id JUCE gives the VST3 of the same class (its TUID, as the VST3 SDK's FUID reads it)
+    auto vst3Id = [] (const juce::String& cid) -> int
+    {
+        uint8_t b[16] {};
+        const auto utf = cid.toRawUTF8();
+        for (int k = 0; k < 16 && utf[k] != 0; ++k) b[k] = (uint8_t) utf[k];
+        auto mk = [] (uint8_t a, uint8_t bb, uint8_t c, uint8_t dd) { return ((uint32_t) a << 24) | ((uint32_t) bb << 16) | ((uint32_t) c << 8) | dd; };
+       #if JUCE_WINDOWS
+        const uint32_t l[4] { mk (b[3], b[2], b[1], b[0]), mk (b[5], b[4], b[7], b[6]), mk (b[8], b[9], b[10], b[11]), mk (b[12], b[13], b[14], b[15]) };
+       #else
+        const uint32_t l[4] { mk (b[0], b[1], b[2], b[3]), mk (b[4], b[5], b[6], b[7]), mk (b[8], b[9], b[10], b[11]), mk (b[12], b[13], b[14], b[15]) };
+       #endif
+        uint32_t v = 0;
+        for (auto x : l) v = v * 31u + x;
+        return (int) v;
+    };
+    for (auto& i : all())
+        if (i.instrument == d.isInstrument
+            && (vst3Id (i.classId) == d.uniqueId
+                || (i.name.equalsIgnoreCase (d.name) && (d.manufacturerName.startsWithIgnoreCase ("PEQUOD") || d.manufacturerName.containsIgnoreCase ("Studio Two")))))
+            return &i;
+    return nullptr;
+}
+
 const juce::var& panelOf (const Info& i)
 {
     // parsed on first use (all on the message thread)

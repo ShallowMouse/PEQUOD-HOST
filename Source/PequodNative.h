@@ -29,6 +29,8 @@ namespace PequodNative
     const std::vector<Info>& all();
     const Info* find (const juce::String& fileOrIdentifier);
     juce::PluginDescription describe (const Info&);
+    /** The built-in plugin a scanned VST3 is a copy of (an old PEQUOD / Studio Two install), or null. */
+    const Info* nativeFor (const juce::PluginDescription&);
 
     /** The panel layout JSON, parsed. */
     const juce::var& panelOf (const Info&);

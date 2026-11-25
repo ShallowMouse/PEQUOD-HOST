@@ -171,6 +171,8 @@ void PequodPanel::applyHardwareFace (const juce::String& name)
     // every other plugin after a real box: its family's paint, ink and knobs
     static const std::vector<F> families {
         // instruments: their own cases and panels
+        { "Roland Juno-60", 0xff1c1d1f, 0xff3a3b3e, 0xffe8e8e4, 0xff9a9a96, 0xff2a2b2e, 0xffe8e8e4, KnobStyle::capped, 0xff2a2a2a, { 0xffe8e2d0, 0xffd86a22, 0xff2f8ac8 }, 0xff141414, false },
+        { "Roland Juno-106", 0xff1a1b1d, 0xff38393c, 0xffe8e8e4, 0xff9a9a96, 0xffc8cacc, 0xff141414, KnobStyle::capped, 0xff2a2a2a, { 0xffeeeeea, 0xffc33a32 }, 0xff141414, false },
         { "TR-606", 0xffc2c4c6, 0xff8c8e90, 0xff141414, 0xff44464a, 0xff1a1a1a, 0xffe8eaec, KnobStyle::capped, 0xff1a1a1a, { 0xffd86a22, 0xff2a2a2a }, 0xff141414, true },
         { "Bass Line", 0xffc2c4c6, 0xff8c8e90, 0xff141414, 0xff44464a, 0xff1a1a1a, 0xffe8eaec, KnobStyle::capped, 0xff1a1a1a, { 0xff1a1a1a }, 0xff141414, true },
         { "Juno Six", 0xff1c1d1f, 0xff3a3b3e, 0xffe8e8e4, 0xff9a9a96, 0xff2a2b2e, 0xffe8e8e4, KnobStyle::capped, 0xff2a2a2a, { 0xffe8e2d0, 0xffd86a22 }, 0xff141414, false },
@@ -404,6 +406,7 @@ PequodPanel::PequodPanel (PequodNative::Instance& p)
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
 
     rack = isRackMounted();
+    setOpaque (rack || hardwareFace);     // (edge to edge: nothing behind it needs redrawing)
     if (rack) rackLayout();
     else if (! presets.empty())
     {
@@ -527,7 +530,22 @@ juce::String PequodPanel::text (int p) const
 void PequodPanel::paint (juce::Graphics& g)
 {
     textBounds = getLocalBounds().toFloat();
-    drawFaceplate (g);
+    if (textLog != nullptr)
+        drawFaceplate (g);       // (checking: every word logged)
+    else
+    {
+        const float sc = juce::jmax (1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+        const int iw = juce::roundToInt ((float) getWidth() * sc), ih = juce::roundToInt ((float) getHeight() * sc);
+        if (! plateCache.isValid() || plateCache.getWidth() != iw || plateCache.getHeight() != ih)
+        {
+            plateCache = juce::Image (juce::Image::ARGB, juce::jmax (1, iw), juce::jmax (1, ih), true);
+            juce::Graphics ig (plateCache);
+            ig.addTransform (juce::AffineTransform::scale (sc));
+            drawFaceplate (ig);
+            textBounds = getLocalBounds().toFloat();
+        }
+        g.drawImage (plateCache, getLocalBounds().toFloat());
+    }
 
     for (int k = 0; k < (int) items.size(); ++k)
     {
