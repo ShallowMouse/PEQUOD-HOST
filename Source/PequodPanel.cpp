@@ -46,6 +46,11 @@ namespace
     }
 
     /** egui's painter.text(): `align` -1/0/1 per axis says which point of the text sits at `at`. */
+    /** (checking: every piece of text a panel draws, where it lands - see PEQUOD_PANEL_SHOTS) */
+    std::vector<std::pair<juce::Rectangle<float>, juce::String>>* textLog = nullptr;
+    /** The panel being painted: text is nudged back inside it rather than cut off at an edge. */
+    juce::Rectangle<float> textBounds;
+
     void say (juce::Graphics& g, const juce::String& s, Pt at, int ax, int ay, float size, Colour c, bool mono = false)
     {
         auto fnt = font (size, mono);
@@ -53,8 +58,12 @@ namespace
         g.setColour (c);
         const float w = juce::GlyphArrangement::getStringWidth (fnt, s) + 2.0f;
         const float h = fnt.getHeight();
-        const float x = ax < 0 ? at.x : ax > 0 ? at.x - w : at.x - w * 0.5f;
+        float x = ax < 0 ? at.x : ax > 0 ? at.x - w : at.x - w * 0.5f;
         const float y = ay < 0 ? at.y : ay > 0 ? at.y - h : at.y - h * 0.5f;
+        if (! textBounds.isEmpty() && w < textBounds.getWidth() - 8.0f)
+            x = juce::jlimit (textBounds.getX() + 4.0f, textBounds.getRight() - w - 2.0f, x);
+        if (textLog != nullptr && s.trim().isNotEmpty())
+            textLog->push_back ({ Rect (x, y, w - 2.0f, h * 0.8f).translated (0.0f, h * 0.1f), s });
         g.drawText (s, Rect (x, y, w, h), ax < 0 ? juce::Justification::centredLeft : ax > 0 ? juce::Justification::centredRight : juce::Justification::centred, false);
     }
 
@@ -63,7 +72,10 @@ namespace
     {
         float sz = size;
         while (sz > 7.0f && juce::GlyphArrangement::getStringWidth (font (sz), s) > maxW) sz -= 0.5f;
-        say (g, s, at, -1, 0, sz, c);
+        auto t = s;
+        while (t.length() > 4 && juce::GlyphArrangement::getStringWidth (font (sz), t) > maxW)
+            t = t.dropLastCharacters (2).trimEnd() + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6"));
+        say (g, t, at, -1, 0, sz, c);
     }
 
     void line (juce::Graphics& g, Pt a, Pt b, float width, Colour c)
@@ -120,7 +132,7 @@ namespace
     (its paint, its ink, the knobs it wore), with no maker's name or logo on it. */
 void PequodPanel::applyHardwareFace (const juce::String& name)
 {
-    struct F { const char* names; uint32_t plate, edge, ink, inkSoft, block, blockInk; KnobStyle knob; uint32_t cap; std::initializer_list<uint32_t> caps; uint32_t meter; bool brushed; };
+    struct F { const char* names; uint32_t plate, edge, ink, inkSoft, block, blockInk; KnobStyle knob; uint32_t cap; std::vector<uint32_t> caps; uint32_t meter; bool brushed; };
     static const std::vector<F> faces {
         // compressors
         { "Fairchild 670",        0xff5d625f, 0xff3d413f, 0xfff0ece0, 0xffb8b4a8, 0xff3a3e3c, 0xfff0ece0, KnobStyle::skirted,   0xff151515, {}, 0xfff3e7c2, false },
@@ -293,7 +305,7 @@ void PequodPanel::applyHardwareFace (const juce::String& name)
                 for (auto c : f.caps) caps.push_back (Colour (c));
                 METER_FACE = Colour (f.meter);
                 brushed = f.brushed;
-                accent = titleBlock.getPerceivedBrightness() > 0.35f && titleBlock.getPerceivedBrightness() < 0.85f ? titleBlock : accent;
+                accent = highlightFor();
                 return;
             }
 }
@@ -393,6 +405,35 @@ PequodPanel::PequodPanel (PequodNative::Instance& p)
 
     rack = isRackMounted();
     if (rack) rackLayout();
+    else if (! presets.empty())
+    {
+        // the full-size panel keeps its size; if its lowest controls reach the preset bar, the rows
+        // close up a little (the gaps between them, not the controls) so the bar sits clear below
+        float top = 1.0e9f, lowest = 0.0f;
+        for (auto& it : items)
+        {
+            if (it.kind == Kind::divider) continue;
+            const float t = it.kind == Kind::knob ? it.y - it.r : it.kind == Kind::selector ? it.y - 20.0f : it.y;
+            const float b = it.kind == Kind::knob ? it.y + it.r + 22.0f : it.kind == Kind::selector ? it.y + 36.0f
+                          : it.kind == Kind::sw ? it.y + 9.0f : it.kind == Kind::text ? it.y + it.size * 0.6f
+                          : it.kind == Kind::radio ? it.y + (float) ((it.labels.size() + juce::jmax (1, it.cols) - 1) / juce::jmax (1, it.cols)) * it.rowH
+                          : it.y + it.h;
+            top = juce::jmin (top, t);
+            // (only what's above the footer itself: the preset bar and its PRESET label, and [PEQUOD])
+            const float hw = it.kind == Kind::knob ? it.r + 30.0f : it.kind == Kind::selector ? 50.0f : it.kind == Kind::sw ? 50.0f : it.w * 0.5f;
+            const float cx = it.kind == Kind::knob || it.kind == Kind::selector || it.kind == Kind::sw ? it.x : it.x + it.w * 0.5f;
+            const bool overBar = cx + hw > presetPrevRect().getX() - 60.0f && cx - hw < presetNextRect().getRight();
+            const bool overTag = cx - hw < 120.0f;
+            if (overBar || overTag) lowest = juce::jmax (lowest, b);
+        }
+        const float limit = (float) panelH - 50.0f;
+        if (lowest > limit && lowest > top + 1.0f)
+        {
+            const float k = juce::jmax (0.8f, (limit - top) / (lowest - top));
+            for (auto& it : items)
+                it.y = top + (it.y - top) * k;
+        }
+    }
     setSize (panelW, panelH);
     setWantsKeyboardFocus (false);
     startTimerHz (30);
@@ -485,6 +526,7 @@ juce::String PequodPanel::text (int p) const
 //==============================================================================
 void PequodPanel::paint (juce::Graphics& g)
 {
+    textBounds = getLocalBounds().toFloat();
     drawFaceplate (g);
 
     for (int k = 0; k < (int) items.size(); ++k)
@@ -514,7 +556,7 @@ void PequodPanel::paint (juce::Graphics& g)
     }
 
     const float h = (float) panelH;
-    if (rack) { if (presets.empty()) say (g, "[PEQUOD]", { 16.0f, h - 14.0f }, -1, 0, 10.0f, CREAM.withAlpha (0.6f), true); }
+    if (rack) { if (presets.empty()) say (g, "[PEQUOD]", { 16.0f, h - 14.0f }, -1, 0, 10.0f, (hardwareFace ? titleInk : CREAM).withAlpha (0.6f), true); }
     else      say (g, "[PEQUOD]", { 38.0f, h - 36.0f }, -1, 0, 12.0f, Colour (0xffa8823a), true);
     if (! presets.empty())
     {
@@ -553,14 +595,31 @@ void PequodPanel::drawFaceplate (juce::Graphics& g) const
         drawPlateTexture (g, getLocalBounds().toFloat());
         g.setColour (PLATE_EDGE);
         g.drawRect (getLocalBounds().toFloat(), 2.0f);
-        const Rect band (0.0f, 14.0f, w, 52.0f);
+        // the name strip: as tall as it can be above the controls (52 px), shallower if they sit high
+        float top = h;
+        for (auto& it : items)
+            top = juce::jmin (top, it.kind == Kind::knob ? it.y - it.r - 26.0f : it.kind == Kind::selector ? it.y - 46.0f
+                                 : it.kind == Kind::divider ? h : it.y - 12.0f);
+        const float bh = juce::jlimit (34.0f, 52.0f, top - 14.0f - 6.0f);
+        const Rect band (0.0f, 14.0f, w, bh);
         g.setColour (titleBlock);
         g.fillRect (band);
         g.setColour (blackAlpha (70));
         g.fillRect (band.withY (band.getBottom()).withHeight (2.0f));
-        say (g, title, { 44.0f, 40.0f }, -1, 0, 28.0f, titleInk);
-        say (g, sub1, { w - 44.0f, 34.0f }, 1, 0, 11.5f, titleInk.withAlpha (0.85f));
-        say (g, sub2, { w - 44.0f, 50.0f }, 1, 0, 11.5f, titleInk.withAlpha (0.85f));
+        textBounds = getLocalBounds().toFloat();
+        float ts = juce::jmin (28.0f, bh * 0.54f);
+        while (ts > 14.0f && juce::GlyphArrangement::getStringWidth (font (ts), title) > w * 0.5f) ts -= 1.0f;
+        const float mid = band.getCentreY(), gap = juce::jmin (8.0f, bh * 0.16f);
+        say (g, title, { 44.0f, mid }, -1, 0, ts, titleInk);
+        const float room = w - 88.0f - juce::GlyphArrangement::getStringWidth (font (ts), title) - 24.0f;
+        for (int k = 0; k < 2; ++k)
+        {
+            const auto& sub = k == 0 ? sub1 : sub2;
+            float ss = juce::jmin (11.5f, bh * 0.24f);
+            while (ss > 7.5f && juce::GlyphArrangement::getStringWidth (font (ss), sub) > room) ss -= 0.5f;
+            const float sw = juce::GlyphArrangement::getStringWidth (font (ss), sub);
+            sayFit (g, sub, { w - 44.0f - juce::jmin (sw, room), k == 0 ? mid - gap : mid + gap }, room, ss, titleInk.withAlpha (0.85f));
+        }
         for (auto c : { Pt (16.0f, 8.0f), Pt (w - 16.0f, 8.0f), Pt (16.0f, h - 10.0f), Pt (w - 16.0f, h - 10.0f) })
         {
             circle (g, c + Pt (0.4f, 0.8f), 5.0f, blackAlpha (90));
@@ -599,6 +658,38 @@ void PequodPanel::drawFaceplate (juce::Graphics& g) const
         circle (g, c, 4.8f, Colour (0xffcfc4ab));
         line (g, c - Pt (3.5f, 1.0f), c + Pt (3.5f, 1.0f), 1.4f, INK_SOFT);
     }
+}
+
+/** The face's highlight (a switch that's on, a value's arc, the chosen radio button): the
+    colour of its knob caps or its name strip, if either is a real colour, else an amber lamp. */
+Colour PequodPanel::highlightFor() const
+{
+    std::vector<Colour> candidates (caps.begin(), caps.end());
+    candidates.push_back (titleBlock);
+    candidates.push_back (PLATE);
+    for (auto c : candidates)
+        if (c.getSaturation() > 0.35f && c.getBrightness() > 0.35f && std::abs (c.getPerceivedBrightness() - PLATE.getPerceivedBrightness()) > 0.12f)
+            return c;
+    for (auto c : candidates)
+        if (c.getSaturation() > 0.35f && c.getBrightness() > 0.35f)
+            return PLATE.getPerceivedBrightness() > 0.5f ? c.darker (0.4f) : c.brighter (0.3f);
+    return Colour (0xffe0a030);
+}
+
+/** The preset display: a dark window, lit in the meter's colour (or amber, if the meters are black). */
+Colour PequodPanel::displayBg() const
+{
+    return BAKELITE.getPerceivedBrightness() < 0.3f ? BAKELITE : Colour (0xff1c1a18);
+}
+Colour PequodPanel::displayInk() const
+{
+    return METER_FACE.getPerceivedBrightness() > 0.5f ? METER_FACE : Colour (0xffe0a030);
+}
+
+/** Text on the highlight: dark on a pale one, cream on a deep one. */
+Colour PequodPanel::onAccent() const
+{
+    return accent.getPerceivedBrightness() > 0.62f ? Colour (0xff141414) : CREAM;
 }
 
 void PequodPanel::drawPlateTexture (juce::Graphics& g, Rect r) const
@@ -763,6 +854,11 @@ void PequodPanel::drawSwitch (juce::Graphics& g, const Item& it, int index) cons
     }
     g.setColour (BAKELITE);
     g.fillRoundedRectangle (pill, 8.0f);
+    if (hardwareFace)
+    {
+        g.setColour (PLATE_EDGE.withAlpha (0.9f));
+        g.drawRoundedRectangle (pill, 8.0f, 1.0f);
+    }
     if (on)
     {
         g.setColour (accent);
@@ -792,16 +888,46 @@ void PequodPanel::drawSelector (juce::Graphics& g, const Item& it, int index) co
     const float r = 20.0f;
     const Pt c (it.x, it.y);
     const int current = indexOf (it.p);
+    // where each position's label goes: side ones hang outward to clear the knob; crowded ones
+    // get smaller, and if they still touch, every other one steps out
+    struct L { Pt at; int ax; Rect box; };
+    auto place = [&] (float size, bool stagger)
+    {
+        std::vector<L> ls;
+        for (int k = 0; k < n && k < it.labels.size(); ++k)
+        {
+            const float a = selectorAngle (it, k);
+            const float out = stagger && (k % 2 == 1) ? 12.0f : 0.0f;
+            L l;
+            if (n >= 4 && std::sin (a) > 0.6f)       { l.at = polar (c, r + 12.0f + out, a); l.ax = -1; }
+            else if (n >= 4 && std::sin (a) < -0.6f) { l.at = polar (c, r + 12.0f + out, a); l.ax = 1; }
+            else                                     { l.at = polar (c, r + 20.0f + out, a); l.ax = 0; }
+            const float w = juce::GlyphArrangement::getStringWidth (font (size), it.labels[k]);
+            const float hh = size * 0.9f;
+            const float x = l.ax < 0 ? l.at.x : l.ax > 0 ? l.at.x - w : l.at.x - w * 0.5f;
+            l.box = Rect (x, l.at.y - hh * 0.5f, w, hh);
+            ls.push_back (l);
+        }
+        return ls;
+    };
+    auto clashes = [] (const std::vector<L>& ls)
+    {
+        for (size_t a = 0; a < ls.size(); ++a)
+            for (size_t b = a + 1; b < ls.size(); ++b)
+                if (ls[a].box.intersects (ls[b].box)) return true;
+        return false;
+    };
+    float size = 10.0f;
+    bool stagger = false;
+    auto ls = place (size, stagger);
+    while (clashes (ls) && size > 7.5f) { size -= 0.5f; ls = place (size, stagger); }
+    if (clashes (ls)) { stagger = true; ls = place (size, stagger); }
     for (int k = 0; k < n; ++k)
     {
         const float a = selectorAngle (it, k);
         line (g, polar (c, r + 4.0f, a), polar (c, r + 9.0f, a), 1.5f, INK);
-        if (k >= it.labels.size()) continue;
-        const auto col = k == current ? accent : INK_SOFT;
-        // side labels hang outward so they clear the knob
-        if (n >= 4 && std::sin (a) > 0.6f)       say (g, it.labels[k], polar (c, r + 12.0f, a), -1, 0, 10.0f, col);
-        else if (n >= 4 && std::sin (a) < -0.6f) say (g, it.labels[k], polar (c, r + 12.0f, a), 1, 0, 10.0f, col);
-        else                                     say (g, it.labels[k], polar (c, r + 20.0f, a), 0, 0, 10.0f, col);
+        if (k >= (int) ls.size()) continue;
+        say (g, it.labels[k], ls[(size_t) k].at, ls[(size_t) k].ax, 0, size, k == current ? accent : INK_SOFT);
     }
     // chicken-head knob
     const float a = selectorAngle (it, current);
@@ -832,6 +958,9 @@ void PequodPanel::drawMeter (juce::Graphics& g, const Item& it) const
     const float font = juce::jmax (8.5f, 11.0f * s);
     const Rect rect (it.x, it.y, it.w, it.h);
     const bool gr = it.meterKind == "gr";
+    // the meter's own printing: dark on a lit cream face, pale on a black one
+    const bool paleFace = METER_FACE.getPerceivedBrightness() > 0.5f;
+    const Colour mInk = paleFace ? Colour (0xff1a120c) : Colour (0xffe8e4d8), mInkSoft = mInk.withAlpha (0.7f);
     const float value = juce::isPositiveAndBelow (it.m, (int) shown.size()) ? shown[(size_t) it.m] : (gr ? 0.0f : -25.0f);
     g.setColour (BAKELITE);
     g.fillRoundedRectangle (rect.expanded (5.0f * s), 6.0f * s);
@@ -861,32 +990,32 @@ void PequodPanel::drawMeter (juce::Graphics& g, const Item& it) const
     const float redFrom = gr ? 10.0f : 0.0f, redTo = gr ? 20.0f : 3.0f;
     polyline (g, 20, [&] (int k) { return polar (pivot, radius - 22.0f * s, map (redFrom + (redTo - redFrom) * (float) k / 20.0f)); }, 4.0f * s, accent);
     const float lo = gr ? 0.0f : -20.0f, hi = gr ? 20.0f : 3.0f;
-    polyline (g, 40, [&] (int k) { return polar (pivot, radius - 26.0f * s, map (lo + (hi - lo) * (float) k / 40.0f)); }, 1.2f, INK);
+    polyline (g, 40, [&] (int k) { return polar (pivot, radius - 26.0f * s, map (lo + (hi - lo) * (float) k / 40.0f)); }, 1.2f, mInk);
     auto drawMarks = [&] (const Mark* m, int count)
     {
         for (int k = 0; k < count; ++k)
         {
             const float a = map (m[k].v);
             const bool lng = m[k].t[0] != 0;
-            line (g, polar (pivot, radius - 26.0f * s, a), polar (pivot, radius - (lng ? 36.0f : 32.0f) * s, a), 1.2f, INK);
+            line (g, polar (pivot, radius - 26.0f * s, a), polar (pivot, radius - (lng ? 36.0f : 32.0f) * s, a), 1.2f, mInk);
             const char* t = small ? m[k].tSmall : m[k].t;
-            if (t[0] != 0) say (g, t, polar (pivot, radius - 14.0f * s, a), 0, 0, font, INK);
+            if (t[0] != 0) say (g, t, polar (pivot, radius - 14.0f * s, a), 0, 0, font, mInk);
         }
     };
     if (gr) drawMarks (grMarks, (int) std::size (grMarks));
     else    drawMarks (vuMarks, (int) std::size (vuMarks));
     // its name (and VU / dB), between the scale and the strip
     if (small)
-        say (g, it.label + (gr ? juce::String() : juce::String (" VU")), { rect.getCentreX(), rect.getBottom() - 10.0f * s - font * 0.75f }, 0, 0, juce::jmax (8.0f, font - 1.0f), INK_SOFT);
+        say (g, it.label + (gr ? juce::String() : juce::String (" VU")), { rect.getCentreX(), rect.getBottom() - 10.0f * s - font * 0.75f }, 0, 0, juce::jmax (8.0f, font - 1.0f), mInkSoft);
     else
     {
-        say (g, it.label, { rect.getCentreX(), rect.getBottom() - 34.0f * s }, 0, 0, 10.0f * s, INK_SOFT);
-        say (g, gr ? "dB" : "VU", { rect.getCentreX(), rect.getBottom() - 21.0f * s }, 0, 0, 10.0f * s, INK_SOFT);
+        say (g, it.label, { rect.getCentreX(), rect.getBottom() - 34.0f * s }, 0, 0, 10.0f * s, mInkSoft);
+        say (g, gr ? "dB" : "VU", { rect.getCentreX(), rect.getBottom() - 21.0f * s }, 0, 0, 10.0f * s, mInkSoft);
     }
     {
         juce::Graphics::ScopedSaveState ss (g);
         g.reduceClipRegion (rect.toNearestInt());
-        line (g, pivot, polar (pivot, radius - 8.0f * s, map (value)), 2.0f, Colour (0xff1a120c));
+        line (g, pivot, polar (pivot, radius - 8.0f * s, map (value)), 2.0f, paleFace ? Colour (0xff1a120c) : Colour (0xffe0a030));
     }
     juce::Path strip;
     strip.addRoundedRectangle (rect.getX(), rect.getBottom() - 10.0f * s, rect.getWidth(), 10.0f * s, 3.0f, 3.0f, false, false, true, true);
@@ -958,9 +1087,9 @@ void PequodPanel::drawRadio (juce::Graphics& g, const Item& it) const
             g.fillRoundedRectangle (r, 4.0f);
         }
         const Pt lc (r.getX() + 12.0f, r.getCentreY());
-        ring (g, lc, 4.5f, 1.2f, on ? CREAM : INK_SOFT);
-        if (on) circle (g, lc, 2.6f, CREAM);
-        say (g, it.labels[k], lc + Pt (12.0f, 0.0f), -1, 0, 12.5f, on ? CREAM : INK);
+        ring (g, lc, 4.5f, 1.2f, on ? onAccent() : INK_SOFT);
+        if (on) circle (g, lc, 2.6f, onAccent());
+        say (g, it.labels[k], lc + Pt (12.0f, 0.0f), -1, 0, 12.5f, on ? onAccent() : INK);
     }
 }
 
@@ -1180,7 +1309,14 @@ juce::Rectangle<float> PequodPanel::itemBounds (const Item& it) const
             const float hw = juce::jmax (it.r + 10.0f, 0.5f * textW (it.label, big ? 16.0f : 11.0f) + 4.0f);
             return Rect (it.x - hw, it.y - it.r - (big ? 32.0f : 28.0f), 2.0f * hw, 2.0f * it.r + (big ? 62.0f : 54.0f));
         }
-        case Kind::selector:  return Rect (it.x - it.r - 34.0f, it.y - it.r - 30.0f, 2.0f * it.r + 68.0f, 2.0f * it.r + 52.0f);
+        case Kind::selector:
+        {
+            // the side positions' labels hang outward: as wide as the longest of them
+            float lw = 0.0f;
+            for (auto& l : it.labels) lw = juce::jmax (lw, textW (l, 10.0f));
+            const float hw = juce::jmax (it.r + 34.0f, it.r + 14.0f + (it.labels.size() >= 4 ? lw : lw * 0.5f));
+            return Rect (it.x - hw, it.y - it.r - 30.0f, 2.0f * hw, 2.0f * it.r + 52.0f);
+        }
         case Kind::sw:
         {
             const float lw = it.labels.size() >= 2 ? juce::jmax (textW (it.labels[0], 11.0f), textW (it.labels[1], 11.0f)) : 0.0f;
@@ -1430,27 +1566,28 @@ juce::Rectangle<float> PequodPanel::presetRowRect (int k) const
 void PequodPanel::drawPresetBar (juce::Graphics& g) const
 {
     const auto name = presetNameRect(), prev = presetPrevRect(), next = presetNextRect();
-    say (g, "PRESET", { prev.getX() - 12.0f, prev.getCentreY() }, 1, 0, 11.0f, INK_SOFT);
+    if (! rack) say (g, "PRESET", { prev.getX() - 12.0f, prev.getCentreY() }, 1, 0, 11.0f, INK_SOFT);
     for (int k = 0; k < 2; ++k)
     {
         const auto r = k == 0 ? prev : next;
-        g.setColour (hoverButton == k + 1 ? accent : BAKELITE);
+        const bool hovered = hoverButton == k + 1;
+        g.setColour (hovered ? accent : displayBg());
         g.fillRoundedRectangle (r, 4.0f);
         const auto cx = r.getCentre();
         juce::Path tri;
         if (k == 1) tri.addTriangle (cx + Pt (-3.0f, -5.0f), cx + Pt (4.0f, 0.0f), cx + Pt (-3.0f, 5.0f));
         else        tri.addTriangle (cx + Pt (3.0f, -5.0f), cx + Pt (-4.0f, 0.0f), cx + Pt (3.0f, 5.0f));
-        g.setColour (CREAM);
+        g.setColour (hovered ? onAccent() : displayInk());
         g.fillPath (tri);
     }
-    g.setColour (BAKELITE);
+    g.setColour (displayBg());
     g.fillRoundedRectangle (name, 4.0f);
     g.setColour (hoverButton == 3 || presetOpen ? accent : BAKELITE_HI);
     g.drawRoundedRectangle (name.reduced (0.5f), 4.0f, 1.0f);
     const auto label = juce::isPositiveAndBelow (currentPreset, (int) presets.size())
                            ? presets[(size_t) currentPreset].name + (presetDirty ? " *" : "")
                            : juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x94 choose a preset \xe2\x80\x94"));
-    say (g, label, name.getCentre(), 0, 0, 12.0f, METER_FACE);
+    say (g, label, name.getCentre(), 0, 0, 12.0f, displayInk());
 }
 
 void PequodPanel::drawPresetList (juce::Graphics& g) const
@@ -1458,7 +1595,7 @@ void PequodPanel::drawPresetList (juce::Graphics& g) const
     const auto l = presetListRect();
     g.setColour (blackAlpha (90));
     g.fillRoundedRectangle (l.translated (0.0f, 3.0f), 6.0f);
-    g.setColour (BAKELITE);
+    g.setColour (displayBg());
     g.fillRoundedRectangle (l, 6.0f);
     for (int k = 0; k < (int) presets.size(); ++k)
     {
@@ -1469,7 +1606,7 @@ void PequodPanel::drawPresetList (juce::Graphics& g) const
             g.setColour (hovered ? accent : BAKELITE_HI);
             g.fillRoundedRectangle (r, 4.0f);
         }
-        say (g, presets[(size_t) k].name, { r.getX() + 10.0f, r.getCentreY() }, -1, 0, 12.0f, hovered ? CREAM : METER_FACE);
+        say (g, presets[(size_t) k].name, { r.getX() + 10.0f, r.getCentreY() }, -1, 0, 12.0f, hovered ? onAccent() : displayInk());
     }
 }
 
@@ -1824,4 +1961,39 @@ void PequodPanel::timerCallback()
         if (v != lastValues[(size_t) p]) { lastValues[(size_t) p] = v; dirty = true; }
     }
     if (dirty) repaint();
+}
+
+//==============================================================================
+juce::StringArray PequodPanel::checkLayout()
+{
+    std::vector<std::pair<Rect, juce::String>> log;
+    textLog = &log;
+    {
+        juce::Image img (juce::Image::ARGB, juce::jmax (1, getWidth()), juce::jmax (1, getHeight()), true);
+        juce::Graphics g (img);
+        paint (g);
+    }
+    textLog = nullptr;
+
+    juce::StringArray problems;
+    const auto bounds = getLocalBounds().toFloat();
+    for (auto& [r, t] : log)
+        if (! bounds.contains (r)) problems.addIfNotAlreadyThere ("OFF THE EDGE: \"" + t + "\"");
+    for (size_t a = 0; a < log.size(); ++a)
+        for (size_t b = a + 1; b < log.size(); ++b)
+        {
+            const auto i = log[a].first.getIntersection (log[b].first);
+            const float small = juce::jmin (log[a].first.getWidth() * log[a].first.getHeight(), log[b].first.getWidth() * log[b].first.getHeight());
+            if (! i.isEmpty() && i.getWidth() * i.getHeight() > 0.12f * small && log[a].second != log[b].second)
+                problems.addIfNotAlreadyThere ("OVERLAP: \"" + log[a].second + "\" / \"" + log[b].second + "\"");
+        }
+    for (auto& it : items)
+        if (it.kind == Kind::knob || it.kind == Kind::selector)
+        {
+            const float r = it.kind == Kind::selector ? 20.0f : it.r;
+            const auto body = Rect (it.x - r, it.y - r, r * 2.0f, r * 2.0f).reduced (r * 0.2f);
+            for (auto& [tr, t] : log)
+                if (body.intersects (tr)) problems.addIfNotAlreadyThere ("ON A CONTROL (" + it.label + "): \"" + t + "\"");
+        }
+    return problems;
 }

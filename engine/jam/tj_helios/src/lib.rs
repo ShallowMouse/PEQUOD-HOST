@@ -224,7 +224,7 @@ fn panel() -> Panel {
         items: vec![
             Item::Knob { p: DRIVE, x: 70.0, y: 170.0, r: 26.0, label: "MIC AMP", tip: "How hard the Helios mic amplifier is driven: clean low down, thicker as it is pushed.", active: None },
             Item::Selector { p: BASSF, x: 180.0, y: 130.0, label: "BASS FREQ", positions: &["50", "100", "200"], tip: "Where the bass lift is centred." },
-            Item::Knob { p: BASS, x: 180.0, y: 210.0, r: 22.0, label: "BASS", tip: "Bass boost or cut at the chosen frequency.", active: None },
+            Item::Knob { p: BASS, x: 180.0, y: 224.0, r: 22.0, label: "BASS", tip: "Bass boost or cut at the chosen frequency.", active: None },
             Item::Selector { p: CUT, x: 290.0, y: 170.0, label: "BASS CUT", positions: &["OFF", "50", "100", "200"], tip: "The separate bass cut: a gentle high-pass." },
             Item::Selector { p: MIDF, x: 400.0, y: 130.0, label: "PRESENCE", positions: &["700", "1.5K", "3K", "5K"], tip: "The presence frequency." },
             Item::Knob { p: MID, x: 400.0, y: 210.0, r: 22.0, label: "PRESENCE", tip: "Presence boost (wide) or cut (narrower).", active: None },

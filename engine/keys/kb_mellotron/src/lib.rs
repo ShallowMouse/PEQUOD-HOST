@@ -273,7 +273,7 @@ fn panel() -> Panel {
         accent: ui::MOSS,
         size: (W, H),
         items: vec![
-            Item::RadioList { p: STATION, x: 30.0, y: 84.0, w: 190.0, row_h: 24.0, names: NAMES, tip: "The tape the heads play. These instruments are synthesised, not recorded." },
+            Item::RadioList { p: STATION, x: 30.0, y: 84.0, w: 190.0, row_h: 21.0, names: NAMES, tip: "The tape the heads play. These instruments are synthesised, not recorded." },
             Item::Knob { p: TONE, x: 300.0, y: 165.0, r: 32.0, label: "TONE", tip: "The tone knob: from dull, played-out tape to fresh and bright.", active: None },
             Item::Knob { p: PITCH, x: 420.0, y: 165.0, r: 32.0, label: "PITCH", tip: "The capstan speed: up to a semitone sharp or flat.", active: None },
             Item::Knob { p: VOLUME, x: 560.0, y: 165.0, r: 30.0, label: "VOLUME", tip: "Output level.", active: None },

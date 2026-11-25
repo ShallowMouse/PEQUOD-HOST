@@ -236,7 +236,7 @@ fn panel() -> Panel {
             Item::Selector { p: RATIO, x: 190.0, y: 170.0, label: "RATIO", positions: &["4", "8", "12", "20", "ALL"], tip: "The ratio buttons (ALL: every one pushed in)." },
             k(ATTACK, 290.0, 170.0, 22.0, "ATTACK", "Faster clockwise."),
             k(RELEASE, 380.0, 170.0, 22.0, "RELEASE", "Faster clockwise."),
-            Item::Meter { m: 0, x: 445.0, y: 130.0, w: 150.0, h: 80.0, kind: MeterKind::GainReduction, caption: "GAIN REDUCTION" },
+            Item::Meter { m: 0, x: 445.0, y: 120.0, w: 160.0, h: 100.0, kind: MeterKind::GainReduction, caption: "GR" },
             k(ECHO, 90.0, 330.0, 24.0, "ECHO", "How much echo on the voice."),
             k(TIME, 200.0, 330.0, 22.0, "TIME", "Echo time."),
             k(FEEDBACK, 300.0, 330.0, 22.0, "REPEATS", "Echo repeats."),

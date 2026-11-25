@@ -71,6 +71,13 @@ private:
     juce::Colour titleBlock, titleInk { 0xfff6eedc };
     std::vector<juce::Colour> caps;
     void applyHardwareFace (const juce::String& name);
+    juce::Colour highlightFor() const;
+    juce::Colour onAccent() const;
+    juce::Colour displayBg() const, displayInk() const;
+public:
+    /** (checking) Paints the panel and returns what's wrong with its text: overlaps, off the edge, over a knob. */
+    juce::StringArray checkLayout();
+private:
     void drawPlateTexture (juce::Graphics&, juce::Rectangle<float>) const;
     void drawHardwareKnob (juce::Graphics&, const Item&, int index) const;
     int panelW = 640, panelH = 432;
